@@ -31,6 +31,7 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "not_found": ("This area is not available. Select or draw the area again.", False),
     "invalid_request": ("The request could not be processed. Check the selected area and years.", False),
     "tiles_unavailable": ("Analysis imagery is temporarily unavailable.", True),
+    "imagery_check_failed": ("Imagery availability could not be checked right now.", True),
 }
 
 

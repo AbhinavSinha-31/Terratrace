@@ -23,6 +23,31 @@ export function statusCopy(r: AnalysisResult) {
  * Shown in place of every analytical panel when the live analysis is not READY.
  * States what is and is not available — and shows no metrics (no result means no result).
  */
+/**
+ * A request that produced NO analysis result (backend unreachable, timeout, failure). Built only from the
+ * error and study metadata — the frontend never constructs a result or any measurement.
+ */
+export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string; message: string }; onRetry(): void }) {
+  const ui = useUi.getState;
+  const b = useUi((s) => s.investigation.baselineYear);
+  const c = useUi((s) => s.investigation.comparisonYear);
+  const title = error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
+    : error.code === 'analysis_too_large' ? 'Analysis too large for interactive mode' : 'Live analysis unavailable';
+  return (
+    <div className="space-y-5" data-testid="analysis-unavailable" data-status="ERROR" data-code={error.code ?? ''}>
+      <section>
+        <div className="t-label flex items-center gap-2 text-warn" data-testid="status-title"><AlertTriangle size={14} /> {title}</div>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{error.message}</p>
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-3">No analysis result exists for {b} → {c}; no measurements are shown.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry}>Retry</Button>
+          <Button size="sm" variant="ghost" icon={<Satellite size={13} />} onClick={() => ui().setDrawerOpen(false)}>Continue exploring imagery</Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResult; onRetry(): void }) {
   const { title, Icon, tone } = statusCopy(result);
   const code = result.error?.code ?? result.reasonCode;

@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { CloudOff, CloudSun, Satellite, SatelliteDish } from 'lucide-react';
-import { useCurrentAnalysis, useCurrentBundle, useWindowKpis } from '../../data/queries';
-import { useUi } from '../../state/store';
-import { fmtHa, fmtKm2 } from '../../lib/format';
-import { evidenceDistribution } from '../../lib/windowStats';
+import { useCurrentAnalysis, useCurrentBundle } from '../../data/queries';
+import { useAnalysisWindow, useUi } from '../../state/store';
+import { useImageryLabel } from '../../data/imagerySync';
+import { evidenceDistribution, fmtHa, fmtKm2 } from '../../lib/format';
 import { eraOf, sourceLabel } from '../../lib/time';
 import { Metric, useAnimatedNumber } from '../../design';
 
@@ -15,11 +15,13 @@ function Divider() {
 export function MetricsStrip() {
   const result = useCurrentAnalysis().data;
   const analysis = useCurrentBundle();
-  const k = useWindowKpis();
-  const year = useUi((s) => s.year);
-  const win = useUi((s) => s.window);
-  if (result && !analysis) return <NoMetrics preview={result.uiPreview} status={result.status} />;
-  if (!analysis || !k) return <div className="h-full" />;
+  // KPIs come from the backend result, which always belongs to the current baseline/comparison.
+  const k = analysis?.summary.kpis ?? null;
+  const year = useUi((s) => s.investigation.imageryYear);
+  const win = useAnalysisWindow();
+  const errCode = useUi((s) => s.investigation.analysisError?.code);
+  // No measured result (idle, running, error, or non-READY): no metrics — never zeros.
+  if (!analysis || !k) return <NoMetrics status={result?.status ?? (errCode === 'service_unavailable' ? 'UNAVAILABLE' : errCode ? 'ERROR' : 'NONE')} />;
   const ys = analysis.summary.years.find((y) => y.year === year);
   const events = analysis.events.features.filter((e) => e.properties.year_to > win.start && e.properties.year_to <= win.end);
   const dist = evidenceDistribution(events);
@@ -81,23 +83,22 @@ export function MetricsStrip() {
 }
 
 /** Without a READY analysis the strip carries no metrics — only what is actually shown. */
-function NoMetrics({ preview, status }: { preview: boolean; status: string }) {
-  const year = useUi((s) => s.year);
-  const hires = useUi((s) => s.imagery === 'hires');
+function NoMetrics({ status }: { status: string }) {
+  const imageryLabel = useImageryLabel();
   return (
     <div className="flex h-full items-center gap-5 px-5" data-testid="no-metrics">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <SatelliteDish size={16} className="shrink-0 text-warn" />
         <div className="min-w-0">
-          <div className="t-label text-warn">{preview ? 'Live analysis unavailable' : status === 'INVALID_ANALYSIS' ? 'Analysis failed scientific validation' : status === 'ERROR' ? 'Analysis could not be completed' : 'No measurements available'}</div>
+          <div className="t-label text-warn">{status === 'INVALID_ANALYSIS' ? 'Analysis failed scientific validation' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}</div>
           <div className="mt-1 truncate text-[11.5px] text-ink-3">No result means no result: forest-change measurements appear only for completed, validated analyses.</div>
         </div>
       </div>
       <Divider />
       <div className="hidden min-w-[210px] lg:block">
         <div className="t-label flex items-center gap-1.5 text-ink-3"><Satellite size={11} /> Real imagery</div>
-        <div className="t-data mt-1.5 text-[14px] leading-none text-ink">{hires ? 'Esri World Imagery' : `Sentinel-2 cloudless ${year}`}</div>
-        <div className="mt-1 text-[11px] text-ink-3">{hires ? 'current, not dated' : 'EOX annual mosaic · imagery only'}</div>
+        <div className="t-data mt-1.5 truncate text-[14px] leading-none text-ink" data-testid="imagery-strip">{imageryLabel.title}</div>
+        <div className="mt-1 truncate text-[11px] text-ink-3">{imageryLabel.sub}</div>
       </div>
     </div>
   );
@@ -107,7 +108,7 @@ function NoMetrics({ preview, status }: { preview: boolean; status: string }) {
 export function TimeMachineHud() {
   const view = useUi((s) => s.view);
   const playing = useUi((s) => s.playing);
-  const year = useUi((s) => s.year);
+  const year = useUi((s) => s.investigation.imageryYear);
   const layersOpen = useUi((s) => s.layersOpen);
   const analysis = useCurrentBundle();
   const ys = analysis?.summary.years.find((y) => y.year === year);

@@ -73,10 +73,9 @@ def test_featured_analysis_unavailable_without_earth_engine(aid):
 
 
 @pytest.mark.parametrize("path", ["events", "stats", "layers"])
-def test_sub_endpoints_carry_no_metrics_when_unavailable(path):
-    env = client.get(f"/api/analysis/similipal/{path}").json()
-    assert env["analysisStatus"] == "UNAVAILABLE"
-    assert set(env) == {"analysis_id", "dataMode", "analysisStatus", "reason", "reasonCode", "window"}
+def test_removed_subset_endpoints_are_gone(path):
+    """Dead routes removed in the canonical rebuild (no product consumer)."""
+    assert client.get(f"/api/analysis/similipal/{path}").status_code == 404
 
 
 def test_analyze_custom_aoi_returns_unavailable_with_the_same_geometry():

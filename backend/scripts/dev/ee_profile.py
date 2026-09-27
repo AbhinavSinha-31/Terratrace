@@ -1,6 +1,6 @@
 """Earth Engine cost attribution for one AOI (developer tool; read-only, nothing cached).
 
-    .venv/Scripts/python scripts/ee_profile.py <aoi-id> [baseline comparison]
+    .venv/Scripts/python scripts/dev/ee_profile.py <aoi-id> [baseline comparison]
 
 Part 1 runs the REAL instrumented pipeline once (provider.analyze → [EE TIMING] logs).
 Part 2 evaluates each component in ISOLATION (one getInfo each) so cost can be attributed.
@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.providers import registry  # noqa: E402
 from app.providers.earth_engine import provider as P  # noqa: E402
@@ -31,7 +31,7 @@ out = logging.getLogger("profile")
 
 aid = sys.argv[1]
 b_req, c_req = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) > 3 else sc.DEFAULT_EVENT_WINDOW
-doc = registry.get(aid) or json.loads((Path(__file__).resolve().parents[1] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
+doc = registry.get(aid) or json.loads((Path(__file__).resolve().parents[2] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
 aoi = validate_aoi(doc["geometry"], enforce_limits=False)
 prov = P.provider
 prov.initialize()

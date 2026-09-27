@@ -388,6 +388,75 @@ class EarthEngineProvider:
     def _composite(self, geom, year: int):
         return self._landsat(geom, year) if sc.era_of(year) == "historical" else self._s2(geom, year)
 
+    # ----------------------------------------------------------------- imagery availability (no analysis)
+    def measure_imagery(self, geometry: dict[str, Any], years: list[int], deadline: float | None = None) -> dict[str, Any]:
+        """REAL per-year imagery measurements for an AOI: scene counts and observed-area coverage.
+
+        Exactly the observation rules of the analysis (stage 0 + stage 1 coverage): scene counts per source,
+        then the area whose composite pixel is `valid` (>= MIN_PIXEL_CLEAR_OBS clear observations, and
+        >= MIN_PIXEL_DW_OBS Dynamic World observations in the modern era). Two getInfo requests; years
+        without scenes are never composited. Returns raw measurements only — classification is done by
+        services/imagery.py. No forest or change metric is computed here.
+        """
+        self.initialize()
+        ee = _ee()
+        geom = ee.Geometry(geometry)
+        tm = EETimer("imagery-availability")
+        with tm("imagery_scene_metadata [getInfo #1]"):
+            counts = self.source_sizes(geom, years).getInfo()
+        with_scenes, _ = split_available(years, counts)
+        coverage: dict[str, Any] = {}
+        if with_scenes:
+            if deadline is not None and time.monotonic() > deadline:
+                raise EarthEngineError("analysis_timeout", "deadline passed before imagery coverage")
+            area = ee.Image.pixelArea().divide(1e4)
+            img = ee.Image.cat([area.rename("aoi")] + [self._composite(geom, y)[0].select("valid").multiply(area).rename(f"valid_{y}") for y in with_scenes])
+            with tm("imagery_coverage [getInfo #2]"):
+                coverage = img.reduceRegion(ee.Reducer.sum(), geom, ANALYSIS_SCALE, maxPixels=1e10, tileScale=4).getInfo()
+        tm.total("measured")
+        return {"counts": counts, "coverage": coverage}
+
+    # True-colour visualisation of the project's own composites (surface reflectance, 0–0.3, gamma 1.2).
+    IMAGERY_VIS = {"min": 0, "max": 0.3, "gamma": 1.2}
+
+    def imagery_collection(self, geom, year: int):
+        """(collection, dataset, date range, S2 band names) of the imagery for one composite year — the SAME
+        collections as the analysis: Sentinel-2 SR Harmonized with Cloud Score+ (modern) or Landsat C2 L2 (historical)."""
+        if sc.era_of(year) == "historical":
+            y0, y1 = sc.landsat_window(year)
+            return self._landsat_collection(geom, year), "Landsat Collection 2 Level-2 (LT05/LE07/LC08/LC09)", (f"{y0}-01-01", f"{y1}-01-01"), ["red", "green", "blue"]
+        return self._s2_collection(geom, year), S2, (f"{year}-01-01", f"{year + 1}-01-01"), ["B4", "B3", "B2"]
+
+    def imagery_layer(self, aoi_id: str, geometry: dict[str, Any], year: int) -> dict[str, Any]:
+        """REAL imagery for one AOI and year, independent of any analysis.
+
+        1 getInfo (scene count) + 1 getMapId. The composite is built ONLY after the scene count is known to be
+        > 0; masks are preserved (no unmask) — unobserved pixels stay transparent, never filled.
+        """
+        self.initialize()
+        ee = _ee()
+        geom = ee.Geometry(geometry)
+        col, dataset, (start, end), vis_bands = self.imagery_collection(geom, year)
+        with EETimer(f"imagery-{aoi_id}-{year}")("imagery_scene_count [getInfo]"):
+            scenes = int(col.size().getInfo())
+        out = {"dataset": dataset, "dateRange": {"start": start, "end": end}, "sceneCount": scenes, "bands": vis_bands, "tileUrl": None}
+        if scenes == 0:
+            return out   # never composite an empty collection
+        if sc.era_of(year) == "historical":
+            rgb = col.select(["red", "green", "blue"]).median()
+        else:
+            # Project cloud rule: per-pixel Cloud Score+ cs_cdf >= 0.6 (the analysis' own mask); reflectance = DN / 10000.
+            rgb = col.map(lambda img: img.updateMask(img.select("cs_cdf").gte(0.6)).select(["B4", "B3", "B2"], ["red", "green", "blue"]).divide(10000)).median()
+        img = rgb.visualize(bands=["red", "green", "blue"], **self.IMAGERY_VIS).clip(geom)
+        with EETimer(f"imagery-{aoi_id}-{year}")("imagery_map_id [getMapId]"):
+            url = ee.data.getMapId({"image": img})["tile_fetcher"].url_format
+        self._mapids[(aoi_id, "aoi-imagery", year)] = url
+        out["tileUrl"] = url
+        return out
+
+    def cached_imagery_url(self, aoi_id: str, year: int) -> str | None:
+        return self._mapids.get((aoi_id, "aoi-imagery", year))
+
     # ----------------------------------------------------------------- analysis
     def analyze(self, aoi: Aoi, analysis_id: str, name: str, baseline_year: int, comparison_year: int,
                 diag: frozenset[str] = frozenset(), deadline: float | None = None, workers: int | None = None,
@@ -398,7 +467,7 @@ class EarthEngineProvider:
         ONLY when status == READY. A finished computation is not enough for READY: every
         year must be observed well enough and every statistic must pass `science.evaluate`.
 
-        diag is a DIAGNOSTIC-ONLY switch set (scripts/ee_diagnose.py; never passed by the API):
+        diag is a DIAGNOSTIC-ONLY switch set (scripts/dev/ee_diagnose.py; never passed by the API):
         no_coverage, no_yearly_stats, no_change, no_vectorize, no_hansen, no_persistence. A diagnostic
         result is marked diagnostic and is never cached or served.
         """

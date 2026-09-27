@@ -7,8 +7,8 @@
  * and real reference imagery — never metrics, events or narratives.
  */
 import type {
-  AnalysisEnvelope, AnalysisResult, AnalyzeRequest, AoiGeometry, AoiPreview, Explanation, ExplanationFacts,
-  LayerCatalog, SearchResult, StudyArea, StudyAreaIndex, SystemHealth,
+  AnalysisEnvelope, AnalysisResult, AnalyzeRequest, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
+  ImageryAvailability, ImageryDecision, LayerCatalog, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -33,11 +33,6 @@ export class ApiError extends Error {
   }
 }
 
-/** Failure injection for testing error states (?simulate=error|slow). Never produces data. */
-function scenario(): 'error' | 'slow' | null {
-  const v = new URLSearchParams(window.location.search).get('simulate');
-  return v === 'error' || v === 'slow' ? v : null;
-}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function request<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
@@ -93,12 +88,6 @@ function normalizeLayers(cat: LayerCatalog): LayerCatalog {
   return { ...cat, overlays: cat.overlays.map((o) => ({ ...o, by_year: Object.fromEntries(Object.entries(o.by_year).map(([y, p]) => [y, resolveAsset(p)])) })) };
 }
 
-async function injected<T>(v: Promise<T>): Promise<T> {
-  const s = scenario();
-  if (s === 'slow') await sleep(2600);
-  if (s === 'error') { await sleep(500); throw new ApiError(PUBLIC.unavailable, 503, 'service_unavailable'); }
-  return v;
-}
 
 /** Envelope → UI result. Metrics are only ever taken from a READY envelope. */
 function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
@@ -111,7 +100,6 @@ function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
     aoi: env.aoi,
     window: env.window,
     source: env.source,
-    uiPreview: false,
     error: ready ? null : env.error ?? { code: env.reasonCode ?? 'analysis_failed', user_message: env.reason ?? PUBLIC.failed, retryable: true },
     // Diagnostics are sent only by a DEV_DIAGNOSTICS backend, and shown only in development builds.
     diagnostics: import.meta.env.DEV ? env.diagnostics ?? null : null,
@@ -122,17 +110,6 @@ function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
 
 /** Random per-request id so the UI can poll the real backend stage of its own request. */
 export const newRid = () => globalThis.crypto?.randomUUID?.() ?? `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
-
-export const PREVIEW_REASON: string = PUBLIC.unavailable;
-
-/** Backend down: an explicit non-analysis state. No numbers are invented. */
-function previewResult(aoi: StudyArea, window: { baseline_year: number; comparison_year: number }): AnalysisResult {
-  return {
-    id: aoi.id, status: 'UNAVAILABLE', reason: PREVIEW_REASON, reasonCode: 'service_unavailable', aoi, window,
-    error: { code: 'service_unavailable', user_message: PREVIEW_REASON, retryable: true }, diagnostics: null,
-    source: { landsat: false, sentinel2: false, dynamicWorld: false, hansen: false }, uiPreview: true, quality: null, bundle: null,
-  };
-}
 
 let featuredCache: StudyAreaIndex | null = null;
 const offlineFeatured = async () => (featuredCache ??= await request<StudyAreaIndex>(`${BASE}data/featured.json`));
@@ -168,30 +145,61 @@ export const client = {
 
   /** Featured investigations: AOI definitions only (no results). */
   listStudyAreas(): Promise<StudyAreaIndex> {
-    return injected(withFallback(() => request(`${API}/study-areas`), offlineFeatured));
+    return withFallback(() => request(`${API}/study-areas`), offlineFeatured);
   },
 
-  /** Analysis of a featured or registered AOI. Returns READY results or an explicit non-READY state. */
+  /**
+   * Analysis of a featured or registered AOI. Returns what the backend computed, or throws a truthful
+   * error. There is NO offline fallback: the frontend never constructs an AnalysisResult itself.
+   */
   async getAnalysis(id: string, window: { baseline_year: number; comparison_year: number }, rid?: string): Promise<AnalysisResult> {
     const q = `?baseline=${window.baseline_year}&comparison=${window.comparison_year}${rid ? `&rid=${rid}` : ''}`;
-    return injected(withFallback(
-      async () => fromEnvelope(await request<AnalysisEnvelope>(`${API}/analysis/${encodeURIComponent(id)}${q}`, { timeoutMs: ANALYSIS_TIMEOUT_MS })),
-      async () => {
-        const aoi = (await offlineFeatured()).items.find((a) => a.id === id);
-        if (!aoi) throw new ApiError('This area is not available right now. Live analysis is temporarily unavailable.', 404, 'not_found');
-        return previewResult(aoi, window);
-      },
-    ));
+    try {
+      const env = await request<AnalysisEnvelope>(`${API}/analysis/${encodeURIComponent(id)}${q}`, { timeoutMs: ANALYSIS_TIMEOUT_MS });
+      backend = true;
+      return fromEnvelope(env);
+    } catch (e) {
+      if (isOffline(e)) { backend = false; throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable'); }
+      throw e;
+    }
   },
 
   async analyze(req: AnalyzeRequest, rid?: string): Promise<AnalysisResult> {
-    if (scenario() === 'error') { await sleep(800); throw new ApiError(PUBLIC.unavailable, 503, 'service_unavailable'); }
     try {
       const env = await request<AnalysisEnvelope>(`${API}/analyze${rid ? `?rid=${rid}` : ''}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req), timeoutMs: ANALYSIS_TIMEOUT_MS,
       });
       backend = true;
       return fromEnvelope(env);
+    } catch (e) {
+      if (isOffline(e)) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
+      throw e;
+    }
+  },
+
+  /** Static base layers (backend-owned URLs). Offline: the backend-generated copy in public/data/basemaps.json. */
+  basemaps(): Promise<Basemaps> {
+    return withFallback(() => request(`${API}/imagery/basemaps`), () => request(`${BASE}data/basemaps.json`));
+  },
+
+  /** Real Earth Engine imagery for an AOI and year. Independent of analysis; never constructed here. */
+  async imagery(aoi: string, year: number): Promise<ImageryDecision> {
+    if (backend === false) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
+    try {
+      return await request<ImageryDecision>(`${API}/imagery?aoi=${encodeURIComponent(aoi)}&year=${year}`, { timeoutMs: ANALYSIS_TIMEOUT_MS });
+    } catch (e) {
+      // Connection failure (or the dev proxy's code-less 500/502 when the backend is down) = unreachable.
+      // Real HTTP errors (404 / 429 / 500 …) keep their status so the UI can say what actually failed.
+      if (isOffline(e)) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
+      throw e;
+    }
+  },
+
+  /** Measured per-year imagery availability for the timeline (an error when it cannot be measured). */
+  async imageryAvailability(aoi: string): Promise<ImageryAvailability> {
+    if (backend === false) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
+    try {
+      return await request<ImageryAvailability>(`${API}/imagery/availability?aoi=${encodeURIComponent(aoi)}`, { timeoutMs: ANALYSIS_TIMEOUT_MS });
     } catch (e) {
       if (isOffline(e)) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
       throw e;

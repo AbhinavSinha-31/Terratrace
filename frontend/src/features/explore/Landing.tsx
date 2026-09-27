@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, Play, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
 import { useHealth, useReadyResults, useStudyAreas } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
 import { fmtKm2 } from '../../lib/format';
 import { useBreakpoint } from '../../lib/useLayout';
@@ -11,17 +11,8 @@ import { Badge, Button, IconButton, Skeleton, StateView, TerratraceMark, Tooltip
 import { AnimatedNumber } from '../../design/Metric';
 import { DrawHint, SearchBar } from './SearchBar';
 import { SelectionPanel } from './SelectionPanel';
-import { startPresentation } from '../shell/Header';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
-
-function tileFor(lon: number, lat: number, z: number, year = 2025) {
-  const n = 2 ** z;
-  const x = Math.floor(((lon + 180) / 360) * n);
-  const r = (lat * Math.PI) / 180;
-  const y = Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n);
-  return `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-${year}_3857/default/g/${z}/${y}/${x}.jpg`;
-}
 
 // ---------------------------------------------------------------- hero
 function Hero() {
@@ -44,9 +35,6 @@ function Hero() {
       <div className="mt-[clamp(16px,2.8vh,30px)] flex flex-wrap gap-3">
         <Button variant="brand" size="lg" className="!h-[50px] !px-6 !text-[14.5px]" icon={<ScanSearch size={18} />} trailing={<ArrowRight size={17} />} onClick={() => setPhase('explore')}>
           Explore Earth
-        </Button>
-        <Button variant="outline" size="lg" className="!h-[50px] !px-6 !text-[14.5px]" icon={<Play size={16} />} onClick={startPresentation}>
-          Guided tour
         </Button>
       </div>
       <div className="mt-[clamp(20px,3.2vh,36px)] grid max-w-[560px] grid-cols-3 gap-4 [@media(max-height:820px)]:hidden">
@@ -156,14 +144,15 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
   const hover = useUi((s) => s.hoverAoi);
   const hovered = useUi((s) => s.hoveredAoiId === area.id);
   const [state, ...rest] = area.region.split(',').map((s) => s.trim());
-  const img = useMemo(() => tileFor(area.center[0], area.center[1], 11), [area.center]);
+  // Static thumbnail from the backend's study metadata (imagery only; URLs are never built here).
+  const img = area.thumbnail_url;
   const ready = useReadyResults().some((r) => r.id === area.id);
   const { data: health } = useHealth();
   const status = ready ? 'Ready' : !health ? '…' : health.backend && health.analysis.status === 'ready' ? 'Not run' : 'Unavailable';
   return (
     <motion.button
       initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + index * 0.07, duration: 0.5, ease: EASE }}
-      onClick={() => open(area.id)}
+      onClick={() => open(area.id, { name: area.name, geometry: area.geometry })}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}
       className={`tt-card group relative flex min-w-[260px] flex-col overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
       aria-label={`Open featured investigation: ${area.name}`}
@@ -245,7 +234,7 @@ function Featured() {
 // ---------------------------------------------------------------- composition
 export function Landing() {
   const phase = useUi((s) => s.phase);
-  const selection = useUi((s) => s.selection);
+  const selection = useUi(selectCandidate);
   const drawTool = useUi((s) => s.drawTool);
   const setPhase = useUi((s) => s.setPhase);
   const { data: health } = useHealth();
@@ -340,7 +329,7 @@ function MapLegendChip() {
 
 function MobileLanding() {
   const phase = useUi((s) => s.phase);
-  const selection = useUi((s) => s.selection);
+  const selection = useUi(selectCandidate);
   const drawTool = useUi((s) => s.drawTool);
   return (
     <div className="pointer-events-none absolute inset-0 z-30">

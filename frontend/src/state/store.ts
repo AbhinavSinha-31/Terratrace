@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import type { AnalyzeRequest, AoiGeometry, ChangeType, Severity } from '../data/contracts';
+import { useShallow } from 'zustand/react/shallow';
+import type { AnalysisResult, AoiGeometry, ChangeType, Severity } from '../data/contracts';
+import { newRid } from '../data/client';
 import { DEFAULT_ANALYSIS_WINDOW, DEFAULT_YEARS } from '../lib/time';
 
 export type View = 'explore' | 'analysis' | 'timemachine';
@@ -31,32 +33,66 @@ export interface CameraRequest {
   nonce: number;
 }
 
+/** Geometry under investigation: a registered study's AOI, or a drawn / searched / clicked candidate. */
 export interface Selection {
   geometry: AoiGeometry;
-  source: 'draw' | 'search' | 'click';
+  source: 'study' | 'draw' | 'search' | 'click';
   name?: string;
+}
+
+/** A registered area (featured study or a custom AOI the backend has registered). */
+export interface StudyRef {
+  id: string;
+  name?: string;
+}
+
+export type InvestigationAnalysisStatus = 'idle' | 'running' | 'complete' | 'error';
+/** Imagery availability for (AOI, imageryYear). 'unknown' until the availability service exists. */
+export type InvestigationImageryStatus = 'unknown' | 'loading' | 'available' | 'insufficient' | 'unavailable';
+
+/**
+ * THE single source of truth for the active investigation.
+ *
+ * - URL state mirrors it (lib/urlState.ts) and writes back only through the actions below.
+ * - React Query is only the fetch cache used by the analysis runner (data/analysisRunner.ts).
+ * - A result/error is accepted only if requestId, baseline, comparison and study still match
+ *   (acceptAnalysis / failAnalysis); anything else is a stale response and is discarded.
+ * - Changing study, AOI, baseline or comparison resets the analysis (incompatible result).
+ *   Changing the imagery year does not (the analysis is baseline -> comparison).
+ */
+export interface InvestigationState {
+  study: StudyRef | null;
+  aoi: Selection | null;
+  imageryYear: number;
+  baselineYear: number;
+  comparisonYear: number;
+  imageryStatus: InvestigationImageryStatus;
+  analysisStatus: InvestigationAnalysisStatus;
+  analysisRequestId: string | null;
+  analysisResult: AnalysisResult | null;
+  analysisError: { code?: string; message: string } | null;
+}
+
+/** Identity of an analysis request; a response is applied only if it still matches the state. */
+export interface AnalysisRequestMeta {
+  requestId: string;
+  studyId: string | null;
+  baselineYear: number;
+  comparisonYear: number;
 }
 
 interface UiState {
   view: View;
   phase: ExplorePhase;
-  aoiId: string | null;
-  entryNonce: number;
-  /** Selectable composite years (always 1984 → present; availability per year comes from the analysis). */
+  /** The active investigation — the only source of study / AOI / years / analysis state. */
+  investigation: InvestigationState;
+  /** Selectable timeline years (UI option list; per-year availability comes from the backend later). */
   years: number[];
-  /**
-   * The ONE canonical REQUESTED analysis window: sent to the backend, shown in the Time Machine
-   * selectors and in the URL. The backend's analysable window is displayed separately and labelled.
-   */
-  window: { start: number; end: number };
-  year: number;
   playing: boolean;
   compare: boolean;
   imagery: ImageryMode;
   layers: LayerToggles;
-  selection: Selection | null;
   drawTool: DrawTool;
-  pending: { request: AnalyzeRequest; nonce: number } | null;
   selectedEventId: string | null;
   hoveredEventId: string | null;
   hoveredAoiId: string | null;
@@ -66,13 +102,6 @@ interface UiState {
   drawerOpen: boolean;
   layersOpen: boolean;
   aboutOpen: boolean;
-  /**
-   * Window selected in the Time Machine but NOT yet analysed. Exploring the timeline never starts a
-   * computation; the analysis runs only when the user explicitly requests it (commitPendingWindow).
-   */
-  pendingWindow: { start: number; end: number } | null;
-  /** Request id of the in-flight featured/area analysis (used to poll its REAL backend stage). */
-  activeRid: string | null;
   presentation: { active: boolean; step: number };
   explainRequested: Record<string, boolean>;
   reportEventId: string | null;
@@ -82,12 +111,28 @@ interface UiState {
 
   setView(v: View): void;
   setPhase(p: ExplorePhase): void;
-  openAnalysis(id: string, opts?: { view?: View; window?: { start: number; end: number } }): void;
+  /**
+   * Open a registered study: populates the investigation (study, AOI, default or given years) and leaves
+   * the analysis IDLE ("Ready to analyze"). It NEVER starts an analysis — only requestAnalysis() does.
+   */
+  openAnalysis(id: string, opts?: { view?: View; window?: { start: number; end: number }; name?: string; geometry?: AoiGeometry; imageryYear?: number }): void;
   goExplore(phase?: ExplorePhase): void;
   setYears(years: number[]): void;
+  /** Set baseline/comparison. Resets an incompatible analysis to idle; never starts one. */
   setWindow(start: number, end: number): void;
   setYear(y: number): void;
+  /** Imagery status from the backend imagery decision; ignored unless study + year still match. */
+  setImageryStatus(meta: { studyId: string; year: number }, status: InvestigationImageryStatus): void;
   stepYear(delta: number): void;
+  /**
+   * The ONLY action that starts an analysis (explicit user action: Run / Retry). Sets `running` with a
+   * new request id; the analysis runner executes exactly that request.
+   */
+  requestAnalysis(): void;
+  acceptAnalysis(meta: AnalysisRequestMeta, result: AnalysisResult): boolean;
+  failAnalysis(meta: AnalysisRequestMeta, error: { code?: string; message: string }): boolean;
+  /** Discard the analysis (e.g. closing a failed custom-area request). */
+  resetAnalysis(): void;
   setPlaying(p: boolean): void;
   setCompare(on: boolean): void;
   setImagery(m: ImageryMode): void;
@@ -95,8 +140,6 @@ interface UiState {
   setForestOpacity(v: number): void;
   setSelection(s: Selection | null): void;
   setDrawTool(t: DrawTool): void;
-  startAnalysis(req: AnalyzeRequest): void;
-  clearPending(): void;
   selectEvent(id: string | null, opts?: { fly?: boolean }): void;
   hoverEvent(id: string | null): void;
   hoverAoi(id: string | null): void;
@@ -107,8 +150,6 @@ interface UiState {
   setDrawerOpen(o: boolean): void;
   setLayersOpen(o: boolean): void;
   setAboutOpen(o: boolean): void;
-  setPendingWindow(start: number, end: number): void;
-  commitPendingWindow(): void;
   setPresentation(p: { active: boolean; step: number }): void;
   requestExplanation(eventId: string): void;
   openReport(eventId: string | null): void;
@@ -124,21 +165,42 @@ const prefersReduced = () => typeof window !== 'undefined' && window.matchMedia?
 
 const ANALYSIS_WINDOW = { ...DEFAULT_ANALYSIS_WINDOW };
 
+const IDLE_ANALYSIS = {
+  analysisStatus: 'idle' as InvestigationAnalysisStatus,
+  analysisRequestId: null,
+  analysisResult: null,
+  analysisError: null,
+};
+
+const EMPTY_INVESTIGATION: InvestigationState = {
+  study: null,
+  aoi: null,
+  imageryYear: ANALYSIS_WINDOW.end,
+  baselineYear: ANALYSIS_WINDOW.start,
+  comparisonYear: ANALYSIS_WINDOW.end,
+  imageryStatus: 'unknown',
+  ...IDLE_ANALYSIS,
+};
+
+/** A response may be applied only if it belongs to the CURRENT request and selection. */
+export function requestMatches(inv: InvestigationState, m: AnalysisRequestMeta): boolean {
+  return inv.analysisStatus === 'running' && inv.analysisRequestId === m.requestId
+    && inv.baselineYear === m.baselineYear && inv.comparisonYear === m.comparisonYear
+    && (inv.study?.id ?? null) === m.studyId;
+}
+
+const snapTo = (years: number[], y: number) => years.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), years[0]);
+
 export const useUi = create<UiState>((set, get) => ({
   view: 'explore',
   phase: 'intro',
-  aoiId: null,
-  entryNonce: 0,
+  investigation: EMPTY_INVESTIGATION,
   years: DEFAULT_YEARS,
-  window: ANALYSIS_WINDOW,
-  year: ANALYSIS_WINDOW.end,
   playing: false,
   compare: false,
   imagery: 'sentinel',
   layers: { satellite: true, forest: true, ndvi: false, change: true, intensity: true, boundary: true, labels: false, globalForest: true, forestOpacity: 0.4 },
-  selection: null,
   drawTool: null,
-  pending: null,
   selectedEventId: null,
   hoveredEventId: null,
   hoveredAoiId: null,
@@ -148,8 +210,6 @@ export const useUi = create<UiState>((set, get) => ({
   drawerOpen: true,
   layersOpen: wide(),
   aboutOpen: false,
-  pendingWindow: null,
-  activeRid: null,
   presentation: { active: false, step: 0 },
   explainRequested: {},
   reportEventId: null,
@@ -160,28 +220,31 @@ export const useUi = create<UiState>((set, get) => ({
   setView: (v) => {
     const s = get();
     if (v === 'explore') return get().goExplore();
-    if (!s.aoiId) return set({ view: v });
-    // Switching views never changes the requested window (one source of truth); only the cursor moves.
-    set({ view: v, year: v === 'timemachine' ? s.years[0] : s.window.end, compare: false, playing: false, drawerOpen: v !== 'timemachine' || wide() });
+    if (!s.investigation.study) return set({ view: v });
+    // Switching views never changes the analysis years; only the imagery-year cursor moves.
+    const imageryYear = v === 'timemachine' ? s.years[0] : s.investigation.comparisonYear;
+    set({ view: v, investigation: { ...s.investigation, imageryYear }, compare: false, playing: false, drawerOpen: v !== 'timemachine' || wide() });
   },
   setPhase: (p) => set({ phase: p }),
   openAnalysis: (id, opts) => {
     const view = opts?.view ?? 'analysis';
     const w = opts?.window ?? ANALYSIS_WINDOW;
-    set((s) => ({
+    set({
       view,
-      aoiId: id,
-      entryNonce: s.entryNonce + 1,
-      window: w,
-      pendingWindow: null,
-  activeRid: null,
-      year: view === 'timemachine' ? DEFAULT_YEARS[0] : w.end,
+      investigation: {
+        study: { id, name: opts?.name },
+        aoi: opts?.geometry ? { geometry: opts.geometry, source: 'study', name: opts?.name } : null,
+        baselineYear: w.start,
+        comparisonYear: w.end,
+        imageryYear: opts?.imageryYear ?? (view === 'timemachine' ? DEFAULT_YEARS[0] : w.end),
+        imageryStatus: 'unknown',
+        ...IDLE_ANALYSIS,   // opening a study never analyses it
+      },
       playing: false,
       compare: false,
       selectedEventId: null,
       hoveredEventId: null,
       hoveredAoiId: null,
-      selection: null,
       drawTool: null,
       tab: 'overview',
       drawerOpen: true,
@@ -189,13 +252,14 @@ export const useUi = create<UiState>((set, get) => ({
       typeFilter: { ...allTypes },
       sheet: 'peek',
       camera: { kind: 'aoi', id, nonce: ++nonce },
-    }));
+    });
   },
   goExplore: (phase) =>
     set((s) => ({
       view: 'explore',
       phase: phase ?? s.phase,
-      aoiId: null,
+      // Leaving a study ends that investigation; an unregistered candidate AOI (drawn/searched) is kept.
+      investigation: s.investigation.study ? { ...EMPTY_INVESTIGATION } : s.investigation,
       compare: false,
       playing: false,
       selectedEventId: null,
@@ -204,35 +268,74 @@ export const useUi = create<UiState>((set, get) => ({
     })),
   setYears: (years) => set({ years: years.length ? years : DEFAULT_YEARS }),
   setWindow: (start, end) => {
+    const inv = get().investigation;
     if (start >= end || !DEFAULT_YEARS.includes(start) || !DEFAULT_YEARS.includes(end)) return;
-    set({ window: { start, end }, pendingWindow: null });
+    if (start === inv.baselineYear && end === inv.comparisonYear) return;
+    // New years -> the previous result is incompatible: reset it (any in-flight response is then stale).
+    set({ investigation: { ...inv, baselineYear: start, comparisonYear: end, ...IDLE_ANALYSIS }, selectedEventId: null, compare: false });
   },
   setYear: (y) => {
-    const { years } = get();
-    const snapped = years.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), years[0]);
-    set({ year: snapped });
+    const s = get();
+    set({ investigation: { ...s.investigation, imageryYear: snapTo(s.years, y), imageryStatus: 'unknown' } });
+  },
+  setImageryStatus: (meta, status) => {
+    const inv = get().investigation;
+    if (inv.study?.id !== meta.studyId || inv.imageryYear !== meta.year || inv.imageryStatus === status) return;
+    set({ investigation: { ...inv, imageryStatus: status } });
   },
   stepYear: (d) => {
-    const { years, year } = get();
-    const i = years.indexOf(year);
-    const next = years[Math.min(years.length - 1, Math.max(0, (i < 0 ? 0 : i) + d))];
-    set({ year: next });
+    const s = get();
+    const i = s.years.indexOf(s.investigation.imageryYear);
+    const next = s.years[Math.min(s.years.length - 1, Math.max(0, (i < 0 ? 0 : i) + d))];
+    set({ investigation: { ...s.investigation, imageryYear: next, imageryStatus: 'unknown' } });
   },
+  requestAnalysis: () => {
+    const inv = get().investigation;
+    if (!inv.study && !inv.aoi) return;
+    set({ investigation: { ...inv, ...IDLE_ANALYSIS, analysisStatus: 'running', analysisRequestId: newRid() }, selectedEventId: null });
+  },
+  acceptAnalysis: (meta, result) => {
+    const s = get();
+    if (!requestMatches(s.investigation, meta)) return false;   // stale response - discarded
+    const wasCustom = !s.investigation.study;
+    set({
+      investigation: {
+        ...s.investigation,
+        // A custom AOI becomes a registered study once the backend has accepted it.
+        study: s.investigation.study ?? { id: result.id, name: result.aoi.name },
+        aoi: s.investigation.aoi ?? { geometry: result.aoi.geometry, source: 'study', name: result.aoi.name },
+        analysisStatus: 'complete',
+        analysisResult: result,
+        analysisError: null,
+      },
+      ...(wasCustom ? { view: 'analysis' as View, tab: 'overview' as PanelTab, drawerOpen: true, drawTool: null, sheet: 'peek' as SheetSnap, camera: { kind: 'aoi' as const, id: result.id, nonce: ++nonce } } : {}),
+    });
+    return true;
+  },
+  failAnalysis: (meta, error) => {
+    const s = get();
+    if (!requestMatches(s.investigation, meta)) return false;   // stale response - discarded
+    set({ investigation: { ...s.investigation, analysisStatus: 'error', analysisResult: null, analysisError: error } });
+    return true;
+  },
+  resetAnalysis: () => set((s) => ({ investigation: { ...s.investigation, ...IDLE_ANALYSIS } })),
   setPlaying: (p) => set({ playing: p }),
   setCompare: (on) =>
     set((s) => {
       if (!on) return { compare: false };
-      // Compare the window start (before) with the displayed year (after).
-      const after = s.year > s.window.start ? s.year : s.window.end;
-      return { compare: true, playing: false, year: after };
+      // Compare the baseline (before) with the displayed imagery year (after).
+      const inv = s.investigation;
+      const after = inv.imageryYear > inv.baselineYear ? inv.imageryYear : inv.comparisonYear;
+      return { compare: true, playing: false, investigation: { ...inv, imageryYear: after } };
     }),
   setImagery: (m) => set((s) => ({ imagery: m, layers: { ...s.layers, satellite: true } })),
   setLayer: (k, on) => set((s) => ({ layers: { ...s.layers, [k]: on } })),
   setForestOpacity: (v) => set((s) => ({ layers: { ...s.layers, forestOpacity: v } })),
-  setSelection: (sel) => set({ selection: sel }),
+  // Candidate AOI (drawn / searched / clicked) while no study is open. A new AOI resets the analysis.
+  setSelection: (sel) => set((s) => ({
+    investigation: { ...EMPTY_INVESTIGATION, baselineYear: s.investigation.baselineYear, comparisonYear: s.investigation.comparisonYear, imageryYear: s.investigation.imageryYear, aoi: sel },
+  })),
   setDrawTool: (t) => set({ drawTool: t, phase: t ? 'explore' : get().phase }),
-  startAnalysis: (request) => set({ pending: { request, nonce: ++nonce } }),
-  clearPending: () => set({ pending: null }),
   selectEvent: (id, opts) =>
     set((s) => ({
       selectedEventId: id,
@@ -249,18 +352,16 @@ export const useUi = create<UiState>((set, get) => ({
   setDrawerOpen: (o) => set({ drawerOpen: o }),
   setLayersOpen: (o) => set({ layersOpen: o }),
   setAboutOpen: (o) => set({ aboutOpen: o }),
-  setPendingWindow: (start, end) => {
-    const w = get().window;
-    if (start >= end || !DEFAULT_YEARS.includes(start) || !DEFAULT_YEARS.includes(end)) return;
-    set({ pendingWindow: start === w.start && end === w.end ? null : { start, end } });
-  },
-  commitPendingWindow: () => {
-    const p = get().pendingWindow;
-    if (p) set({ window: p, pendingWindow: null });
-  },
   setPresentation: (p) => set({ presentation: p }),
   requestExplanation: (id) => set((s) => ({ explainRequested: { ...s.explainRequested, [id]: true } })),
   openReport: (id) => set({ reportEventId: id }),
   setSheet: (sh) => set({ sheet: sh }),
   requestCamera: (req) => set({ camera: { ...req, nonce: ++nonce } }),
 }));
+
+/** The candidate (not yet registered) AOI while exploring; null once a study is open. */
+export const selectCandidate = (s: UiState) => (s.investigation.study ? null : s.investigation.aoi);
+
+/** The analysis years of the active investigation (baseline -> comparison), as a stable {start, end}. */
+export const useAnalysisWindow = () =>
+  useUi(useShallow((s: UiState) => ({ start: s.investigation.baselineYear, end: s.investigation.comparisonYear })));

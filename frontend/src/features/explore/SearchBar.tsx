@@ -5,7 +5,7 @@ import { ChevronDown, Crosshair, Eraser, Hexagon, Loader2, MapPin, Search, Squar
 import { client } from '../../data/client';
 import type { SearchResult } from '../../data/contracts';
 import { useStudyAreas } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { selectCandidate, useUi } from '../../state/store';
 import { useMapRegistry } from '../map/registry';
 import { bboxAreaKm2, bboxPolygon, squareAround } from '../../lib/geo';
 import { Tooltip } from '../../design';
@@ -14,7 +14,7 @@ const MAX_DIRECT_KM2 = 2500;
 
 export function selectSearchResult(r: SearchResult) {
   const ui = useUi.getState();
-  if (r.kind === 'featured' && r.study_area_id) return ui.openAnalysis(r.study_area_id);
+  if (r.kind === 'featured' && r.study_area_id) return ui.openAnalysis(r.study_area_id, { name: r.name });
   ui.setPhase('explore');
   if (r.bbox) ui.requestCamera({ kind: 'bbox', bbox: r.bbox });
   else ui.requestCamera({ kind: 'point', point: r.center });
@@ -58,7 +58,7 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
   const drawBtn = useRef<HTMLDivElement>(null);
   const featured = useStudyAreas().data;
   const drawTool = useUi((s) => s.drawTool);
-  const selection = useUi((s) => s.selection);
+  const selection = useUi(selectCandidate);
   const setDrawTool = useUi((s) => s.setDrawTool);
   const setSelection = useUi((s) => s.setSelection);
 

@@ -15,7 +15,7 @@ from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import provider as ee_provider
 from ..schemas import AnalysisEnvelope, AnalyzeRequest, AoiPreview, AoiPreviewRequest, Explanation, ExplainRequest, Health
-from ..services import analysis, search
+from ..services import analysis, imagery, search
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -31,6 +31,12 @@ def _err(status: int, code: str, message: str | None = None, retryable: bool | N
 
 
 RID = r"^[A-Za-z0-9-]{8,64}$"
+
+
+def _tile_redirect(url: str) -> RedirectResponse:
+    """Redirect to an Earth Engine tile. Cacheable briefly (the map id is stable while this process runs), so
+    the browser does not re-ask the backend — and Earth Engine — for a tile it already has."""
+    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=600"})
 
 
 async def _run(aid: str, baseline: int | None, comparison: int | None, rid: str | None = None) -> dict[str, Any]:
@@ -77,33 +83,6 @@ def get_progress(rid: str) -> dict[str, Any]:
     return analysis.progress(rid)
 
 
-def _subset(env: dict[str, Any], *keys: str) -> dict[str, Any]:
-    base = {k: env[k] for k in ("analysis_id", "dataMode", "analysisStatus", "reason", "reasonCode", "window")}
-    if env["analysisStatus"] == "READY":
-        base.update({k: env.get(k) for k in keys})
-    return base
-
-
-@router.get("/analysis/{aid}/events")
-async def get_events(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
-    return _subset(await _run(aid, baseline, comparison), "events")
-
-
-@router.get("/analysis/{aid}/stats")
-async def get_stats(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
-    env = await _run(aid, baseline, comparison)
-    out = _subset(env)
-    if env["analysisStatus"] == "READY":
-        s = env["summary"]
-        out.update({k: s.get(k) for k in ("kpis", "history", "years", "periods", "analysis_window")})
-    return out
-
-
-@router.get("/analysis/{aid}/layers")
-async def get_layers(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
-    return _subset(await _run(aid, baseline, comparison), "layers")
-
-
 @router.post("/analyze", response_model=AnalysisEnvelope)
 async def analyze(req: AnalyzeRequest, rid: str | None = Query(None, pattern=RID)) -> dict[str, Any]:
     try:
@@ -145,4 +124,52 @@ async def tiles(aid: str, kind: str, year: int, z: int, x: int, y: int) -> Redir
     except Exception as e:  # noqa: BLE001 — EarthEngineError or ee transport errors; details stay in the log
         log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
         raise _err(503, "tiles_unavailable") from None
-    return RedirectResponse(url.format(z=z, x=x, y=y), status_code=307)
+    return _tile_redirect(url.format(z=z, x=x, y=y))
+
+
+# ----------------------------------------------------------------------------- imagery (never an analysis)
+def _imagery_err(e: imagery.ImageryError) -> HTTPException:
+    return HTTPException(status_code=e.status, detail={**e.error, "message": e.error["user_message"]})
+
+
+@router.get("/imagery/availability")
+async def imagery_availability(aoi: str = Query(..., min_length=1, max_length=80)) -> dict[str, Any]:
+    """Measured per-year imagery availability for an AOI (AVAILABLE / INSUFFICIENT / UNAVAILABLE)."""
+    try:
+        return await imagery.availability(aoi)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except imagery.ImageryError as e:
+        raise _imagery_err(e) from None
+
+
+@router.get("/imagery")
+async def imagery_decision(aoi: str = Query(..., min_length=1, max_length=80), year: int = Query(..., ge=1900, le=2100)) -> dict[str, Any]:
+    """The canonical imagery decision for an AOI and year (the frontend never builds imagery URLs)."""
+    try:
+        return await imagery.decide(aoi, year)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except imagery.ImageryError as e:
+        raise _imagery_err(e) from None
+
+
+@router.get("/imagery/basemaps")
+def imagery_basemaps() -> dict[str, Any]:
+    """Base imagery and reference layers (imagery only; no TERRATRACE measurement)."""
+    return imagery.basemaps()
+
+
+@router.get("/imagery/tiles/{aid}/{year}/{z}/{x}/{y}")
+async def imagery_tiles(aid: str, year: int, z: int, x: int, y: int) -> RedirectResponse:
+    """Earth Engine composite tiles for a year MEASURED as AVAILABLE (proxied; no credentials reach the browser)."""
+    try:
+        url = await imagery.tile_url(aid, year)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except imagery.ImageryError as e:
+        raise _imagery_err(e) from None
+    except Exception as e:  # noqa: BLE001 — details stay in the log
+        log.warning("Imagery tiles %s/%s unavailable: %s", aid, year, e)
+        raise _err(503, "tiles_unavailable") from None
+    return _tile_redirect(url.format(z=z, x=x, y=y))

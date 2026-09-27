@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Compass, Minus, Plus, RotateCcw, WifiOff, X } from 'lucide-react';
-import { useUi } from '../../state/store';
-import { useCurrentAnalysis, useCurrentBundle, useSelectedAoi } from '../../data/queries';
+import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
+import { imageryErrorMessage } from '../../data/imagerySync';
+import { useEeTiles } from './eeTiles';
+import { useBasemaps, useCurrentAnalysis, useCurrentBundle, useImageryDecision, useSelectedAoi } from '../../data/queries';
 import { CHROME, analysisPadding, landingInset, landingZoom, useBreakpoint } from '../../lib/useLayout';
 import { fmtCoord } from '../../lib/format';
-import { hasEoxImagery } from '../../lib/time';
 import { IconButton, Tooltip } from '../../design';
 import { MapCanvas } from './MapCanvas';
 import type { TerraMap } from './TerraMap';
@@ -22,8 +23,8 @@ export function MapStage() {
   const [dragging, setDragging] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
 
-  const year = useUi((s) => s.year);
-  const win = useUi((s) => s.window);
+  const year = useUi((s) => s.investigation.imageryYear);
+  const win = useAnalysisWindow();
   const compare = useUi((s) => s.compare);
   const camera = useUi((s) => s.camera);
   const view = useUi((s) => s.view);
@@ -69,7 +70,7 @@ export function MapStage() {
   useEffect(() => {
     if (!primary || aoi) return;
     const s = useUi.getState();
-    if (s.selection || s.drawTool) return;
+    if (selectCandidate(s) || s.drawTool) return;
     primary.flyHome(landingInset(bp, phase), landingZoom(bp, phase));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primary, phase, bp]);
@@ -197,31 +198,51 @@ function AnalysisMapControls({ onFit }: { onFit(): void }) {
  * (Sentinel-2 cloudless mosaics) — never analysis results.
  */
 function ReferenceImageryNotice() {
-  const year = useUi((s) => s.year);
+  const year = useUi((s) => s.investigation.imageryYear);
+  const studyId = useUi((s) => s.investigation.study?.id ?? null);
   const satellite = useUi((s) => s.layers.satellite);
   const hires = useUi((s) => s.imagery === 'hires');
   const q = useCurrentAnalysis();
   const bundle = q.data?.bundle ?? null;
   const img = bundle?.layers.imagery.find((i) => i.year === year);
-  const imageryOnly = !!q.data && !bundle;
+  const live = useImageryDecision(studyId, year);
+  const hiresLabel = useBasemaps().data?.hires.label ?? 'Esri World Imagery (current, undated)';
+  const d = live.data;
+  const throttling = useEeTiles((s) => s.throttling);
+  // Imagery is independent of analysis: shown whenever no READY analysis layer covers this year.
+  const show = satellite && !!studyId && !img;
+  const box = 'pointer-events-none absolute left-1/2 top-[76px] z-20 -translate-x-1/2 rounded-md bg-[#0c1116]/92 px-3 py-1.5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.12)]';
   return (
     <AnimatePresence>
-      {satellite && imageryOnly && (
+      {show && (
         <motion.div key="real-imagery"
           initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-          className="pointer-events-none absolute left-1/2 top-[76px] z-20 -translate-x-1/2 rounded-md bg-[#0c1116]/92 px-3 py-1.5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
-          role="status" data-testid="real-imagery-label"
+          className={box} role="status" data-testid="real-imagery-label"
+          data-imagery={hires ? 'basemap' : d?.status ?? (live.isError ? 'ERROR' : 'LOADING')} data-code={d?.code ?? ''}
         >
-          {hires || hasEoxImagery(year) ? (
+          {hires ? (
             <>
               <div className="t-label text-ink">Real imagery · no analysis</div>
-              <div className="mt-0.5 text-[11px] text-ink-2">{hires ? 'Esri World Imagery (current)' : `Sentinel-2 cloudless ${year} (EOX)`} — not a TERRATRACE result</div>
+              <div className="mt-0.5 text-[11px] text-ink-2">{hiresLabel} — not a TERRATRACE result</div>
             </>
-          ) : (
+          ) : d?.status === 'READY' ? (
             <>
-              <div className="t-label text-warn">{year} · no imagery layer</div>
-              <div className="mt-0.5 text-[11px] text-ink-2">Historical Landsat composites are displayed only with a READY analysis. Nothing is substituted.</div>
+              <div className="t-label text-ink">Live satellite imagery · no analysis</div>
+              <div className="mt-0.5 text-[11px] text-ink-2">{d.label} · {d.sceneCount} scenes · Earth Engine — not a TERRATRACE result</div>
+              {throttling && <div className="mt-1 text-[11px] text-warn" data-testid="imagery-throttled">Satellite imagery is temporarily throttled. Retrying…</div>}
             </>
+          ) : d ? (
+            <div data-testid="no-usable-imagery">
+              <div className="t-label text-warn">{year} · imagery unavailable</div>
+              <div className="mt-0.5 max-w-[360px] text-[11px] text-ink-2">{d.message} Nothing is substituted.</div>
+            </div>
+          ) : live.isError ? (
+            <div data-testid="no-usable-imagery">
+              <div className="t-label text-warn">Imagery unavailable</div>
+              <div className="mt-0.5 text-[11px] text-ink-2" data-testid="imagery-error">{imageryErrorMessage(live.error)} Nothing is substituted.</div>
+            </div>
+          ) : (
+            <div className="t-label text-ink-2" data-testid="imagery-loading">Loading satellite imagery · {year}</div>
           )}
         </motion.div>
       )}

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useUi, type View } from '../state/store';
+import { useUi, type InvestigationState, type View } from '../state/store';
 
 /**
  * URL ⇄ UI state, so refreshes and shared links restore the same analysis.
@@ -44,23 +44,29 @@ export function parseHash(hash: string): UrlState {
   return { view: 'explore', phase: parts[0] === 'explore' ? 'explore' : 'intro', aoiId: null };
 }
 
-export function toHash(s: { view: View; phase: 'intro' | 'explore'; aoiId: string | null; window: { start: number; end: number }; year: number }): string {
-  if (s.view === 'explore' || !s.aoiId) {
+/** The URL is a MIRROR of InvestigationState (study, baseline, comparison, imagery year) — never a source. */
+export function toHash(s: { view: View; phase: 'intro' | 'explore'; investigation: InvestigationState }): string {
+  const inv = s.investigation;
+  if (s.view === 'explore' || !inv.study) {
     return s.view === 'explore' ? (s.phase === 'explore' ? '#/explore' : '#/') : `#/${s.view}`;
   }
-  const q = new URLSearchParams({ from: String(s.window.start), to: String(s.window.end), year: String(s.year) });
-  return `#/${s.view}/${encodeURIComponent(s.aoiId)}?${q}`;
+  const q = new URLSearchParams({ from: String(inv.baselineYear), to: String(inv.comparisonYear), year: String(inv.imageryYear) });
+  return `#/${s.view}/${encodeURIComponent(inv.study.id)}?${q}`;
 }
 
+/** Apply a URL to the state ONLY through store actions (the same paths the UI uses). */
 function apply(u: UrlState) {
   const ui = useUi.getState();
+  const studyId = ui.investigation.study?.id ?? null;
   if (u.aoiId) {
     const window = u.from !== undefined && u.to !== undefined && u.from < u.to ? { start: u.from, end: u.to } : undefined;
-    if (u.aoiId !== ui.aoiId || u.view !== ui.view) ui.openAnalysis(u.aoiId, { view: u.view, window });
-    else if (window) ui.setWindow(window.start, window.end);
-    if (u.year !== undefined) useUi.setState({ year: u.year });
+    if (u.aoiId !== studyId || u.view !== ui.view) ui.openAnalysis(u.aoiId, { view: u.view, window, imageryYear: u.year });
+    else {
+      if (window) ui.setWindow(window.start, window.end);
+      if (u.year !== undefined) ui.setYear(u.year);
+    }
   } else if (u.view === 'explore') {
-    if (ui.view !== 'explore' || ui.aoiId) ui.goExplore(u.phase);
+    if (ui.view !== 'explore' || studyId) ui.goExplore(u.phase);
     else if (ui.phase !== u.phase) ui.setPhase(u.phase);
   } else {
     ui.setView(u.view);
@@ -81,7 +87,7 @@ export function useUrlSync() {
       const next = toHash(s);
       if (next === last || (next === '#/' && last === '')) return;
       // A new place (view / AOI / explore phase) is a history entry; scrubbing years is not.
-      const navigation = s.view !== prev.view || s.aoiId !== prev.aoiId || s.phase !== prev.phase;
+      const navigation = s.view !== prev.view || s.investigation.study?.id !== prev.investigation.study?.id || s.phase !== prev.phase;
       const url = `${window.location.pathname}${window.location.search.replace(/[?&]mode=(live|demo)/, '')}${next}`;
       if (navigation) window.history.pushState(null, '', url);
       else window.history.replaceState(null, '', url);

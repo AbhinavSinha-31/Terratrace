@@ -1,6 +1,6 @@
 """A/B: single combined request vs concurrent per-year requests (developer tool; nothing cached).
 
-    .venv/Scripts/python scripts/ee_ab_parallel.py <aoi-id> <dlon>
+    .venv/Scripts/python scripts/dev/ee_ab_parallel.py <aoi-id> <dlon>
 
 Builds two COLD AOIs (the given AOI shifted ±dlon, same shape/size, never analysed), runs
 A = workers=1 (current single request) and B = workers=8 (concurrent), then re-runs A's AOI with
@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.providers.earth_engine import provider as P  # noqa: E402
 from app.services.geometry import validate_aoi  # noqa: E402
@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefm
 logging.getLogger("googleapiclient").setLevel(logging.WARNING)
 
 aid, dlon = sys.argv[1], float(sys.argv[2])
-doc = json.loads((Path(__file__).resolve().parents[1] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
+doc = json.loads((Path(__file__).resolve().parents[2] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
 
 
 def shifted(d: float):

@@ -56,9 +56,9 @@ function EventBody({ event, aoi }: { event: ChangeEvent; aoi: StudyArea }) {
   const evaluated = p.confidence.evidence.filter((e) => e.passed !== null).length;
 
   const compareThis = () => {
-    // Before = the composite preceding the event, after = the composite where it was detected.
+    // Before = the analysis baseline (= the event's year_from), after = the year it was detected.
+    // The analysis years are NOT changed here: that would discard the result this event belongs to.
     const s = ui();
-    s.setWindow(p.year_from, Math.max(p.year_to, s.window.end));
     s.setYear(p.year_to);
     s.setCompare(true);
     s.requestCamera({ kind: 'event', id: event.id });

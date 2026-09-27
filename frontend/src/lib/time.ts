@@ -16,9 +16,6 @@ export const TIMELINE_END = 2026;
 export const PENDING_YEAR = 2026;
 /** Default REQUESTED analysis window (a default, not a minimum — any window from 1984 can be requested). */
 export const DEFAULT_ANALYSIS_WINDOW = { start: 2018, end: 2025 };
-/** EOX Sentinel-2 cloudless mosaics exist only for these years (real imagery, never metrics). */
-export const EOX_FIRST_YEAR = 2016;
-export const hasEoxImagery = (year: number) => year >= EOX_FIRST_YEAR && year <= 2025;
 export const eraOf = (year: number): 'historical' | 'modern' => (year < MODERN_FIRST_YEAR ? 'historical' : 'modern');
 
 export interface SensorEra {

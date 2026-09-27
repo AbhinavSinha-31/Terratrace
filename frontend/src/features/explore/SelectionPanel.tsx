@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Eraser, Hexagon, SquareDashed, Trees } from 'lucide-react';
 import { client } from '../../data/client';
 import { useHealth } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
 import { geometryAreaKm2, geometryCentroid, fmtLatLon } from '../../lib/geo';
 import { DEFAULT_YEARS, sourceLabel } from '../../lib/time';
 import { Badge, Button, IconButton, Menu, StateView, Tooltip } from '../../design';
@@ -12,13 +12,14 @@ import { AnimatedNumber } from '../../design/Metric';
 
 /** SELECTED AREA — measurement, reference forest share, time range and the Analyze action. */
 export function SelectionPanel() {
-  const selection = useUi((s) => s.selection)!;
+  const selection = useUi(selectCandidate)!;
   const setSelection = useUi((s) => s.setSelection);
   const setDrawTool = useUi((s) => s.setDrawTool);
-  const start = useUi((s) => s.startAnalysis);
+  const requestAnalysis = useUi((s) => s.requestAnalysis);
   const { data: health } = useHealth();
-  const [baseline, setBaseline] = useState(2018);
-  const [comparison, setComparison] = useState(2025);
+  // Baseline/comparison are the investigation's own years (no local copy).
+  const { start: baseline, end: comparison } = useAnalysisWindow();
+  const setWindow = useUi((s) => s.setWindow);
 
   const area = geometryAreaKm2(selection.geometry);
   const centroid = geometryCentroid(selection.geometry);
@@ -79,9 +80,9 @@ export function SelectionPanel() {
       <div className="mt-5">
         <div className="t-label text-ink-3">Time range</div>
         <div className="mt-2 flex items-center gap-2">
-          <Menu label="Baseline year" value={baseline} options={DEFAULT_YEARS.filter((y) => y < comparison).map(yearOpt)} onChange={(v) => setBaseline(Number(v))} className="h-9 flex-1 justify-between px-3 text-[13px]" />
+          <Menu label="Baseline year" value={baseline} options={DEFAULT_YEARS.filter((y) => y < comparison).map(yearOpt)} onChange={(v) => setWindow(Number(v), comparison)} className="h-9 flex-1 justify-between px-3 text-[13px]" />
           <ArrowRight size={14} className="shrink-0 text-ink-3" />
-          <Menu label="Comparison year" value={comparison} options={DEFAULT_YEARS.filter((y) => y > baseline).map(yearOpt)} onChange={(v) => setComparison(Number(v))} className="h-9 flex-1 justify-between px-3 text-[13px]" align="right" />
+          <Menu label="Comparison year" value={comparison} options={DEFAULT_YEARS.filter((y) => y > baseline).map(yearOpt)} onChange={(v) => setWindow(baseline, Number(v))} className="h-9 flex-1 justify-between px-3 text-[13px]" align="right" />
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
           {baseline < 2016 ? 'Historical years (1984–2015) use Landsat (30 m); change events are detected only between analysable Sentinel-2 / Dynamic World years (2016 onward, where available).' : 'Sentinel-2 composites with Dynamic World tree evidence, where available for this area.'}
@@ -101,7 +102,7 @@ export function SelectionPanel() {
         <Button
           variant="brand" size="lg" block disabled={blocked}
           trailing={<ArrowRight size={16} />}
-          onClick={() => start({ geometry: selection.geometry, baseline_period: { year: baseline }, comparison_period: { year: comparison }, name: selection.name })}
+          onClick={() => requestAnalysis()}
         >
           {eeReady || !health ? 'Analyze forest change' : 'Open area · imagery only'}
         </Button>

@@ -1,22 +1,23 @@
 import { useMemo } from 'react';
 import { Printer } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useCurrentBundle, useSelectedAoi } from '../../data/queries';
+import { useCurrentBundle, useExplanation, useSelectedAoi } from '../../data/queries';
 import { useUi } from '../../state/store';
-import type { Explanation } from '../../data/contracts';
 import { buildFacts } from '../../explain/facts';
-import { groundedNarrative } from '../../explain/narrative';
 import { fmtCoord, fmtDelta, fmtHa, fmtPct, landCoverLabel, severityLabel } from '../../lib/format';
 import { Button, Modal, TerratraceLogo } from '../../design';
 import { evidenceChips } from './Briefing';
 
-function tile(lon: number, lat: number, year: number) {
+/**
+ * One tile of a backend-provided XYZ template (the READY analysis' own Earth Engine composite) around a point.
+ * The template comes from the backend; only the tile index is computed here. No template -> no image.
+ */
+function tileFrom(template: string | undefined, lon: number, lat: number) {
+  if (!template) return null;
   const z = 13, n = 2 ** z;
   const x = Math.floor(((lon + 180) / 360) * n);
   const r = (lat * Math.PI) / 180;
   const y = Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n);
-  const layer = year >= 2017 ? `s2cloudless-${year}_3857` : 's2cloudless_3857';
-  return `https://tiles.maps.eox.at/wmts/1.0.0/${layer}/default/g/${z}/${y}/${x}.jpg`;
+  return template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
 }
 
 /** Printable EVENT BRIEF (browser print → PDF). */
@@ -26,13 +27,12 @@ export function ReportModal() {
   // Reports exist only for events of a READY live analysis.
   const analysis = useCurrentBundle();
   const aoi = useSelectedAoi();
-  const qc = useQueryClient();
   const ev = analysis?.events.features.find((f) => f.id === id);
-  const text = useMemo(() => {
-    if (!ev || !aoi) return '';
-    const cached = qc.getQueryData<Explanation>(['explanation', ev.id]);
-    return cached?.text ?? groundedNarrative(buildFacts(ev.properties, aoi));
-  }, [ev, aoi, qc]);
+  // The briefing comes ONLY from the backend explainer (same query/cache as the Briefing panel).
+  const facts = useMemo(() => (ev && aoi ? buildFacts(ev.properties, aoi) : null), [ev, aoi]);
+  const briefing = useExplanation(facts, !!id && !!facts);
+  const text = briefing.data?.text
+    ?? (briefing.isError ? 'The briefing is unavailable right now. The measurements below are unaffected.' : 'Preparing the briefing…');
 
   if (!ev || !aoi || !analysis) return null;
   const p = ev.properties;
@@ -50,12 +50,18 @@ export function ReportModal() {
           </div>
         </header>
         <section className="grid grid-cols-2 gap-4">
-          {[p.year_from, p.year_to].map((y, i) => (
-            <figure key={y}>
-              <img src={tile(p.centroid[0], p.centroid[1], y)} alt={`Sentinel-2 cloudless imagery ${y} around the event`} className="aspect-[4/3] w-full rounded-md object-cover" />
-              <figcaption className="t-label mt-1.5 text-ink-3">{i === 0 ? 'Before' : 'After'} · {y}{y < 2016 ? ' (no EOX mosaic — 2016 shown)' : ''}</figcaption>
-            </figure>
-          ))}
+          {[p.year_from, p.year_to].map((y, i) => {
+            const layer = analysis.layers.imagery.find((l) => l.year === y && !l.reference);
+            const src = tileFrom(layer?.tiles[0], p.centroid[0], p.centroid[1]);
+            return (
+              <figure key={y}>
+                {src
+                  ? <img src={src} alt={`${layer!.label} around the event`} className="aspect-[4/3] w-full rounded-md object-cover" />
+                  : <div className="flex aspect-[4/3] w-full items-center justify-center rounded-md bg-white/[0.03] text-[11px] text-ink-3">No imagery for {y}</div>}
+                <figcaption className="t-label mt-1.5 text-ink-3">{i === 0 ? 'Before' : 'After'} · {y}{layer ? ` · ${layer.sensor ?? 'composite'}` : ''}</figcaption>
+              </figure>
+            );
+          })}
         </section>
         <section className="grid grid-cols-3 gap-px overflow-hidden rounded-md bg-line text-[12px]">
           {[
@@ -83,7 +89,7 @@ export function ReportModal() {
           </ul>
         </section>
         <footer className="border-t border-line pt-4 text-[10.5px] leading-relaxed text-ink-3">
-          {aoi.name} · centroid {fmtCoord(p.centroid[0], p.centroid[1])} · {analysis.summary.method.change_rule}. Evidence score is a weighted agreement of measured checks, not a calibrated probability. Measurements indicate that a change occurred, not its cause. Imagery: Sentinel-2 cloudless by EOX (contains modified Copernicus Sentinel data).
+          {aoi.name} · centroid {fmtCoord(p.centroid[0], p.centroid[1])} · {analysis.summary.method.change_rule}. Evidence score is a weighted agreement of measured checks, not a calibrated probability. Measurements indicate that a change occurred, not its cause. Imagery: the analysis' own Earth Engine composites (contains modified Copernicus Sentinel data / USGS Landsat).
         </footer>
       </article>
     </Modal>

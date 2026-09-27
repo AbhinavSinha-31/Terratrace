@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, ChevronDown, RotateCcw, Info, Menu as MenuIcon, MonitorPlay, Search, Settings, UserRound, X } from 'lucide-react';
+import { Bell, ChevronDown, RotateCcw, Info, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
+import { useImageryLabel } from '../../data/imagerySync';
 import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
@@ -40,9 +41,28 @@ export function dataStatus(h?: SystemHealth): { short: string; long: string; det
     detail: 'Live Earth observation is temporarily unavailable. You can keep exploring real imagery; TERRATRACE does not display estimated, simulated, or placeholder measurements.',
   };
 }
+/** Imagery is independent of analysis: live imagery may be READY while the analysis is unavailable. */
+function ImageryStatusRow() {
+  const status = useUi((s) => (s.investigation.study ? s.investigation.imageryStatus : null));
+  const label = useImageryLabel();
+  const dot = status === 'available' ? 'bg-live' : status === 'loading' || status === null ? 'bg-ink-4' : 'bg-warn';
+  const title = status === null ? 'Open a study to load live imagery'
+    : status === 'available' ? 'Live satellite imagery'
+    : status === 'insufficient' ? 'Live imagery · limited coverage'
+    : status === 'loading' ? 'Loading imagery…'
+    : 'Imagery unavailable';
+  return (
+    <div data-testid="imagery-status-row" data-status={status ?? 'none'}>
+      <div className="t-label mt-2 !text-[9px] text-ink-4">Imagery</div>
+      <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink"><span className={`h-2 w-2 rounded-full ${dot}`} />{title}</div>
+      {status !== null && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">{label.title} · {label.sub}</p>}
+    </div>
+  );
+}
 function StatusPill({ health }: { health?: SystemHealth }) {
   const queryClient = useQueryClient();
   const s = dataStatus(health);
+  const imageryStatus = useUi((st) => st.investigation.imageryStatus);
   const dot = s.ready ? 'bg-live' : 'bg-warn';
   return (
     <Popover
@@ -67,12 +87,14 @@ function StatusPill({ health }: { health?: SystemHealth }) {
       {(close) => (
         <div className="p-4">
           <div className="t-label text-ink-3">Data status</div>
-          <div className="mt-2 flex items-center gap-2 text-[13px] font-medium text-ink"><span className={`h-2 w-2 rounded-full ${dot}`} />{s.long}</div>
+          <ImageryStatusRow />
+          <div className="t-label mt-3 !text-[9px] text-ink-4">Analysis</div>
+          <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink" data-testid="analysis-status-row"><span className={`h-2 w-2 rounded-full ${dot}`} />{s.long}</div>
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">{s.detail}</p>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-4">TERRATRACE never shows simulated results: measurements appear only for completed, validated live analyses.</p>
-          {!s.ready && (
+          {(!s.ready || imageryStatus === 'unknown' || imageryStatus === 'unavailable') && (
             <button className="tt-press mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent/12 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20"
-              onClick={() => { close(); void queryClient.invalidateQueries({ queryKey: ['health'] }); }}>
+              onClick={() => { close(); for (const k of ['health', 'imagery', 'imagery-availability', 'basemaps']) void queryClient.invalidateQueries({ queryKey: [k] }); }}>
               <RotateCcw size={14} /> Retry
             </button>
           )}
@@ -136,7 +158,7 @@ function SettingsMenu() {
       width={300}
       trigger={(p) => <IconButton {...p} label="Settings"><Settings size={17} /></IconButton>}
     >
-      {(close) => (
+      {() => (
         <div className="p-4">
           <div className="t-label text-ink-3">Display</div>
           <div className="mt-3 space-y-3">
@@ -154,20 +176,12 @@ function SettingsMenu() {
               </div>
             ))}
           </div>
-          <div className="mt-4 border-t border-line pt-3">
-            <button className="tt-press flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink" onClick={() => { close(); startPresentation(); }}>
-              <MonitorPlay size={15} /> Start presentation mode
-            </button>
-          </div>
         </div>
       )}
     </Popover>
   );
 }
 
-export function startPresentation() {
-  useUi.getState().setPresentation({ active: true, step: 0 });
-}
 
 function Avatar() {
   return (
@@ -187,9 +201,6 @@ function Avatar() {
             <div className="text-[11px] text-ink-3">Not signed in · prototype build</div>
           </div>
           <div className="my-1 h-px bg-line" />
-          <button className="tt-press flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink" onClick={() => { close(); startPresentation(); }}>
-            <MonitorPlay size={15} /> Presentation mode
-          </button>
           <button className="tt-press flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink" onClick={() => { close(); useUi.getState().setAboutOpen(true); }}>
             <Info size={15} /> About TERRATRACE
           </button>
@@ -262,9 +273,6 @@ export function Header() {
                     {n.label}
                   </button>
                 ))}
-                <button onClick={() => { setMenu(false); startPresentation(); }} className="tt-press flex h-12 w-full items-center gap-2.5 rounded-md px-3 text-[14px] text-ink-2">
-                  <MonitorPlay size={16} /> Presentation mode
-                </button>
               </div>
             </motion.nav>
           </motion.div>

@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
-import { useCurrentAnalysis, useFilteredEvents, useSelectedAoi, useWindowKpis } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { useCurrentAnalysis, useFilteredEvents, useSelectedAoi } from '../../data/queries';
+import { useAnalysisWindow, useUi } from '../../state/store';
 import type { ChangeLevel } from '../../data/contracts';
 import { ForestCoverChart } from '../../components/charts/ForestCoverChart';
 import { YearlyLossChart } from '../../components/charts/YearlyLossChart';
-import { fmtHa, fmtKm2, fmtSignedPct } from '../../lib/format';
-import { evidenceDistribution } from '../../lib/windowStats';
+import { evidenceDistribution, fmtHa, fmtKm2, fmtSignedPct } from '../../lib/format';
 import { Badge, SectionLabel, SeverityBadge, Skeleton, StateView } from '../../design';
 import { SEVERITY_COLOR } from '../../lib/palette';
 
@@ -16,9 +15,10 @@ const SEV_RANK = { low: 0, moderate: 1, high: 2, critical: 3 };
 export function Overview() {
   const q = useCurrentAnalysis();
   const aoi = useSelectedAoi();
-  const k = useWindowKpis();
-  const year = useUi((s) => s.year);
-  const win = useUi((s) => s.window);
+  // KPIs come from the backend result, which always belongs to the current baseline/comparison.
+  const k = q.data?.bundle?.summary.kpis ?? null;
+  const year = useUi((s) => s.investigation.imageryYear);
+  const win = useAnalysisWindow();
   const setYear = useUi((s) => s.setYear);
   const selectEvent = useUi((s) => s.selectEvent);
   const setTab = useUi((s) => s.setTab);

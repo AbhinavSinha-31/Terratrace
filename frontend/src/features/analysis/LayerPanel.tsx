@@ -1,6 +1,7 @@
 import { ChevronsLeft, Flame, Layers, Map as MapIcon, Satellite, Scan, SquareDashed, TreePine, Type } from 'lucide-react';
 import { useCurrentBundle } from '../../data/queries';
 import { useUi } from '../../state/store';
+import { useImageryLabel } from '../../data/imagerySync';
 import { SEVERITIES, type GradientLegend } from '../../data/contracts';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
 import { severityLabel } from '../../lib/format';
@@ -27,11 +28,12 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
   const imagery = useUi((s) => s.imagery);
   const setImagery = useUi((s) => s.setImagery);
   const setOpacity = useUi((s) => s.setForestOpacity);
-  const year = useUi((s) => s.year);
+  const year = useUi((s) => s.investigation.imageryYear);
   const forestLegend = analysis?.layers.overlays.find((o) => o.kind === 'forest')?.legend;
   const ndviLegend = analysis?.layers.overlays.find((o) => o.kind === 'ndvi')?.legend;
   const hasNdvi = !!ndviLegend;
   const img = analysis?.layers.imagery.find((i) => i.year === year);
+  const imageryLabel = useImageryLabel();
 
   return (
     <div>
@@ -40,7 +42,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
         {onCollapse && <IconButton label="Collapse layers" size="sm" onClick={onCollapse}><ChevronsLeft size={15} /></IconButton>}
       </div>
       <div className="space-y-0.5">
-        <LayerToggle icon={<Satellite size={14} />} label="Satellite" hint={img ? `${img.label}${img.reference ? ' — stand-in reference, desaturated' : ''}` : analysis ? 'Annual satellite composite for the selected year' : `Real imagery only — Sentinel-2 cloudless ${year} (EOX)`} on={layers.satellite} onChange={(v) => set('satellite', v)}>
+        <LayerToggle icon={<Satellite size={14} />} label="Satellite" hint={img ? `${img.label}${img.reference ? ' — stand-in reference, desaturated' : ''}` : `${imageryLabel.title} — ${imageryLabel.sub}`} on={layers.satellite} onChange={(v) => set('satellite', v)}>
           <Segmented label="Imagery source" value={imagery} onChange={setImagery} options={[{ value: 'sentinel', label: 'Annual composite' }, { value: 'hires', label: 'High-res (current)' }]} />
         </LayerToggle>
         {analysis && <>

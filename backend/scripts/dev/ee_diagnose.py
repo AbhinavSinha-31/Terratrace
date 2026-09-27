@@ -1,6 +1,6 @@
 """Controlled Earth Engine diagnostic runs for one AOI (developer tool; results never cached/served).
 
-    .venv/Scripts/python scripts/ee_diagnose.py <aoi-id> <baseline> <comparison> <config> [<config> ...]
+    .venv/Scripts/python scripts/dev/ee_diagnose.py <aoi-id> <baseline> <comparison> <config> [<config> ...]
 
 config: full | no_coverage | no_yearly_stats | no_change | no_vectorize | no_hansen | no_persistence
 (combine with '+', e.g. no_hansen+no_persistence). Runs are strictly sequential; each prints
@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.providers.earth_engine import provider as P  # noqa: E402
 from app.services.geometry import validate_aoi  # noqa: E402
@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefm
 logging.getLogger("googleapiclient").setLevel(logging.WARNING)
 
 aid, b, c, configs = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4:]
-doc = json.loads((Path(__file__).resolve().parents[1] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
+doc = json.loads((Path(__file__).resolve().parents[2] / ".cache" / "aois" / f"{aid}.json").read_text(encoding="utf-8"))
 aoi = validate_aoi(doc["geometry"], enforce_limits=False)
 P.provider.initialize()
 print(f"AOI {aid} {aoi.area_km2:.2f} km2, window {b}->{c}")

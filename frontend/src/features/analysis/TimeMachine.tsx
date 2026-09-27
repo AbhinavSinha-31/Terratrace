@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Pause, Play, SkipBack, SkipForward, SplitSquareHorizontal } from 'lucide-react';
-import { useUi } from '../../state/store';
-import { useCurrentAnalysis, useCurrentBundle } from '../../data/queries';
+import { useAnalysisWindow, useUi } from '../../state/store';
+import { useCurrentAnalysis, useCurrentBundle, useImageryAvailability } from '../../data/queries';
 import type { ChangeLevel, YearStat } from '../../data/contracts';
-import { ERAS, PENDING_YEAR, TIMELINE_START, axisPos, axisYear, eraOf, hasEoxImagery, sourceLabel } from '../../lib/time';
+import { ERAS, PENDING_YEAR, TIMELINE_START, axisPos, axisYear, eraOf, sourceLabel } from '../../lib/time';
 import { fmtHa } from '../../lib/format';
 import { SEVERITY_COLOR } from '../../lib/palette';
 import { Button, IconButton, Menu, Tooltip } from '../../design';
@@ -23,8 +23,8 @@ function usePlayback() {
     if (!playing) return;
     const id = window.setInterval(() => {
       const s = useUi.getState();
-      const next = s.years.find((y) => y > s.year);
-      const stop = s.view === 'timemachine' ? s.years[s.years.length - 1] : s.window.end;
+      const next = s.years.find((y) => y > s.investigation.imageryYear);
+      const stop = s.view === 'timemachine' ? s.years[s.years.length - 1] : s.investigation.comparisonYear;
       if (!next || next > stop) s.setPlaying(false);
       else s.setYear(next);
     }, 1400);
@@ -39,11 +39,12 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
   const analysis = useCurrentBundle();
   const result = useCurrentAnalysis().data;
   const years = useUi((s) => s.years);
-  const year = useUi((s) => s.year);
-  const win = useUi((s) => s.window);
-  // Selected-but-not-analysed window (exploration). Analysis runs only on an explicit request.
-  const pending = useUi((s) => s.pendingWindow);
-  const sel = pending ?? win;
+  const year = useUi((s) => s.investigation.imageryYear);
+  const win = useAnalysisWindow();
+  const idle = useUi((s) => s.investigation.analysisStatus === 'idle' && !!s.investigation.study);
+  // The selectors ARE the investigation's baseline/comparison. Changing them discards the previous
+  // (now incompatible) result; the analysis runs only on an explicit request.
+  const sel = win;
   const playing = useUi((s) => s.playing);
   const compare = useUi((s) => s.compare);
   const ui = useUi.getState;
@@ -54,6 +55,8 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
   const shownWin = dragWin ?? sel;
   const [hover, setHover] = useState<number | null>(null);
 
+  const studyId = useUi((s) => s.investigation.study?.id ?? null);
+  const availability = useImageryAvailability(studyId);
   const stats = analysis?.summary.years ?? [];
   const periods = analysis?.summary.periods ?? [];
   const events = analysis?.events.features ?? [];
@@ -73,20 +76,25 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
   };
   const togglePlay = () => {
     const s = ui();
-    const first = s.view === 'timemachine' ? s.years[0] : s.window.start;
-    const last = s.view === 'timemachine' ? s.years[s.years.length - 1] : s.window.end;
-    if (!s.playing && s.year >= last) s.setYear(first);
+    const first = s.view === 'timemachine' ? s.years[0] : s.investigation.baselineYear;
+    const last = s.view === 'timemachine' ? s.years[s.years.length - 1] : s.investigation.comparisonYear;
+    if (!s.playing && s.investigation.imageryYear >= last) s.setYear(first);
     s.setPlaying(!s.playing);
   };
   const hs: YearStat | undefined = hover !== null ? stats.find((s) => s.year === hover) : undefined;
   const pct = (y: number) => `${axisPos(y) * 100}%`;
   const eventsByYear = new Map<number, typeof events>();
   for (const e of events) eventsByYear.set(e.properties.year_to, [...(eventsByYear.get(e.properties.year_to) ?? []), e]);
-  /** Per-year availability from the backend's observation-quality report — never assumed. */
-  const avail = (y: number): { ok: boolean | null; reason: string } => {
+  /**
+   * Per-year imagery availability MEASURED by the backend (/api/imagery/availability) — never assumed.
+   * ok: true = AVAILABLE, false = INSUFFICIENT / UNAVAILABLE, null = not measured (no status is guessed).
+   */
+  const avail = (y: number): { ok: boolean | null; status: string | null; reason: string } => {
+    const e = availability.data?.years.find((r) => r.year === y);
+    if (e) return { ok: e.status === 'AVAILABLE', status: e.status, reason: e.reason ?? `${e.sceneCount} scenes · ${e.coverage === null ? '—' : Math.round(e.coverage * 100)}% observed` };
     const q = result?.quality?.years.find((r) => r.year === y);
-    if (q) return q.passes ? { ok: true, reason: '' } : { ok: false, reason: q.reason ?? 'Insufficient clear observations' };
-    return { ok: null, reason: result?.status === 'READY' ? '' : 'No analysis for this year' };
+    if (q) return q.passes ? { ok: true, status: 'AVAILABLE', reason: '' } : { ok: false, status: 'INSUFFICIENT', reason: q.reason ?? 'Insufficient clear observations' };
+    return { ok: null, status: null, reason: availability.isFetching ? 'Checking imagery availability…' : availability.isError ? 'Imagery availability could not be checked.' : '' };
   };
   const yearOpts = years.map((y) => ({ value: y, label: String(y), meta: avail(y).ok === false ? 'unavailable' : eraOf(y) === 'historical' ? 'Landsat' : 'S2 · DW' }));
 
@@ -103,20 +111,16 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
         </div>
         {!compact && (
           <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
-            <Menu label="Start year" value={sel.start} options={yearOpts.filter((o) => o.value < sel.end)} onChange={(v) => ui().setPendingWindow(Number(v), sel.end)} className="!h-7" />
+            <Menu label="Start year" value={sel.start} options={yearOpts.filter((o) => o.value < sel.end)} onChange={(v) => ui().setWindow(Number(v), sel.end)} className="!h-7" />
             <span>→</span>
-            <Menu label="End year" value={sel.end} options={yearOpts.filter((o) => o.value > sel.start)} onChange={(v) => ui().setPendingWindow(sel.start, Number(v))} className="!h-7" />
+            <Menu label="End year" value={sel.end} options={yearOpts.filter((o) => o.value > sel.start)} onChange={(v) => ui().setWindow(sel.start, Number(v))} className="!h-7" />
           </div>
         )}
-        {pending && (
+        {idle && (
           <div className="flex items-center gap-2" data-testid="pending-window">
-            <Button size="sm" variant="brand" className="!h-7" onClick={() => ui().commitPendingWindow()}>Run live analysis {pending.start} → {pending.end}</Button>
-            <button className="text-[11px] text-ink-3 hover:text-ink" onClick={() => useUi.setState({ pendingWindow: null })}>Cancel</button>
-            {compact && <span className="text-[10.5px] text-ink-4">not yet analysed</span>}
+            <Button size="sm" variant="brand" className="!h-7" onClick={() => ui().requestAnalysis()}>Run live analysis {win.start} → {win.end}</Button>
+            <span className="text-[10.5px] text-ink-4">not yet analysed</span>
           </div>
-        )}
-        {!compact && pending && (
-          <div className="text-[10.5px] text-ink-4">Selected, not yet analysed · current analysis {win.start} → {win.end}</div>
         )}
       </div>
 
@@ -140,7 +144,7 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
             if (!target) ui().setYear(snap(pAt(e.clientX)));
           }}
           onPointerMove={(e) => { if (drag) move(e.clientX); setHover(snap(pAt(e.clientX))); }}
-          onPointerUp={() => { if (dragWin) ui().setPendingWindow(dragWin.start, dragWin.end); setDragWin(null); setDrag(null); }}
+          onPointerUp={() => { if (dragWin) ui().setWindow(dragWin.start, dragWin.end); setDragWin(null); setDrag(null); }}
           onPointerLeave={() => setHover(null)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); ui().stepYear(-1); }
@@ -183,8 +187,9 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
             const hide = y !== year && y !== win.start && y !== win.end && eraOf(y) === 'modern' && y % 2 === 1 && compact;
             return (
               <button key={`l${y}`} tabIndex={-1} onClick={() => ui().setYear(y)} disabled={y === PENDING_YEAR}
-                title={y === PENDING_YEAR ? undefined : avail(y).ok === false ? `Unavailable — insufficient imagery: ${avail(y).reason}` : undefined}
+                title={y === PENDING_YEAR ? undefined : avail(y).ok === false ? `${avail(y).status === 'UNAVAILABLE' ? 'No imagery' : 'Insufficient imagery'}: ${avail(y).reason}` : undefined}
                 data-unavailable={avail(y).ok === false || undefined}
+                data-imagery-status={y === PENDING_YEAR ? undefined : avail(y).status ?? 'UNKNOWN'}
                 className={`t-data absolute top-[70px] -translate-x-1/2 text-[10.5px] ${hide ? 'hidden' : ''} ${y === year ? 'font-medium text-ink' : y === PENDING_YEAR ? 'text-ink-4' : avail(y).ok === false ? 'text-ink-4 line-through decoration-warn/60' : 'text-ink-3 hover:text-ink-2'}`}
                 style={{ left: pct(y) }}>
                 {y === TIMELINE_START ? y : `’${String(y).slice(2)}`}
@@ -249,9 +254,9 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
                 <span className="t-label !text-[8.5px] text-ink-3">{eraOf(hover) === 'historical' ? 'Landsat · 30 m' : 'Sentinel-2 + DW · 10 m'}</span>
               </div>
               <div className="mt-1.5 text-[11px] leading-snug text-warn">
-                {avail(hover).ok === false ? `Unavailable — insufficient imagery. ${avail(hover).reason}` : avail(hover).reason || 'No measurement for this year'}
+                {avail(hover).ok === false ? `${avail(hover).status === 'UNAVAILABLE' ? 'No imagery' : 'Insufficient imagery'} — ${avail(hover).reason}` : avail(hover).ok ? `Imagery available · ${avail(hover).reason}` : avail(hover).reason || 'Imagery availability not measured'}
               </div>
-              <div className="mt-1 text-[10.5px] text-ink-4">{hasEoxImagery(hover) ? `Map imagery: Sentinel-2 cloudless ${hover} (EOX), not an analysis` : 'No imagery layer for this year without a READY analysis'}</div>
+              <div className="mt-1 text-[10.5px] text-ink-4">Imagery only — no analysis measurement for this year.</div>
             </div>
           )}
         </div>

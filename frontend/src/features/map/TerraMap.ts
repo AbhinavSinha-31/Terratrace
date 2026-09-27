@@ -7,13 +7,13 @@ import maplibregl, {
   type StyleSpecification,
 } from 'maplibre-gl';
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
-import type { AoiGeometry, ChangeEvent, ChangeType, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
+import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, ImageryDecision, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
 import type { ImageryMode, LayerToggles } from '../../state/store';
 import type { ExploreRegion } from '../../lib/regions';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
 import { changeTypeLabel, fmtHa, severityLabel } from '../../lib/format';
 import { nightPolygons } from '../../lib/solar';
-import { hasEoxImagery } from '../../lib/time';
+import { THROTTLED, eeTiles, registerEeTiles } from './eeTiles';
 
 export interface GlobalHotspot {
   lon: number;
@@ -28,6 +28,10 @@ export interface MapState {
   regions: ExploreRegion[];
   aoi: StudyArea | null;
   catalog: LayerCatalog | null;
+  /** Static base layers from the backend (URLs are never built here). */
+  basemaps: Basemaps | null;
+  /** Backend imagery decision for the open AOI + this map's year (real Earth Engine imagery; never analysis). */
+  yearImagery: ImageryDecision | null;
   events: ChangeEvent[];
   hotspots: GlobalHotspot[];
   year: number;
@@ -58,10 +62,6 @@ export interface TerraMapHandlers {
 
 export interface Padding { top: number; bottom: number; left: number; right: number }
 
-/** EOX Sentinel-2 cloudless annual mosaics (real imagery; 2016 is the unversioned first release). */
-const EOX = (y: number) => `https://tiles.maps.eox.at/wmts/1.0.0/${y === 2016 ? 's2cloudless_3857' : `s2cloudless-${y}_3857`}/default/g/{z}/{y}/{x}.jpg`;
-const EOX_LATEST = EOX(2025);
-const HANSEN_TILES = 'https://storage.googleapis.com/earthenginepartners-hansen/tiles/gfc_v1.4/tree_alpha/{z}/{x}/{y}.png';
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const NO_PAD = { top: 0, bottom: 0, left: 0, right: 0 };
 const ACCENT = '#45d0c4';
@@ -91,19 +91,6 @@ function baseStyle(): StyleSpecification {
       'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 4, 0.9, 7, 0],
     },
     sources: {
-      'img-base': { type: 'raster', tiles: [EOX_LATEST], tileSize: 256, maxzoom: 15, attribution: 'Sentinel-2 cloudless 2025 — s2maps.eu by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2025)' },
-      hires: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256, maxzoom: 19,
-        attribution: 'High-resolution imagery © Esri, Maxar, Earthstar Geographics',
-      },
-      labels: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256, maxzoom: 19, attribution: 'Labels © Esri',
-      },
-      'global-forest': { type: 'raster', tiles: [HANSEN_TILES], tileSize: 256, maxzoom: 12, attribution: 'Tree cover 2000: Hansen/UMD/Google/USGS/NASA (CC BY 4.0)' },
       night: { type: 'geojson', data: nightPolygons() },
       'global-hotspots': { type: 'geojson', data: EMPTY },
       'aoi-all': { type: 'geojson', data: EMPTY, promoteId: 'id' },
@@ -115,17 +102,14 @@ function baseStyle(): StyleSpecification {
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#03060a', 'background-opacity': 0 } },
-      { id: 'img-base', type: 'raster', source: 'img-base', paint: { 'raster-fade-duration': 300, 'raster-saturation': -0.05, 'raster-contrast': 0.05 } },
-      { id: 'img-hires', type: 'raster', source: 'hires', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 250 } },
+      // Base layers (backend-owned URLs) are inserted below these anchors once /api/imagery/basemaps arrives.
+      { id: 'anchor-base', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'anchor-imagery', type: 'background', paint: { 'background-opacity': 0 } },
-      {
-        id: 'global-forest', type: 'raster', source: 'global-forest', maxzoom: 12,
-        paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 0.35, 10, 0.2], 'raster-saturation': -0.25, 'raster-hue-rotate': 12, 'raster-opacity-transition': { duration: 500 } },
-      },
+      { id: 'anchor-reference', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'night', type: 'fill', source: 'night', paint: { 'fill-color': '#01040a', 'fill-opacity': 0.2, 'fill-antialias': false } },
       { id: 'aoi-mask', type: 'fill', source: 'aoi-mask', paint: { 'fill-color': '#020406', 'fill-opacity': 0.5 } },
       { id: 'anchor-overlays', type: 'background', paint: { 'background-opacity': 0 } },
-      { id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.85 } },
+      { id: 'anchor-labels', type: 'background', paint: { 'background-opacity': 0 } },
       {
         id: 'global-hotspots-glow', type: 'circle', source: 'global-hotspots',
         paint: {
@@ -210,6 +194,7 @@ export class TerraMap {
   private collisionQueued = false;
 
   constructor(container: HTMLElement, initial: MapState, private handlers: TerraMapHandlers = {}) {
+    registerEeTiles();   // bounded Earth Engine tile loader (idempotent)
     this.state = initial;
     this.map = new maplibregl.Map({
       container,
@@ -336,7 +321,9 @@ export class TerraMap {
       this.applied.globalForest = undefined;
     }
 
-    if (this.changed('globalForest', `${s.layers.globalForest}|${!!s.aoi}`)) {
+    if (this.changed('basemaps', s.basemaps)) this.addBasemaps();
+
+    if (this.changed('globalForest', `${s.layers.globalForest}|${!!s.aoi}|${this.basemapsAdded}`) && m.getLayer('global-forest')) {
       m.setLayoutProperty('global-forest', 'visibility', s.layers.globalForest && !s.aoi ? 'visible' : 'none');
     }
     if (this.changed('hotspotsData', s.hotspots)) {
@@ -358,13 +345,14 @@ export class TerraMap {
 
     if (this.changed('catalog', s.catalog)) this.rebuildOverlays();
 
-    const imageryKey = `${s.layers.satellite}:${s.imagery}:${s.year}:${s.catalog?.aoi_id ?? ''}`;
+    const live = this.liveImagery();
+    const imageryKey = `${s.layers.satellite}:${s.imagery}:${s.year}:${s.catalog?.aoi_id ?? ''}:${s.aoi?.id ?? ''}:${live?.tileUrl ?? ''}:${this.basemapsAdded}`;
     if (this.changed('imagery', imageryKey)) this.showImagery();
 
     const ovKey = `${s.year}|${s.layers.forest}|${s.layers.ndvi}|${s.layers.forestOpacity}|${s.catalog?.aoi_id}`;
     if (this.changed('overlays', ovKey)) this.updateOverlays();
 
-    if (this.changed('labels', s.layers.labels)) m.setLayoutProperty('labels', 'visibility', s.layers.labels ? 'visible' : 'none');
+    if (this.changed('labels', `${s.layers.labels}|${this.basemapsAdded}`) && m.getLayer('labels')) m.setLayoutProperty('labels', 'visibility', s.layers.labels ? 'visible' : 'none');
 
     if (this.changed('events', s.events)) {
       (m.getSource('events') as GeoJSONSource).setData({
@@ -471,18 +459,46 @@ export class TerraMap {
     });
   }
 
-  private ensureImagery(year: number): string {
-    const id = `img-s2-${year}`;
+  /** Adds the backend's static base layers (globe mosaic, hi-res, reference forest, labels) once. */
+  private basemapsAdded = false;
+  private addBasemaps() {
+    const b = this.state.basemaps;
+    if (!b || this.basemapsAdded) return;
+    const m = this.map;
+    const src = (l: BaseLayer) => ({ type: 'raster' as const, tiles: l.tiles, tileSize: l.tile_size, maxzoom: l.max_zoom, attribution: l.attribution });
+    m.addSource('img-base', src(b.globe));
+    m.addSource('hires', src(b.hires));
+    m.addSource('global-forest', src(b.reference_forest));
+    m.addSource('labels', src(b.labels));
+    m.addLayer({ id: 'img-base', type: 'raster', source: 'img-base', paint: { 'raster-fade-duration': 300, 'raster-saturation': -0.05, 'raster-contrast': 0.05 } }, 'anchor-base');
+    m.addLayer({ id: 'img-hires', type: 'raster', source: 'hires', layout: { visibility: 'none' }, paint: { 'raster-fade-duration': 250 } }, 'anchor-base');
+    m.addLayer({
+      id: 'global-forest', type: 'raster', source: 'global-forest', maxzoom: 12, layout: { visibility: 'none' },
+      paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 0.35, 10, 0.2], 'raster-saturation': -0.25, 'raster-hue-rotate': 12, 'raster-opacity-transition': { duration: 500 } },
+    }, 'anchor-reference');
+    m.addLayer({ id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.85 } }, 'anchor-labels');
+    this.basemapsAdded = true;
+  }
+
+  /** The backend imagery decision, only if it is READY for exactly the open AOI and this map's year. */
+  private liveImagery(): ImageryDecision | null {
+    const { yearImagery: d, aoi, year } = this.state;
+    return d && d.status === 'READY' && d.tileUrl && aoi && d.aoi_id === aoi.id && d.year === year ? d : null;
+  }
+
+  /** Raster layer for this year: the READY analysis' own composite if present, else the live imagery decision. */
+  private ensureImagery(year: number): string | null {
     const spec = this.state.catalog?.imagery.find((i) => i.year === year);
-    const layerId = spec?.reference ? `${id}-ref` : id;
+    const live = spec ? null : this.liveImagery();
+    if (!spec && !live) return null;
+    const layerId = spec ? `img-s2-${year}${spec.reference ? '-ref' : ''}` : `img-s2-live-${live!.aoi_id}-${year}`;
     if (!this.map.getSource(layerId)) {
-      this.map.addSource(layerId, {
-        type: 'raster',
-        tiles: spec?.tiles ?? [EOX(year)],
-        tileSize: spec?.tile_size ?? 256,
-        maxzoom: spec?.max_zoom ?? 15,
-        attribution: spec?.attribution ?? `Sentinel-2 cloudless ${year} — s2maps.eu by EOX IT Services GmbH`,
-      });
+      // Earth Engine tiles go through the bounded loader (eeTiles.ts); `bounds` = the AOI, so MapLibre never
+      // requests tiles outside the study area (the live composite is clipped to it).
+      const bounds = this.state.aoi?.bbox;
+      this.map.addSource(layerId, spec
+        ? { type: 'raster', tiles: spec.tiles.map(eeTiles), tileSize: spec.tile_size, maxzoom: spec.max_zoom, attribution: spec.attribution, ...(bounds ? { bounds } : {}) }
+        : { type: 'raster', tiles: [eeTiles(live!.tileUrl!)], tileSize: 256, maxzoom: live!.max_zoom ?? 15, attribution: live!.attribution ?? '', ...(bounds ? { bounds } : {}) });
       this.map.addLayer({
         id: layerId, type: 'raster', source: layerId, layout: { visibility: 'none' },
         // Stand-in reference imagery is visibly desaturated so it never reads as the composite of that year.
@@ -492,37 +508,34 @@ export class TerraMap {
     return layerId;
   }
 
+  private hideImagery(prev: string | null) {
+    if (prev && this.map.getLayer(prev)) this.map.setLayoutProperty(prev, 'visibility', 'none');
+    this.imageryLayer = null;
+  }
+
   /** Cross-fade: the new layer goes on top and fades its tiles in; the old one is hidden afterwards. */
   private showImagery() {
     const s = this.state;
+    const m = this.map;
     const prev = this.imageryLayer;
-    this.map.setLayoutProperty('img-base', 'visibility', s.aoi ? 'none' : 'visible');
-    if (!s.aoi) {
-      if (prev) this.map.setLayoutProperty(prev, 'visibility', 'none');
-      this.imageryLayer = null;
-      if (s.imagery === 'hires') this.map.setLayoutProperty('img-hires', 'visibility', s.layers.satellite ? 'visible' : 'none');
-      return;
+    if (m.getLayer('img-base')) m.setLayoutProperty('img-base', 'visibility', s.aoi ? 'none' : 'visible');
+    if (m.getLayer('img-hires')) m.setLayoutProperty('img-hires', 'visibility', s.imagery === 'hires' && s.layers.satellite ? 'visible' : 'none');
+    // Live-imagery layers of other areas are removed (each is clipped to its own AOI).
+    for (const l of m.getStyle().layers) {
+      if (l.id.startsWith('img-s2-live-') && !l.id.startsWith(`img-s2-live-${s.aoi?.id ?? '-'}-`)) { m.removeLayer(l.id); m.removeSource(l.id); if (prev === l.id) this.imageryLayer = null; }
     }
-    if (!s.layers.satellite) {
-      if (prev) this.map.setLayoutProperty(prev, 'visibility', 'none');
-      this.imageryLayer = null;
-      return;
-    }
-    // No analysis layer and no EOX mosaic for this year (EOX starts 2016): show NO imagery rather than
-    // another year's — the map notice explains why.
-    if (s.imagery !== 'hires' && !s.catalog?.imagery.some((i) => i.year === s.year) && !hasEoxImagery(s.year)) {
-      if (prev) this.map.setLayoutProperty(prev, 'visibility', 'none');
-      this.imageryLayer = null;
-      return;
-    }
-    const next = s.imagery === 'hires' ? 'img-hires' : this.ensureImagery(s.year);
-    if (prev === next) return;
-    this.map.setLayoutProperty(next, 'visibility', 'visible');
-    this.map.moveLayer(next, 'anchor-imagery');
+    if (!s.aoi || !s.layers.satellite) return this.hideImagery(this.imageryLayer);
+    // No READY imagery for this exact year: draw NOTHING rather than another year's imagery — the map notice explains why.
+    const next = s.imagery === 'hires' ? (m.getLayer('img-hires') ? 'img-hires' : null) : this.ensureImagery(s.year);
+    if (!next) return this.hideImagery(this.imageryLayer);
+    if (this.imageryLayer === next) return;
+    const before = this.imageryLayer;
+    m.setLayoutProperty(next, 'visibility', 'visible');
+    if (next !== 'img-hires') m.moveLayer(next, 'anchor-imagery');
     this.imageryLayer = next;
-    if (prev) {
+    if (before && before !== 'img-hires') {
       window.setTimeout(() => {
-        if (!this.destroyed && this.imageryLayer !== prev && this.map.getLayer(prev)) this.map.setLayoutProperty(prev, 'visibility', 'none');
+        if (!this.destroyed && this.imageryLayer !== before && m.getLayer(before)) m.setLayoutProperty(before, 'visibility', 'none');
       }, 900);
     }
   }
@@ -535,7 +548,10 @@ export class TerraMap {
       if (m.getSource(id)) m.removeSource(id);
     }
     // Imagery sources are catalogue-specific (reference vs. real composites).
-    for (const l of m.getStyle().layers) if (l.id.startsWith('img-s2-')) { m.removeLayer(l.id); m.removeSource(l.id); }
+    for (const l of m.getStyle().layers) if (l.id.startsWith('img-s2-') && !l.id.startsWith('img-s2-live-')) { m.removeLayer(l.id); m.removeSource(l.id); }
+    // Live-imagery layers are kept (re-usable) but hidden: showImagery() re-shows exactly one layer. A visible
+    // live layer under the analysis composite would load every Earth Engine tile twice.
+    for (const l of m.getStyle().layers) if (l.id.startsWith('img-s2-live-')) m.setLayoutProperty(l.id, 'visibility', 'none');
     this.imageryLayer = null;
     this.applied.imagery = undefined;
     const cat = this.state.catalog;
@@ -544,7 +560,7 @@ export class TerraMap {
       const id = `ov-${ov.kind}`;
       const url = ov.by_year[String(this.state.year)];
       if (ov.source === 'image' && ov.coordinates && url) m.addSource(id, { type: 'image', url, coordinates: ov.coordinates });
-      else if (ov.source === 'raster-tiles' && ov.tiles_by_year?.[String(this.state.year)]) m.addSource(id, { type: 'raster', tiles: ov.tiles_by_year[String(this.state.year)], tileSize: 256 });
+      else if (ov.source === 'raster-tiles' && ov.tiles_by_year?.[String(this.state.year)]) m.addSource(id, { type: 'raster', tiles: ov.tiles_by_year[String(this.state.year)].map(eeTiles), tileSize: 256, ...(this.state.aoi ? { bounds: this.state.aoi.bbox } : {}) });
       else continue;
       m.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0, 'raster-opacity-transition': { duration: 350 }, 'raster-fade-duration': 0 } }, 'anchor-overlays');
       this.applied[`ovyear-${id}`] = `${id}:${this.state.year}`;
@@ -569,7 +585,7 @@ export class TerraMap {
         if (ov.source === 'image' && src && 'updateImage' in src && ov.by_year[String(year)]) {
           (src as ImageSource).updateImage({ url: ov.by_year[String(year)], coordinates: ov.coordinates });
         } else if (ov.source === 'raster-tiles' && ov.tiles_by_year?.[String(year)] && src && 'setTiles' in src) {
-          (src as maplibregl.RasterTileSource).setTiles(ov.tiles_by_year[String(year)]);
+          (src as maplibregl.RasterTileSource).setTiles(ov.tiles_by_year[String(year)].map(eeTiles));
         }
       }
     }
@@ -649,6 +665,8 @@ export class TerraMap {
     m.on('mouseout', () => this.handlers.onPointer?.(null));
     m.on('error', (e) => {
       const src = (e as unknown as { sourceId?: string }).sourceId ?? '';
+      // A tile Earth Engine throttled (429, after its one retry) is not a connection failure; eeTiles reports it.
+      if ((e as unknown as { error?: Error }).error?.name === THROTTLED) return;
       if (/^(img-|hires|labels)/.test(src)) {
         this.tileErrors++;
         if (this.tileErrors === 8) this.handlers.onTileError?.();

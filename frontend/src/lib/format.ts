@@ -1,4 +1,4 @@
-import type { ChangeType, LandCover, Severity } from '../data/contracts';
+import type { ChangeEvent, ChangeType, ConfidenceClass, LandCover, Severity } from '../data/contracts';
 
 const nf0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
@@ -23,3 +23,10 @@ export const severityLabel: Record<Severity, string> = { low: 'Low', moderate: '
 export const changeTypeLabel: Record<ChangeType, string> = {
   clearing: 'Forest clearing', fire: 'Burn scar', degradation: 'Degradation', unknown: 'Unclassified',
 };
+
+/** Display helper: count backend-classified events by evidence class (no scientific computation). */
+export function evidenceDistribution(events: ChangeEvent[]): Record<ConfidenceClass, number> {
+  const d = { high: 0, medium: 0, low: 0 };
+  for (const e of events) d[e.properties.confidence.class]++;
+  return d;
+}

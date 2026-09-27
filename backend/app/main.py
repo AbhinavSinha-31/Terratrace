@@ -33,6 +33,9 @@ async def lifespan(_: FastAPI):
     stale = purge_stale_results()   # results from another scientific-method version are never reused
     if stale:
         logging.getLogger("terratrace").info("Removed %d cached result(s) from an older method version", stale)
+    from .services.imagery import purge_stale as purge_stale_imagery
+
+    purge_stale_imagery()   # imagery availability is method-versioned too
     threading.Thread(target=ee_provider.status, name="ee-warmup", daemon=True).start()
     yield
 

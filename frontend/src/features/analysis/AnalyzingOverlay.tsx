@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { client, ApiError, newRid } from '../../data/client';
-import { analysisKey, useCurrentAnalysis, useSelectedAoi } from '../../data/queries';
+import { useQuery } from '@tanstack/react-query';
+import { client } from '../../data/client';
+import { useSelectedAoi } from '../../data/queries';
 import { useUi } from '../../state/store';
 import { Button, Panel, StateView } from '../../design';
 
@@ -68,73 +68,48 @@ function StageProgress({ title, subtitle, rid }: { title: string; subtitle: Reac
   );
 }
 
-/** Runs a pending custom-AOI analysis. Non-READY results open the area with its status panel. */
-export function CustomAnalysisRunner() {
-  const pending = useUi((s) => s.pending);
-  const qc = useQueryClient();
-  const [state, setState] = useState<{ nonce: number; rid: string; error: ApiError | null } | null>(null);
-
-  useEffect(() => {
-    if (!pending) return;
-    let alive = true;
-    const rid = newRid();
-    setState({ nonce: pending.nonce, rid, error: null });
-    client.analyze(pending.request, rid)
-      .then((result) => {
-        if (!alive) return;
-        const b = pending.request.baseline_period.year, c = pending.request.comparison_period.year;
-        qc.setQueryData(analysisKey(result.id, { start: b, end: c }), result);
-        useUi.getState().openAnalysis(result.id, { window: { start: b, end: c } });
-        useUi.getState().clearPending();
-      })
-      .catch((e: ApiError) => alive && setState({ nonce: pending.nonce, rid, error: e }));
-    return () => { alive = false; };
-  }, [pending, qc]);
-
-  if (!pending) return null;
-  const retry = () => useUi.getState().startAnalysis(pending.request);
-
-  return (
-    <Overlay>
-      {state?.error ? (
-        <StateView
-          kind={state.error.code === 'aoi_too_large' || state.error.code === 'aoi_too_small' ? 'error' : 'service-unavailable'}
-          title={state.error.code === 'aoi_too_large' || state.error.code === 'aoi_too_small' || state.error.code === 'invalid_request' ? 'Area cannot be analysed'
-            : state.error.code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'}
-          onRetry={retry}
-          action={<Button size="sm" variant="ghost" onClick={() => useUi.getState().clearPending()}>Close</Button>}
-        >
-          {/* ApiError messages are public product language (data/client.ts) */}
-          {state.error.message}
-        </StateView>
-      ) : (
-        <StageProgress
-          title="Running live analysis"
-          subtitle={<>{pending.request.name ?? 'Custom area'} · {pending.request.baseline_period.year} → {pending.request.comparison_period.year}</>}
-          rid={state?.rid ?? null}
-        />
-      )}
-    </Overlay>
-  );
-}
-
-/** Shown only while a featured area's analysis request is genuinely in flight (after a short delay). */
-export function EntryOverlay() {
-  const q = useCurrentAnalysis();
-  const aoi = useSelectedAoi();
-  const rid = useUi((s) => s.activeRid);
+/**
+ * Progress for the CURRENT analysis request of the InvestigationState (featured study or candidate AOI).
+ * It executes nothing — the analysis runner (data/analysisRunner.ts) does. A failed request for a
+ * not-yet-registered candidate AOI is shown here (there is no analysis view for it yet).
+ */
+export function AnalysisProgressOverlay() {
+  const status = useUi((s) => s.investigation.analysisStatus);
+  const rid = useUi((s) => s.investigation.analysisRequestId);
+  const study = useUi((s) => s.investigation.study);
+  const aoiName = useUi((s) => s.investigation.aoi?.name);
+  const error = useUi((s) => s.investigation.analysisError);
+  const years = useUi((s) => `${s.investigation.baselineYear} → ${s.investigation.comparisonYear}`);
+  const featured = useSelectedAoi();
   const [slow, setSlow] = useState(false);
-  const loading = q.isLoading;
+  const running = status === 'running';
   useEffect(() => {
-    if (!loading) { setSlow(false); return; }
+    if (!running) { setSlow(false); return; }
     const t = window.setTimeout(() => setSlow(true), 450);
     return () => window.clearTimeout(t);
-  }, [loading]);
-  // Custom areas opened from a link have no name until the response arrives — still show progress.
-  if (!loading || !slow) return null;
+  }, [running, rid]);
+
+  if (status === 'error' && !study && error) {
+    const code = error.code;
+    return (
+      <Overlay>
+        <StateView
+          kind={code === 'aoi_too_large' || code === 'aoi_too_small' ? 'error' : 'service-unavailable'}
+          title={code === 'aoi_too_large' || code === 'aoi_too_small' || code === 'invalid_request' ? 'Area cannot be analysed'
+            : code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'}
+          onRetry={() => useUi.getState().requestAnalysis()}
+          action={<Button size="sm" variant="ghost" onClick={() => useUi.getState().resetAnalysis()}>Close</Button>}
+        >
+          {/* ApiError messages are public product language (data/client.ts) */}
+          {error.message}
+        </StateView>
+      </Overlay>
+    );
+  }
+  if (!running || !slow) return null;
   return (
     <Overlay>
-      <StageProgress title="Running live analysis" subtitle={aoi?.name ?? 'Selected area'} rid={rid} />
+      <StageProgress title="Running live analysis" subtitle={<>{featured?.name ?? study?.name ?? aoiName ?? 'Selected area'} · {years}</>} rid={rid} />
     </Overlay>
   );
 }

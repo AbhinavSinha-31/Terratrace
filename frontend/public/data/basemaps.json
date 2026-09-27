@@ -1,0 +1,56 @@
+{
+ "schema_version": "1.0",
+ "note": "Base imagery and reference layers only. None of these layers is a TERRATRACE measurement.",
+ "globe": {
+  "kind": "basemap",
+  "year": 2025,
+  "tiles": [
+   "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg"
+  ],
+  "tile_size": 256,
+  "max_zoom": 15,
+  "label": "Sentinel-2 cloudless 2025 mosaic (EOX) — static basemap, not live imagery",
+  "attribution": "Sentinel-2 cloudless 2025 — s2maps.eu by EOX IT Services GmbH (contains modified Copernicus Sentinel data)",
+  "aoi_verified": false,
+  "is_analysis": false
+ },
+ "hires": {
+  "kind": "basemap",
+  "year": null,
+  "tiles": [
+   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+  ],
+  "tile_size": 256,
+  "max_zoom": 19,
+  "label": "Esri World Imagery (current, undated)",
+  "attribution": "High-resolution imagery © Esri, Maxar, Earthstar Geographics",
+  "aoi_verified": false,
+  "is_analysis": false
+ },
+ "labels": {
+  "kind": "basemap",
+  "year": null,
+  "tiles": [
+   "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+  ],
+  "tile_size": 256,
+  "max_zoom": 19,
+  "label": "Place labels",
+  "attribution": "Labels © Esri",
+  "aoi_verified": false,
+  "is_analysis": false
+ },
+ "reference_forest": {
+  "kind": "reference",
+  "year": 2000,
+  "tiles": [
+   "https://storage.googleapis.com/earthenginepartners-hansen/tiles/gfc_v1.4/tree_alpha/{z}/{x}/{y}.png"
+  ],
+  "tile_size": 256,
+  "max_zoom": 12,
+  "label": "Tree cover 2000 (Hansen et al.) — reference, not a TERRATRACE detection",
+  "attribution": "Tree cover 2000: Hansen/UMD/Google/USGS/NASA (CC BY 4.0)",
+  "aoi_verified": false,
+  "is_analysis": false
+ }
+}

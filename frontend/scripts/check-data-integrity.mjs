@@ -60,7 +60,7 @@ function validityErrors(env) {
 
 /** Time Machine: selectable from 1984, no 2016/2018 floor, requested vs analysable window explicit and consistent. */
 async function checkTimeline(page, name, env) {
-  const s = await page.evaluate(() => { const u = window.__ttUi.getState(); return { years: u.years, win: u.window }; });
+  const s = await page.evaluate(() => { const u = window.__ttUi.getState(); return { years: u.years, win: { start: u.investigation.baselineYear, end: u.investigation.comparisonYear } }; });
   check(s.years[0] === 1984 && s.years.includes(1990) && s.years.at(-1) === 2025, `${name} timeline selectable from 1984`, `${s.years[0]}…${s.years.at(-1)}`);
   check(s.years.filter((y) => y < 2016).length === 7, `${name} no 2016/2018 minimum (7 historical Landsat years present)`);
   const tick = await page.locator('button:text-is("1984")').count();
@@ -68,7 +68,7 @@ async function checkTimeline(page, name, env) {
   const panel = await page.locator('[data-testid="analysis-unavailable"]').textContent().catch(() => null);
   if (panel) {
     const req = panel.match(/Requested window\s*(\d{4}) → (\d{4})/);
-    check(!!req && Number(req[1]) === s.win.start && Number(req[2]) === s.win.end, `${name} requested window in panel == Time Machine window`, req ? `${req[1]}→${req[2]} vs ${s.win.start}→${s.win.end}` : 'not shown');
+    if (/Requested window/.test(panel)) check(!!req && Number(req[1]) === s.win.start && Number(req[2]) === s.win.end, `${name} requested window in panel == Time Machine window`, req ? `${req[1]}→${req[2]} vs ${s.win.start}→${s.win.end}` : 'not shown');
     if (env?.quality) check(/Analysable window/.test(panel), `${name} analysable window explicitly labelled`);
   }
   if (env?.window) check(env.window.baseline_year === s.win.start && env.window.comparison_year === s.win.end, `${name} backend request == UI window`);
@@ -87,6 +87,9 @@ async function run(label, { offline }) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // Every raster tile the page requests (to prove no frontend-built imagery URLs).
+  const tileRequests = [];
+  page.on('request', (r) => { const u = r.url(); if (/^https?:/.test(u) && /\/tiles?\/|wmts|MapServer/.test(u)) tileRequests.push(u); });
   await page.goto(`${BASE}#/`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__tt?.loaded && document.querySelectorAll('.tt-marker--featured').length >= 4, null, { timeout: 45000 });
   await page.waitForSelector('button.tt-card[aria-label^="Open featured investigation"]', { timeout: 20000 });
@@ -121,83 +124,216 @@ async function run(label, { offline }) {
   check(sub.every((t) => !/events|control/i.test(t)), `${label}: marker labels carry no event counts`);
   check(!FORBIDDEN.test(await page.locator('body').innerText()), `${label}: no demonstration/simulated wording on landing`);
 
-  // ---- every featured analysis
+  // ---- request counter: every analysis request (GET /api/analysis/<id>?... or POST /api/analyze)
+  const ANALYSIS_URL = /\/api\/analysis\/[^/?]+\?|\/api\/analyze\b/;
+  const analysisRequests = [];
+  page.on('request', (r) => { if (ANALYSIS_URL.test(r.url())) analysisRequests.push(r.url()); });
+  // Imagery decisions requested from the backend imagery endpoint.
+  const imageryRequests = [];
+  page.on('request', (r) => { if (/\/api\/imagery\?/.test(r.url())) imageryRequests.push(r.url()); });
+  const imgState = () => page.evaluate(() => {
+    const el = document.querySelector('[data-testid="real-imagery-label"]');
+    const m = window.__tt.map;
+    const liveLayers = m.getStyle().layers.filter((l) => l.id.startsWith('img-s2-live-')).map((l) => ({ id: l.id, visible: m.getLayoutProperty(l.id, 'visibility') !== 'none' }));
+    const v = window.__ttUi.getState().investigation;
+    return { imagery: el?.getAttribute('data-imagery') ?? null, code: el?.getAttribute('data-code') ?? null, text: (el?.textContent ?? '').replace(/\s+/g, ' '), errText: document.querySelector('[data-testid="imagery-error"]')?.textContent ?? null, status: v.imageryStatus, analysis: v.analysisStatus, hasResult: !!v.analysisResult, liveLayers };
+  });
+  const waitImagery = () => page.waitForFunction(() => { const el = document.querySelector('[data-testid="real-imagery-label"]'); return el && el.getAttribute('data-imagery') !== 'LOADING'; }, null, { timeout: 150000 }).catch(() => {});
+  /** Expected imagery outcome in this backend state. Imagery is independent of analysis. */
+  const checkImagery = async (name, id) => {
+    await waitImagery();
+    const s = await imgState();
+    if (offline) {
+      check(s.imagery === 'ERROR' && s.status === 'unknown' && /^Imagery unavailable/.test(s.text) && /^Imagery service could not be reached\./.test(s.errText ?? '') && s.liveLayers.length === 0, `${name} offline: 'Imagery service could not be reached', no imagery drawn`, JSON.stringify(s));
+    } else if (live) {
+      const layer = s.liveLayers.find((l) => l.id.startsWith(`img-s2-live-${id}-`));
+      check(s.imagery === 'READY' && ['available', 'insufficient'].includes(s.status) && !!layer?.visible, `${name} LIVE satellite imagery READY and drawn on the map`, JSON.stringify(s));
+      check(/Live satellite imagery · no analysis/.test(s.text) && /scenes · Earth Engine/.test(s.text), `${name} imagery labelled live imagery · no analysis`, s.text.replace(/\s+/g, ' '));
+    } else {
+      check(s.imagery === 'UNAVAILABLE' && s.code === 'EARTH_ENGINE_AUTH_ERROR' && s.status === 'unavailable' && s.liveLayers.length === 0, `${name} Earth Engine unavailable: imagery UNAVAILABLE (classified), nothing drawn`, JSON.stringify(s));
+    }
+    return s;
+  };
+  const settle = () => page.waitForFunction(() => ['complete', 'error', 'idle'].includes(window.__ttUi.getState().investigation.analysisStatus), null, { timeout: ANALYSIS_TIMEOUT }).catch(() => {});
+  const inv = () => page.evaluate(() => {
+    const v = window.__ttUi.getState().investigation;
+    return {
+      status: v.analysisStatus, has: !!v.analysisResult, rid: v.analysisRequestId, err: v.analysisError,
+      study: v.study?.id ?? null, b: v.baselineYear, c: v.comparisonYear, bundle: !!v.analysisResult?.bundle,
+      resYears: v.analysisResult ? [v.analysisResult.window.baseline_year, v.analysisResult.window.comparison_year] : null,
+    };
+  });
+
+  // ---- every featured study
   for (const id of FEATURED) {
-    const resp = offline ? null : page.waitForResponse((r) => r.url().includes(`/api/analysis/${id}`), { timeout: ANALYSIS_TIMEOUT }).catch(() => null);
+    // A. Opening a study populates the investigation, sends ZERO analysis requests, shows Ready to analyze.
+    const n0 = analysisRequests.length;
     await page.evaluate((h) => { window.location.hash = h; }, `#/analysis/${id}`);
-    const env = resp ? await (await resp)?.json().catch(() => null) : null;
-    if (live) {
-      if (!env) { check(false, `${label}: ${id} analysis response`, 'no response'); continue; }
-      if (env.analysisStatus === 'READY') {
-        const errs = validityErrors(env);
-        check(errs.length === 0, `${label}: ${id} READY result passes every validity rule`, errs.slice(0, 3).join('; '));
-        await page.locator('[role="tablist"]').first().waitFor({ timeout: 20000 }).catch(() => {});
-        check((await page.locator('[data-testid="analysis-unavailable"]').count()) === 0, `${label}: ${id} READY renders measured results`);
-        await checkTimeline(page, `${label}: ${id}`, env);
-        continue;
-      }
-      check(NON_READY.includes(env.analysisStatus) && !!env.reason && !env.summary && !env.events, `${label}: ${id} non-READY (${env.analysisStatus}) carries a reason and no metrics`, env.reasonCode ?? '');
-      if (env.analysisStatus === 'INVALID_ANALYSIS') check((env.quality?.issues?.length ?? 0) > 0, `${label}: ${id} INVALID_ANALYSIS lists the failed checks`);
+    await page.waitForTimeout(1500);
+    const opened = await inv();
+    check(analysisRequests.length === n0, `${label}: ${id} opening the study sends 0 analysis requests`, `${analysisRequests.length - n0} sent`);
+    check(opened.study === id && opened.status === 'idle' && !opened.has, `${label}: ${id} opens as Ready to analyze (no result)`, JSON.stringify({ s: opened.status, has: opened.has }));
+    check((await page.locator('[data-testid="ready-to-analyze"]').count()) === 1, `${label}: ${id} 'Ready to analyze' panel shown`);
+    const readyName = ((await page.locator('[data-testid="ready-to-analyze"]').innerText().catch(() => '')).split('\n')[1] ?? '').trim();
+    check(readyName.length > 0 && readyName !== 'Selected area', `${label}: ${id} study metadata renders (name)`, readyName);
+    // Imagery != analysis: imagery is requested for the study; the analysis stays idle whatever imagery does.
+    const img = await checkImagery(`${label}: ${id}`, id);
+    check(offline || imageryRequests.some((u) => u.includes(`aoi=${id}&`)), `${label}: ${id} imagery requested from the backend imagery endpoint`);
+    const after = await inv();
+    check(after.status === 'idle' && !after.has && analysisRequests.length === n0, `${label}: ${id} imagery loading leaves the analysis idle (0 analysis requests)`, JSON.stringify({ s: after.status, n: analysisRequests.length - n0 }));
+    if (live) continue;   // never trigger a real Earth Engine computation from the test suite
+
+    // C. Pressing Run sends exactly ONE analysis request.
+    const n1 = analysisRequests.length;
+    await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
+    await settle();
+    await page.waitForTimeout(500);
+    check(analysisRequests.length - n1 === 1, `${label}: ${id} Run sends exactly 1 analysis request`, `${analysisRequests.length - n1} sent`);
+    const ran = await inv();
+    // E. Backend unavailable -> truthful state. Offline -> NO AnalysisResult is created at all.
+    if (offline) {
+      check(ran.status === 'error' && !ran.has && ran.err?.code === 'service_unavailable', `${label}: ${id} offline: no synthetic AnalysisResult (error state only)`, JSON.stringify({ s: ran.status, has: ran.has, code: ran.err?.code }));
+    } else {
+      check(ran.status === 'complete' && ran.has && !ran.bundle && JSON.stringify(ran.resYears) === '[2018,2025]', `${label}: ${id} backend UNAVAILABLE envelope for the requested years, no measurements`, JSON.stringify(ran));
     }
     const panel = page.locator('[data-testid="analysis-unavailable"]');
     await panel.waitFor({ timeout: 30000 });
     const text = await panel.innerText();
-    const reasonOk = live ? !!env?.reason && text.includes(env.reason.slice(0, 40)) : /Live Earth observation is temporarily unavailable/.test(text);
+    check(/Live Earth observation is temporarily unavailable/.test(text), `${label}: ${id} truthful unavailable message`);
     const bodyText = await page.locator('body').innerText();
     check(!DEV_TEXT.test(bodyText), `${label}: ${id} no developer text in the UI`, (bodyText.match(DEV_TEXT) ?? [''])[0]);
-    check(reasonOk && /km²/.test(text), `${label}: ${id} shows ${env?.analysisStatus ?? 'UNAVAILABLE'} with reason + AOI area`);
-    if (env?.analysisStatus === 'INVALID_ANALYSIS') check((await page.locator('[data-testid="validity-issues"]').count()) === 1, `${label}: ${id} failed checks are shown in the UI`);
-    const strip = await page.locator('[data-testid="no-metrics"]').count();
-    check(strip >= 1, `${label}: ${id} metrics strip carries no metrics`);
-    const real = await page.locator('[data-testid="real-imagery-label"]').innerText().catch(() => '');
-    check(/Real imagery · no analysis/i.test(real), `${label}: ${id} imagery labelled REAL IMAGERY · no analysis`);
-    const body = await page.locator('body').innerText();
-    check(!METRIC_TEXT.test(body) && !FORBIDDEN.test(body), `${label}: ${id} no metric text rendered`);
-    const layers = await page.evaluate(() => ['tt-events', 'tt-events-fill', 'events-fill', 'change-fill'].filter((l) => window.__tt.map.getLayer(l)).length);
+    check((await page.locator('[data-testid="no-metrics"]').count()) >= 1, `${label}: ${id} metrics strip carries no metrics`);
+    const img2 = await imgState();
+    check(img2.status === img.status && img2.imagery === img.imagery, `${label}: ${id} a failed analysis does not change the imagery state`, `${img.status} -> ${img2.status}`);
+    check(!METRIC_TEXT.test(bodyText) && !FORBIDDEN.test(bodyText), `${label}: ${id} no fabricated measurements rendered`);
     const evs = await page.evaluate(() => window.__tt.state.events.length);
-    check(evs === 0, `${label}: ${id} no change events on the map`, `${evs} events, ${layers} layers`);
-    await checkTimeline(page, `${label}: ${id}`, env);
+    check(evs === 0, `${label}: ${id} no change events on the map`, `${evs} events`);
+    await checkTimeline(page, `${label}: ${id}`, null);
   }
 
-  // ---- one canonical window: request 1984 → 2025 and verify it reaches the backend and every display
-  if (!live) {
-    const id = FEATURED[3];
-    const resp = offline ? null : page.waitForResponse((r) => r.url().includes(`/api/analysis/${id}`) && r.url().includes('baseline=1984'), { timeout: 30000 }).catch(() => null);
-    await page.evaluate((i) => { window.location.hash = `#/analysis/${i}`; window.__ttUi.getState().setWindow(1984, 2025); }, id);
-    if (resp) check(!!(await resp), `${label}: selecting 1984 sends baseline=1984 to the backend`);
-    await page.waitForFunction(() => /1984 → 2025/.test(document.querySelector('[data-testid="analysis-unavailable"]')?.textContent ?? ''), null, { timeout: 20000 })
-      .then(() => check(true, `${label}: requested window 1984 → 2025 shown in the panel`), () => check(false, `${label}: requested window 1984 → 2025 shown in the panel`));
-    check(/[#&?]from=1984&to=2025/.test(await page.evaluate(() => window.location.hash)), `${label}: requested window in the URL`);
+  // ---- B/C/D: changing years clears the result without requests; only Run analyses; stale responses rejected
+  {
+    const id = FEATURED[1];   // not the loop's last study: opening it must reset to idle
+    await page.evaluate((i) => { window.location.hash = `#/analysis/${i}`; }, id);
+    await page.waitForTimeout(1000);
+    check((await inv()).status === 'idle', `${label}: switching study resets the analysis to idle`);
+    if (!live) {
+      await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
+      await settle();
+    }
+    const before = await inv();
+    const n0 = analysisRequests.length;
+    await page.evaluate(() => window.__ttUi.getState().setWindow(1990, 2025));
+    await page.waitForTimeout(1500);
+    const after = await inv();
+    check(analysisRequests.length === n0, `${label}: changing the years sends 0 analysis requests`);
+    check(after.status === 'idle' && !after.has && after.rid === null && after.b === 1990, `${label}: changing the years clears the previous result`, JSON.stringify(after));
+    check((await page.locator('[data-testid="ready-to-analyze"]').count()) === 1, `${label}: 'Ready to analyze' shown for the new years`);
+    check((await page.locator('[data-testid="analysis-unavailable"]').count()) === 0, `${label}: no stale status panel from the previous years`);
+    check(/[#&?]from=1990&to=2025/.test(await page.evaluate(() => window.location.hash)), `${label}: URL mirrors the investigation years`);
+    // D. A late response for an OLD request cannot overwrite the current state (test fixture object; never shown).
+    const stale = await page.evaluate((oldRid) => {
+      const s = window.__ttUi.getState();
+      const ok = s.acceptAnalysis({ requestId: oldRid ?? 'old-request-id', studyId: s.investigation.study?.id ?? null, baselineYear: 2018, comparisonYear: 2025 }, { id: 'x', status: 'READY' });
+      return { ok, has: !!window.__ttUi.getState().investigation.analysisResult };
+    }, before.rid);
+    check(stale.ok === false && !stale.has, `${label}: a stale response for an old request is discarded`);
+    const runBtn = page.getByRole('button', { name: /Run live analysis 1990 → 2025/ }).first();
+    check((await runBtn.count()) === 1, `${label}: explicit 'Run live analysis' action offered`);
+    if (!live) {
+      const n1 = analysisRequests.length;
+      await runBtn.click();
+      await settle();
+      await page.waitForTimeout(500);
+      check(analysisRequests.length - n1 === 1, `${label}: Run sends exactly 1 analysis request for the new years`, `${analysisRequests.length - n1} sent`);
+      const done = await inv();
+      check(offline ? !done.has : JSON.stringify(done.resYears) === '[1990,2025]', `${label}: the new state belongs to the current years`, JSON.stringify(done.resYears));
+    }
     await page.evaluate(() => window.__ttUi.getState().setWindow(2018, 2025));
+  }
+
+  // ---- G: URL hydration (full reload) mirrors InvestigationState and does NOT execute analysis
+  {
+    const reqs = [];
+    const onReq = (r) => { if (ANALYSIS_URL.test(r.url())) reqs.push(r.url()); };
+    page.on('request', onReq);
+    await page.goto(`${BASE}#/analysis/${FEATURED[1]}?from=2019&to=2024&year=2021`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__ttUi && !!window.__ttUi.getState().investigation.study, null, { timeout: 45000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    const h = await inv();
+    const y = await page.evaluate(() => window.__ttUi.getState().investigation.imageryYear);
+    check(h.study === FEATURED[1] && h.b === 2019 && h.c === 2024 && y === 2021, `${label}: URL hydration mirrors study + years into InvestigationState`, JSON.stringify({ study: h.study, b: h.b, c: h.c, y }));
+    check(reqs.length === 0 && h.status === 'idle' && !h.has, `${label}: URL hydration executes 0 analysis requests`, `${reqs.length} sent, status ${h.status}`);
+    page.off('request', onReq);
+  }
+
+  // ---- H: the timeline consumes /api/imagery/availability; imagery-only is never shown as analysis.
+  // Route-mocked availability/imagery responses are TEST FIXTURES (exercise the UI contract; never shown to users).
+  if (!offline) {
+    const AOI = FEATURED[2];
+    const years = [1984, 1990, 1995, 2000, 2005, 2010, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
+    const fixture = {
+      aoi_id: AOI, method_version: 'fixture', provider: 'Google Earth Engine', computed_at: '2026-09-27T00:00:00Z',
+      thresholds: { min_pixel_clear_obs: 3, min_pixel_dw_obs: 3, min_year_coverage: 0.8 },
+      years: years.map((y) => ({
+        year: y, era: y < 2016 ? 'historical' : 'modern', source: 'fixture', composite: 'fixture', scenes: {},
+        status: y === 1995 ? 'UNAVAILABLE' : y === 2018 ? 'INSUFFICIENT' : 'AVAILABLE', sceneCount: y === 1995 ? 0 : 40,
+        coverage: y === 1995 ? null : y === 2018 ? 0.42 : 0.93,
+        reason: y === 1995 ? 'No Landsat Collection 2 scenes over this area for 1994–1996.' : y === 2018 ? 'Insufficient clear observations: only 42% of the area.' : null,
+      })),
+    };
+    const decision = (y) => (y === 2020
+      ? { aoi_id: AOI, year: y, status: 'READY', code: null, message: null, source: 'Earth Engine', is_analysis: false, imageryStatus: 'AVAILABLE', tileUrl: `/api/imagery/tiles/${AOI}/2020/{z}/{x}/{y}`, sceneCount: 40, label: 'Live Sentinel-2 imagery 2020', attribution: 'fixture', max_zoom: 15 }
+      : { aoi_id: AOI, year: y, status: 'UNAVAILABLE', code: 'NO_LANDSAT_IMAGERY', message: 'No Landsat observations were found for the requested region and period.', source: 'Earth Engine', is_analysis: false, imageryStatus: 'UNAVAILABLE', tileUrl: null });
+    await page.route(`**/api/imagery/availability?aoi=${AOI}`, (r) => r.fulfill({ json: fixture }));
+    await page.route(`**/api/imagery?aoi=${AOI}&year=*`, (r) => r.fulfill({ json: decision(Number(new URL(r.request().url()).searchParams.get('year'))) }));
+    await page.route(`**/api/imagery/tiles/${AOI}/**`, (r) => r.fulfill({ status: 404, body: '' }));
+    const nA = analysisRequests.length;
+    await page.goto(`${BASE}#/analysis/${AOI}?year=2020`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__ttUi?.getState().investigation.study && window.__tt?.loaded, null, { timeout: 45000 }).catch(() => {});
+    await page.waitForFunction(() => document.querySelector('button[data-imagery-status="UNAVAILABLE"]'), null, { timeout: 30000 }).catch(() => {});
+    const ticks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button[data-imagery-status]')].map((b) => [b.textContent, [b.getAttribute('data-imagery-status'), b.hasAttribute('data-unavailable')]])));
+    check(JSON.stringify(ticks['’95']) === '["UNAVAILABLE",true]', `${label}: timeline marks an UNAVAILABLE year from the availability endpoint`, JSON.stringify(ticks['’95']));
+    check(JSON.stringify(ticks['’18']) === '["INSUFFICIENT",true]', `${label}: timeline marks an INSUFFICIENT year`, JSON.stringify(ticks['’18']));
+    check(JSON.stringify(ticks['’20']) === '["AVAILABLE",false]', `${label}: timeline shows an AVAILABLE year as selectable`, JSON.stringify(ticks['’20']));
+    // READY imagery is drawn as imagery only — never an analysis.
+    await waitImagery();
+    const s = await imgState();
+    check(s.imagery === 'READY' && s.liveLayers.some((l) => l.id === `img-s2-live-${AOI}-2020` && l.visible), `${label}: READY imagery decision drawn as a raster layer from the backend tile template`, JSON.stringify(s.liveLayers));
+    check(s.analysis === 'idle' && !s.hasResult && /no analysis/.test(s.text), `${label}: imagery READY while analysis stays idle — imagery-only never appears as analysis`, JSON.stringify({ a: s.analysis, t: s.text }));
+    const body = await page.locator('body').innerText();
+    check(!METRIC_TEXT.test(body) && (await page.evaluate(() => window.__tt.state.events.length)) === 0, `${label}: imagery-only view renders no measurements or events`);
+    // A year without usable imagery draws NOTHING (no substitution with another year) and says so.
+    await page.evaluate(() => window.__ttUi.getState().setYear(1995));
+    await waitImagery();
+    const u = await imgState();
+    check(u.imagery === 'UNAVAILABLE' && u.status === 'unavailable' && !u.liveLayers.some((l) => l.visible) && /imagery unavailable/i.test(u.text), `${label}: no-usable-imagery year draws nothing and says so (no year substitution)`, JSON.stringify(u));
+    check(analysisRequests.length === nA, `${label}: timeline/imagery interaction sends 0 analysis requests`);
+    // Regression (2026-09-27): a backend without the imagery route answered 404 and the UI said "could not be reached".
+    await page.route(`**/api/imagery?aoi=${AOI}&year=2000`, (r) => r.fulfill({ status: 404, json: { detail: 'Not Found' } }));
+    await page.evaluate(() => window.__ttUi.getState().setYear(2000));
+    await page.waitForFunction(() => document.querySelector('[data-testid="imagery-error"]'), null, { timeout: 20000 }).catch(() => {});
+    const e404 = await imgState();
+    check(e404.errText === 'Imagery request failed: endpoint not found. Nothing is substituted.', `${label}: HTTP 404 is reported as 'endpoint not found', not as unreachable`, e404.errText ?? JSON.stringify(e404));
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  }
+
+  // ---- imagery URLs: every satellite tile comes from a backend-provided template
+  {
+    const cfg = offline ? await page.evaluate(async () => (await fetch('data/basemaps.json')).json()) : await page.evaluate(async () => (await fetch('/api/imagery/basemaps')).json());
+    const hosts = new Set(Object.values(cfg).filter((v) => v?.tiles).map((v) => new URL(v.tiles[0]).host));
+    const eoxYears = [...new Set(tileRequests.map((u) => u.match(/s2cloudless-(\d{4})_3857/)?.[1]).filter(Boolean))];
+    const foreign = tileRequests.filter((u) => { const h = new URL(u).host; return !/^(localhost|127\.)/.test(h) && !hosts.has(h) && !/earthengine\.googleapis\.com/.test(h); });
+    check(foreign.length === 0, `${label}: every imagery tile host comes from the backend imagery config`, foreign.slice(0, 2).join(' | '));
+    check(eoxYears.every((y) => Number(y) === cfg.globe.year), `${label}: no per-year EOX mosaic requested (only the backend's static globe basemap)`, eoxYears.join(','));
+    check(tileRequests.length > 0, `${label}: map tiles were requested`, `${tileRequests.length}`);
   }
 
   // ---- no developer configuration UI exists anywhere
   check((await page.getByRole('button', { name: /Configure Live Data/i }).count()) === 0, `${label}: no developer configuration UI`);
 
-  // ---- exploring the timeline never starts an analysis; only an explicit request does
-  {
-    const id = FEATURED[3];
-    await page.evaluate((i) => { window.location.hash = `#/analysis/${i}`; }, id);
-    await page.waitForTimeout(1500);
-    let sent = 0;
-    const onReq = (r) => { if (r.url().includes('/api/analysis/') && r.url().includes('baseline=1990')) sent++; };
-    page.on('request', onReq);
-    await page.evaluate(() => window.__ttUi.getState().setPendingWindow(1990, 2025));
-    await page.waitForTimeout(1500);
-    check(sent === 0, `${label}: selecting 1990 → 2025 in the Time Machine sends no analysis request`);
-    const run = page.getByRole('button', { name: /Run live analysis 1990 → 2025/ });
-    check((await run.count()) === 1, `${label}: explicit 'Run live analysis' action offered`);
-    if (!live && !offline) {
-      await run.click();
-      await page.waitForTimeout(2000);
-      check(sent >= 1, `${label}: the analysis runs only after the explicit request`, `${sent} request(s)`);
-    }
-    page.off('request', onReq);
-    await page.evaluate(() => window.__ttUi.getState().setWindow(2018, 2025));
-  }
-
-  // ---- custom AOI (backend only)
-  if (!offline) {
+  // ---- custom AOI (backend only; never against live Earth Engine)
+  if (!offline && !live) {
     await page.evaluate(() => {
       const s = window.__ttUi.getState();
       s.goExplore('explore');
@@ -205,10 +341,13 @@ async function run(label, { offline }) {
     });
     const btn = page.getByRole('button', { name: live ? /Analyze forest change/ : /Open area · imagery only/ });
     await btn.waitFor({ timeout: 10000 });
+    check(analysisRequests.filter((u) => u.includes('/api/analyze')).length === 0, `${label}: selecting a custom area sends 0 analysis requests`);
     const resp = page.waitForResponse((r) => r.url().includes('/api/analyze'), { timeout: ANALYSIS_TIMEOUT }).catch(() => null);
+    const nA = analysisRequests.length;
     await btn.click();
     const env = await (await resp)?.json().catch(() => null);
-    await page.waitForFunction(() => window.__ttUi.getState().aoiId?.startsWith('aoi-'), null, { timeout: 90000 });
+    await page.waitForFunction(() => window.__ttUi.getState().investigation.study?.id?.startsWith('aoi-'), null, { timeout: 90000 });
+    check(analysisRequests.length - nA === 1, `${label}: explicit Analyze sends exactly 1 analysis request`, `${analysisRequests.length - nA} sent`);
     if (live && env?.analysisStatus === 'READY') {
       const errs = validityErrors(env);
       check(errs.length === 0, `${label}: custom AOI READY result passes every validity rule`, errs.slice(0, 3).join('; '));

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ChangeEvent, ChangeType, Severity, StudyArea } from '../../data/contracts';
-import { useCurrentBundle, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { useBasemaps, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
+import { selectCandidate, useUi } from '../../state/store';
 import { EXPLORE_REGIONS } from '../../lib/regions';
 import { squareAround } from '../../lib/geo';
 import { TerraMap, type GlobalHotspot } from './TerraMap';
@@ -25,8 +25,11 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
 
   const areas = useStudyAreas().data?.items ?? NO_AREAS;
   const aoi = useSelectedAoi();
-  const aoiId = useUi((s) => s.aoiId);
+  const aoiId = useUi((s) => s.investigation.study?.id ?? null);
   const bundle = useCurrentBundle();
+  const basemaps = useBasemaps().data ?? null;
+  // Real imagery for THIS map's year (compare mode's 'before' map asks for its own year).
+  const yearImagery = useImageryDecision(aoiId, year).data ?? null;
   const readyResults = useReadyResults();
   const imagery = useUi((s) => s.imagery);
   const layers = useUi((s) => s.layers);
@@ -35,7 +38,7 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   const selectedId = useUi((s) => s.selectedEventId);
   const hoveredId = useUi((s) => s.hoveredEventId);
   const hoveredAoiId = useUi((s) => s.hoveredAoiId);
-  const selection = useUi((s) => s.selection);
+  const selection = useUi(selectCandidate);
   const drawTool = useUi((s) => s.drawTool);
   const reducedMotion = useUi((s) => s.reducedMotion);
   const draft = useMapRegistry((s) => s.draft);
@@ -52,7 +55,7 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   );
 
   const state = {
-    areas, regions: EXPLORE_REGIONS, aoi, catalog, events, hotspots, year, imagery, layers, severities, types,
+    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, events, hotspots, year, imagery, layers, severities, types,
     selectedId, hoveredId, hoveredAoiId,
     draft: drawTool ? draft : aoiId ? null : selection?.geometry ?? null,
     drawing: !!drawTool, spin: role === 'primary', reducedMotion,

@@ -3,13 +3,14 @@ import { MapStage } from '../features/map/MapStage';
 import { Header } from '../features/shell/Header';
 import { Landing } from '../features/explore/Landing';
 import { AnalysisView } from '../features/analysis/AnalysisView';
-import { CustomAnalysisRunner, EntryOverlay } from '../features/analysis/AnalyzingOverlay';
+import { AnalysisProgressOverlay } from '../features/analysis/AnalyzingOverlay';
 import { AboutModal } from '../features/shell/AboutModal';
 import { BootSplash } from '../features/shell/BootSplash';
-import { Presenter } from '../features/presentation/Presenter';
 import { useUi } from '../state/store';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
+import { useAnalysisRunner } from '../data/analysisRunner';
+import { useImagerySync } from '../data/imagerySync';
 import { useBreakpoint, CHROME } from '../lib/useLayout';
 
 function useShortcuts() {
@@ -26,7 +27,7 @@ function useShortcuts() {
         return;
       }
       if (e.key === '/') { e.preventDefault(); if (ui.view !== 'explore') ui.goExplore('explore'); window.setTimeout(() => window.dispatchEvent(new CustomEvent('tt:focus-search')), 80); return; }
-      if (!ui.aoiId || ui.view === 'explore') return;
+      if (!ui.investigation.study || ui.view === 'explore') return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); ui.stepYear(-1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); ui.stepYear(1); }
       else if (e.key === ' ' && !t.closest('button')) { e.preventDefault(); ui.setPlaying(!ui.playing); }
@@ -40,13 +41,15 @@ function useShortcuts() {
 export function App() {
   useShortcuts();
   useUrlSync();
+  useAnalysisRunner();   // the only executor of analysis requests
+  useImagerySync();      // imagery status (independent of analysis)
   const view = useUi((s) => s.view);
-  const aoiId = useUi((s) => s.aoiId);
+  const hasStudy = useUi((s) => !!s.investigation.study);
   const drawerOpen = useUi((s) => s.drawerOpen);
   const bp = useBreakpoint();
 
   // Keep map attribution clear of floating panels.
-  const inAnalysis = view !== 'explore' && !!aoiId;
+  const inAnalysis = view !== 'explore' && hasStudy;
   const drawerW = bp === 'wide' ? CHROME.drawer.wide : bp === 'desktop' ? CHROME.drawer.desktop : CHROME.drawer.tablet;
   const attrib = bp === 'mobile'
     ? { bottom: inAnalysis ? '37vh' : '57vh', right: '8px' }
@@ -60,10 +63,8 @@ export function App() {
         <MapErrorBoundary><MapStage /></MapErrorBoundary>
         <div className="tt-vignette pointer-events-none absolute inset-0 z-[5]" />
         {view === 'explore' ? <Landing /> : <AnalysisView />}
-        <EntryOverlay />
-        <CustomAnalysisRunner />
+        <AnalysisProgressOverlay />
       </main>
-      <Presenter />
       <AboutModal />
       <BootSplash />
     </div>

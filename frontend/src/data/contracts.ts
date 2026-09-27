@@ -358,8 +358,6 @@ export interface AnalysisResult {
   aoi: StudyArea;
   window: { baseline_year: number; comparison_year: number };
   source: AnalysisSources;
-  /** True when the backend is unreachable: the UI runs as a non-scientific UI PREVIEW. */
-  uiPreview: boolean;
   error: PublicError | null;
   diagnostics: Record<string, unknown> | null;
   quality: AnalysisQuality | null;
@@ -448,4 +446,72 @@ export interface AnalyzeRequest {
   baseline_period: { year: number };
   comparison_period: { year: number };
   name?: string;
+}
+
+// ----------------------------------------------------------------------------- imagery (backend-owned; never an analysis)
+export type ImageryYearStatus = 'AVAILABLE' | 'INSUFFICIENT' | 'UNAVAILABLE';
+
+/** Per-year imagery availability MEASURED by the backend (GET /api/imagery/availability). */
+export interface ImageryYearAvailability {
+  year: number;
+  era: 'historical' | 'modern';
+  status: ImageryYearStatus;
+  source: string;
+  composite: string;
+  sceneCount: number;
+  scenes: Record<string, number>;
+  /** Share of the AOI with enough clear observations (0–1), null when not measured. */
+  coverage: number | null;
+  reason: string | null;
+}
+
+export interface ImageryAvailability {
+  aoi_id: string;
+  method_version: string;
+  provider: string;
+  thresholds: { min_pixel_clear_obs: number; min_pixel_dw_obs: number; min_year_coverage: number };
+  computed_at: string;
+  years: ImageryYearAvailability[];
+}
+
+/** Real satellite imagery for one AOI and year (GET /api/imagery). READY only with scenes and a tile URL. */
+export interface ImageryDecision {
+  aoi_id: string;
+  year: number;
+  status: 'READY' | 'UNAVAILABLE';
+  code: string | null;
+  message: string | null;
+  source: 'Earth Engine';
+  is_analysis: false;
+  tileUrl: string | null;
+  imageryStatus: ImageryYearStatus | null;
+  dataset?: string;
+  dateRange?: { start: string; end: string };
+  sceneCount?: number;
+  visualization?: { bands: string[]; min: number; max: number; gamma: number; units: string };
+  cloudMask?: string;
+  label?: string;
+  attribution?: string;
+  max_zoom?: number;
+}
+
+/** A static base layer from the backend (GET /api/imagery/basemaps). Never live, never an analysis. */
+export interface BaseLayer {
+  kind: 'basemap' | 'reference';
+  year: number | null;
+  tiles: string[];
+  tile_size: number;
+  max_zoom: number;
+  label: string;
+  attribution: string;
+  aoi_verified: boolean;
+  is_analysis: false;
+}
+
+export interface Basemaps {
+  schema_version: string;
+  globe: BaseLayer;
+  hires: BaseLayer;
+  labels: BaseLayer;
+  reference_forest: BaseLayer;
 }

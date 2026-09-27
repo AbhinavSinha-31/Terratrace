@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useCurrentAnalysis, useFilteredEvents } from '../../data/queries';
-import { useUi } from '../../state/store';
+import { useAnalysisWindow, useUi } from '../../state/store';
 import { SEVERITIES, type ChangeType } from '../../data/contracts';
 import { Menu, Skeleton, StateView } from '../../design';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
@@ -13,8 +13,8 @@ const RANK = { low: 0, moderate: 1, high: 2, critical: 3 };
 export function EventList() {
   const q = useCurrentAnalysis();
   const filtered = useFilteredEvents();
-  const year = useUi((s) => s.year);
-  const win = useUi((s) => s.window);
+  const year = useUi((s) => s.investigation.imageryYear);
+  const win = useAnalysisWindow();
   const sev = useUi((s) => s.severityFilter);
   const types = useUi((s) => s.typeFilter);
   const ui = useUi.getState;

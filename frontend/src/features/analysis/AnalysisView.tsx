@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Hourglass, Layers, LayoutDashboard, ListTree
 import { useCurrentAnalysis, useSelectedAoi, useSelectedEvent, useStudyAreas } from '../../data/queries';
 import { DEFAULT_YEARS } from '../../lib/time';
 import { fmtKm2 } from '../../lib/format';
-import { AnalysisUnavailable, statusCopy } from './Unavailable';
+import { AnalysisErrorPanel, AnalysisUnavailable, statusCopy } from './Unavailable';
 import { useUi } from '../../state/store';
 import { useBreakpoint, CHROME } from '../../lib/useLayout';
 import { Button, IconButton, Panel, StateView, Tooltip } from '../../design';
@@ -23,6 +23,20 @@ function DrawerBody() {
   const aoi = useSelectedAoi();
   const q = useCurrentAnalysis();
   const count = q.data?.bundle?.events.features.length;
+  // Years changed / study just opened: no result exists; nothing runs until the user asks.
+  if (q.status === 'idle') return <ReadyToAnalyze name={aoi?.name} />;
+  // The request produced no result (e.g. backend unavailable): truthful error, no synthetic result.
+  if (q.status === 'error' && q.error) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="shrink-0 border-b border-line px-5 pb-3 pt-4">
+          <div className="t-label text-ink-3">No analysis result</div>
+          <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? 'Selected area'}</div>
+        </div>
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5"><AnalysisErrorPanel error={q.error} onRetry={() => q.refetch()} /></div>
+      </div>
+    );
+  }
   // No READY analysis → no tabs, no metrics: an explicit status panel instead.
   if (q.data && !q.data.bundle) {
     const { title } = statusCopy(q.data);
@@ -82,7 +96,7 @@ function NoAreaState() {
         </p>
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           {featured.map((a) => (
-            <button key={a.id} onClick={() => useUi.getState().openAnalysis(a.id, { view: tm ? 'timemachine' : 'analysis' })}
+            <button key={a.id} onClick={() => useUi.getState().openAnalysis(a.id, { view: tm ? 'timemachine' : 'analysis', name: a.name, geometry: a.geometry })}
               className="tt-press flex items-center justify-between rounded-md px-3.5 py-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:-translate-y-px hover:bg-hover">
               <span><span className="block text-[12.5px] font-medium text-ink">{a.short_name}</span><span className="block text-[10.5px] text-ink-3">{a.country} · {fmtKm2(a.area_km2)} km²</span></span>
               <ChevronRight size={15} className="text-ink-3" />
@@ -95,8 +109,28 @@ function NoAreaState() {
   );
 }
 
+/** Idle investigation: explicit request required (no result is shown for other years). */
+function ReadyToAnalyze({ name }: { name?: string }) {
+  const b = useUi((s) => s.investigation.baselineYear);
+  const c = useUi((s) => s.investigation.comparisonYear);
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="ready-to-analyze">
+      <div className="shrink-0 border-b border-line px-5 pb-3 pt-4">
+        <div className="t-label text-ink-3">Ready to analyze</div>
+        <div className="mt-1 truncate text-[15px] font-semibold text-ink">{name ?? 'Selected area'}</div>
+      </div>
+      <div className="space-y-4 p-5">
+        <p className="text-[12.5px] leading-relaxed text-ink-2">
+          Baseline <b className="t-data text-ink">{b}</b> → comparison <b className="t-data text-ink">{c}</b>. No analysis has been run for these years yet.
+        </p>
+        <Button variant="brand" onClick={() => useUi.getState().requestAnalysis()}>Run live analysis {b} → {c}</Button>
+      </div>
+    </div>
+  );
+}
+
 export function AnalysisView() {
-  const aoiId = useUi((s) => s.aoiId);
+  const hasStudy = useUi((s) => !!s.investigation.study);
   const q = useCurrentAnalysis();
   const drawerOpen = useUi((s) => s.drawerOpen);
   const layersOpen = useUi((s) => s.layersOpen);
@@ -112,29 +146,16 @@ export function AnalysisView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!aoiId) return <NoAreaState />;
+  if (!hasStudy) return <NoAreaState />;
 
-  if (q.isError) {
-    const err = q.error as Error & { code?: string; status?: number };
-    if (err.status === 404) {
-      // Unknown/expired analysis id (e.g. a stale link or a custom AOI from another server).
-      return (
-        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-6">
-          <Panel className="pointer-events-auto w-[min(460px,100%)]">
-            <StateView kind="empty" title="Area not found"
-              action={<Button size="sm" variant="secondary" onClick={() => ui().goExplore('explore')}>Back to Explore</Button>}>
-              This area is not available. The link may be incorrect or expired — select or draw the area again.
-            </StateView>
-          </Panel>
-        </div>
-      );
-    }
+  // Unknown/expired area (e.g. a stale link) is the only error that replaces the layout.
+  if (q.isError && q.error?.code === 'not_found') {
     return (
       <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center p-6">
         <Panel className="pointer-events-auto w-[min(460px,100%)]">
-          <StateView kind="service-unavailable" title={err.code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'} onRetry={() => q.refetch()}>
-            {/* ApiError messages are public product language (data/client.ts) */}
-            {err.message}
+          <StateView kind="empty" title="Area not found"
+            action={<Button size="sm" variant="secondary" onClick={() => ui().goExplore('explore')}>Back to Explore</Button>}>
+            This area is not available. The link may be incorrect or expired — select or draw the area again.
           </StateView>
         </Panel>
       </div>
