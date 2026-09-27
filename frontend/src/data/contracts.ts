@@ -1,0 +1,451 @@
+/**
+ * TERRATRACE data contracts (schema 2.0).
+ *
+ * The boundary between the UI and the scientific pipeline. Scientific results
+ * come from exactly one source — the backend's Google Earth Engine pipeline —
+ * wrapped in an AnalysisEnvelope. Metrics exist ONLY when analysisStatus is
+ * READY; there is no simulated or demonstration data anywhere. Mirrored in
+ * backend/app/schemas.py.
+ */
+import type { Polygon, MultiPolygon } from 'geojson';
+
+/** READY = computed AND scientifically valid. INVALID_ANALYSIS = computed but failed validity checks. */
+export type AnalysisStatus = 'READY' | 'UNAVAILABLE' | 'INVALID_ANALYSIS' | 'PROCESSING' | 'ERROR';
+export type Severity = 'low' | 'moderate' | 'high' | 'critical';
+export type ChangeType = 'clearing' | 'fire' | 'degradation' | 'unknown';
+export type ConfidenceClass = 'high' | 'medium' | 'low';
+export type ImageryStatus = 'good' | 'cloud_limited' | 'insufficient';
+export type ChangeLevel = 'low' | 'moderate' | 'high';
+export type LandCover =
+  | 'water' | 'trees' | 'grass' | 'flooded_vegetation' | 'crops'
+  | 'shrub_and_scrub' | 'built' | 'bare' | 'snow_and_ice';
+export type AoiGeometry = Polygon | MultiPolygon;
+
+export const SEVERITIES: Severity[] = ['low', 'moderate', 'high', 'critical'];
+
+export interface Provenance {
+  dataMode: 'LIVE';
+  pipeline_version: string;
+  generated_at: string;
+  sources: { name: string; role: string; real: boolean }[];
+  note?: string;
+}
+
+
+/** An area of interest: geometry + descriptive metadata only. Never carries results. */
+export interface StudyArea {
+  id: string;
+  code?: string;
+  name: string;
+  short_name: string;
+  region: string;
+  country: string | null;
+  biome: string | null;
+  description: string;
+  tags: string[];
+  bbox: [number, number, number, number];
+  center: [number, number];
+  geometry: AoiGeometry;
+  /** Geodesic area of the geometry (measured, not a result). */
+  area_ha: number;
+  area_km2: number;
+  thumbnail_url: string;
+  featured?: boolean;
+  custom?: boolean;
+}
+
+export interface StudyAreaIndex {
+  schema_version: string;
+  items: StudyArea[];
+}
+
+/**
+ * One composite year. Every statistic is null unless it was measured: years that fail the
+ * observation-quality rule carry no forest/loss/gain values (null is never 0).
+ */
+export interface YearStat {
+  year: number;
+  era: 'historical' | 'modern';
+  /** The analysable year this one is compared with (same era); a gap means years were skipped. */
+  previous_year: number | null;
+  passes_quality: boolean;
+  quality_reason: string | null;
+  scenes: Record<string, number | null>;
+  valid_ha: number | null;
+  /** % of the AOI with enough clear observations (not a scene count). */
+  coverage_pct: number | null;
+  forest_ha: number | null;
+  /** % of the OBSERVED area. */
+  forest_pct: number | null;
+  loss_ha: number | null;
+  gain_ha: number | null;
+  /** Area observed in both this year and previous_year — where loss/gain were measured. */
+  compared_ha: number | null;
+  net_change_ha: number | null;
+  event_count: number;
+  loss_by_severity: Record<Severity, number>;
+  loss_by_type: Partial<Record<ChangeType, number>>;
+  mean_ndvi: number | null;
+  mean_nbr: number | null;
+  clear_obs_median: number | null;
+  dw_obs_median: number | null;
+  imagery_status: ImageryStatus;
+  /** Sensor provenance */
+  sensor: string;
+  source: 'landsat' | 'sentinel-2';
+  resolution_m: number;
+  forest_method: 'landsat_ndvi_proxy' | 'dynamic_world';
+  dw_available: boolean;
+  composite_window: string;
+}
+
+export interface AoiKpis {
+  baseline_year: number;
+  latest_year: number;
+  forest_baseline_ha: number | null;
+  forest_latest_ha: number | null;
+  /** Area observed in both baseline and comparison years (net change is measured there). */
+  compared_ha?: number | null;
+  net_change_ha: number | null;
+  net_change_pct: number | null;
+  total_loss_ha: number | null;
+  total_gain_ha: number | null;
+  event_count: number;
+  high_severity_count: number;
+  mean_confidence: number | null;
+}
+
+export interface ChangePeriod {
+  from_year: number;
+  to_year: number;
+  loss_ha: number;
+  gain_ha: number;
+  net_change_ha: number;
+  rate_pct_per_year: number;
+  level: ChangeLevel;
+  sensors: string;
+  label: string;
+}
+
+export interface History {
+  first_year: number;
+  last_year?: number;
+  forest_first_ha: number | null;
+  net_change_ha: number | null;
+  net_change_pct: number | null;
+  note: string;
+}
+
+/** Observation quality — measured metadata, shown for every status (never forest/change metrics). */
+export interface QualityYear {
+  year: number;
+  era: 'historical' | 'modern';
+  sensor: string;
+  scenes: Record<string, number | null>;
+  clear_obs_median: number | null;
+  dw_obs_median: number | null;
+  coverage_pct: number | null;
+  passes: boolean;
+  reason: string | null;
+}
+
+export interface QualityIssue {
+  rule: string;
+  years: number[];
+  message: string;
+}
+
+export interface AnalysisQuality {
+  method_version: string;
+  status: AnalysisStatus;
+  requested_window: [number, number];
+  analyzable_window: [number, number] | null;
+  years: QualityYear[];
+  issues: QualityIssue[];
+  thresholds: Record<string, number>;
+}
+
+export interface MethodInfo {
+  forest_rule: string;
+  change_rule: string;
+  history_rule?: string;
+  mmu_ha: number;
+  thresholds: { d_ndvi: number; d_nbr: number; d_tree_prob: number; min_clear_obs: number } & Record<string, number>;
+  version?: string;
+  eras?: string;
+  cloud_masking?: string;
+  no_data?: string;
+  coverage_rule?: string;
+  transition_rule?: string;
+  validity_rules?: string;
+  severity: string;
+  confidence: string;
+}
+
+export interface AoiSummary {
+  schema_version: string;
+  aoi: StudyArea;
+  kpis: AoiKpis;
+  history?: History;
+  years: YearStat[];
+  periods?: ChangePeriod[];
+  method: MethodInfo;
+  provenance: Provenance;
+  analysis_window?: { baseline_year: number; comparison_year: number; event_window?: [number, number]; requested?: [number, number] };
+  /** Composite years with no input imagery over the AOI — omitted, never estimated. */
+  unavailable_years?: { year: number; sources: Record<string, number | null>; reason: string }[];
+  quality?: AnalysisQuality;
+  /** Input scene counts per composite year and source (Earth Engine metadata). */
+  source_counts?: Record<string, Record<string, number>>;
+}
+
+export interface IndexChange {
+  before: number;
+  after: number;
+  change: number;
+}
+
+export interface EvidenceItem {
+  key: 'ndvi' | 'nbr' | 'tree_prob' | 'persistence' | 'clear_obs' | 'reference' | string;
+  label: string;
+  value: number | boolean | null;
+  threshold: number | null;
+  unit: string;
+  weight: number;
+  score: number;
+  /** null = not yet verifiable (e.g. latest year, reference not released) */
+  passed: boolean | null;
+}
+
+export interface SignalPoint {
+  year: number;
+  ndvi: number;
+  nbr: number;
+  tree_prob: number;
+}
+
+export interface ChangeEventProps {
+  id: string;
+  aoi_id: string;
+  title: string;
+  sector: string;
+  change_type: ChangeType;
+  change_label: string;
+  year_from: number;
+  year_to: number;
+  composite_window: string;
+  area_ha: number;
+  area_km2: number;
+  conversion_fraction: number;
+  centroid: [number, number];
+  bbox: [number, number, number, number];
+  indices: { ndvi: IndexChange; nbr: IndexChange; tree_prob: IndexChange };
+  land_cover: { before: LandCover; after: LandCover };
+  severity: { class: Severity; score: number; basis: string };
+  /** Evidence score (weighted, not a calibrated probability) and its components. */
+  confidence: { score: number; class: ConfidenceClass; evidence: EvidenceItem[] };
+  /** Share of converted pixels still non-forest one composite later; null for the latest year. */
+  persistence: number | null;
+  clear_obs_min: number;
+  reference_overlap: number | null;
+  timeseries: SignalPoint[];
+}
+
+export interface ChangeEvent {
+  type: 'Feature';
+  id: string;
+  geometry: AoiGeometry;
+  properties: ChangeEventProps;
+}
+
+export interface EventCollection {
+  type: 'FeatureCollection';
+  schema_version: string;
+  aoi_id: string;
+  features: ChangeEvent[];
+}
+
+export interface ImageryLayer {
+  year: number;
+  label: string;
+  tiles: string[];
+  tile_size: number;
+  max_zoom: number;
+  attribution: string;
+  real: boolean;
+  /** True when this is stand-in reference imagery, not the composite of `year`. */
+  reference?: boolean;
+  sensor?: string;
+  note?: string;
+}
+
+export interface GradientLegend {
+  type: 'gradient';
+  title: string;
+  stops: [number, string][];
+  min_label: string;
+  max_label: string;
+  note?: string;
+}
+
+export interface OverlayLayer {
+  kind: 'forest' | 'ndvi';
+  label: string;
+  /** 'image' = one georeferenced image per year; 'raster-tiles' = XYZ tiles per year */
+  source: 'image' | 'raster-tiles';
+  coordinates?: [[number, number], [number, number], [number, number], [number, number]];
+  by_year: Record<string, string>;
+  tiles_by_year?: Record<string, string[]>;
+  legend: GradientLegend;
+}
+
+export interface LayerCatalog {
+  aoi_id: string;
+  years: number[];
+  imagery: ImageryLayer[];
+  overlays: OverlayLayer[];
+  severity_colors: Record<Severity, string>;
+}
+
+/** The measured results of one READY Earth Engine analysis. */
+export interface AnalysisBundle {
+  id: string;
+  summary: AoiSummary;
+  events: EventCollection;
+  layers: LayerCatalog;
+}
+
+export interface AnalysisSources {
+  landsat: boolean;
+  sentinel2: boolean;
+  dynamicWorld: boolean;
+  hansen: boolean;
+}
+
+/** Structured public error (backend app/errors.py). The UI shows only user_message. */
+export interface PublicError {
+  code: string;
+  user_message: string;
+  retryable: boolean;
+}
+
+/** Backend response for any analysis request. summary/events/layers only when READY. */
+export interface AnalysisEnvelope {
+  analysis_id: string;
+  dataMode: 'LIVE';
+  analysisStatus: AnalysisStatus;
+  reason: string | null;
+  reasonCode: string | null;
+  aoi: StudyArea;
+  window: { baseline_year: number; comparison_year: number };
+  source: AnalysisSources;
+  /** Public error for every non-READY status (product language only). */
+  error?: PublicError | null;
+  /** Developer diagnostics — present only when the backend runs with DEV_DIAGNOSTICS=true. */
+  diagnostics?: Record<string, unknown>;
+  quality?: AnalysisQuality | null;
+  summary?: AoiSummary;
+  events?: EventCollection;
+  layers?: LayerCatalog;
+}
+
+/** What the UI holds for an open area. `bundle` is non-null only when status === 'READY'. */
+export interface AnalysisResult {
+  id: string;
+  status: AnalysisStatus;
+  reason: string | null;
+  reasonCode: string | null;
+  aoi: StudyArea;
+  window: { baseline_year: number; comparison_year: number };
+  source: AnalysisSources;
+  /** True when the backend is unreachable: the UI runs as a non-scientific UI PREVIEW. */
+  uiPreview: boolean;
+  error: PublicError | null;
+  diagnostics: Record<string, unknown> | null;
+  quality: AnalysisQuality | null;
+  bundle: AnalysisBundle | null;
+}
+
+/** The only information the explanation module may use. */
+export interface ExplanationFacts {
+  /** The AI refuses to interpret anything that is not a READY live analysis. */
+  data_mode: 'LIVE';
+  analysis_status: 'READY';
+  event_id: string;
+  study_area: string;
+  region: string;
+  biome: string;
+  sector: string;
+  change_type: ChangeType;
+  change_label: string;
+  period: { from_year: number; to_year: number; composite_window: string };
+  area: { hectares: number; square_km: number };
+  share_of_forest_converted: number;
+  ndvi: IndexChange;
+  nbr: IndexChange;
+  tree_probability: IndexChange;
+  land_cover: { before: LandCover; after: LandCover };
+  severity: { class: Severity; score: number; basis: string };
+  confidence: { class: ConfidenceClass; score: number; checks_passed: number; checks_evaluated: number; checks_pending: number };
+  evidence: { check: string; value: number | boolean | null; threshold: number | null; passed: boolean | null }[];
+  persistence_next_year: number | null;
+  min_clear_observations: number;
+  reference_overlap_hansen: number | null;
+}
+
+export interface Explanation {
+  text: string;
+  source: 'llm' | 'template' | 'none';
+  model?: string | null;
+  fact_check?: { passed: boolean; unmatched: string[] } | null;
+  facts_used: number;
+  generated_at: string;
+  cached?: boolean;
+  notice?: string | null;
+}
+
+export type ProviderState = 'ready' | 'unconfigured' | 'error' | 'offline';
+
+export interface SystemHealth {
+  /** false when the backend is unreachable: UI PREVIEW only, no analysis possible. */
+  backend: boolean;
+  status: 'operational' | 'degraded';
+  version: string;
+  engine: string;
+  dataMode: 'LIVE';
+  /** Earth Engine analysis provider. */
+  analysis: { status: ProviderState; detail?: string | null };
+  explainer: { status: ProviderState; detail?: string | null };
+  explainer_model?: string | null;
+  geocoder: { status: ProviderState; detail?: string | null };
+  limits: { max_aoi_km2: number; min_aoi_km2: number; interactive_max_km2?: number };
+}
+
+export interface SearchResult {
+  name: string;
+  detail?: string | null;
+  kind: 'featured' | 'place' | 'forest' | 'coordinates';
+  center: [number, number];
+  bbox?: [number, number, number, number] | null;
+  study_area_id?: string | null;
+  source: string;
+}
+
+export interface AoiPreview {
+  valid: boolean;
+  message?: string | null;
+  code?: string | null;
+  area_km2?: number | null;
+  area_ha?: number | null;
+  centroid?: [number, number] | null;
+  bbox?: [number, number, number, number] | null;
+  forest_cover_pct?: number | null;
+  forest_source?: string | null;
+}
+
+export interface AnalyzeRequest {
+  geometry: AoiGeometry;
+  baseline_period: { year: number };
+  comparison_period: { year: number };
+  name?: string;
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05080b" />
+    <meta name="description" content="TERRATRACE — explainable satellite forest-change intelligence" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>TERRATRACE — Earth Observation Intelligence</title>
+    <!-- Critical style: never show a white page, even if the app bundle fails to load. -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #06080a; color: #edf1f3; }
+      #tt-boot-error { display: none; position: fixed; inset: 0; place-items: center; font: 13px/1.6 system-ui, sans-serif; padding: 24px; }
+      #tt-boot-error div { max-width: 560px; padding: 22px 24px; border-radius: 10px; background: #0b0f12; box-shadow: 0 0 0 1px rgba(229, 88, 79, .45); }
+      #tt-boot-error b { display: block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 8px; }
+      #tt-boot-error pre { white-space: pre-wrap; word-break: break-word; color: #ff8a80; font: 12px/1.5 ui-monospace, monospace; margin: 10px 0; }
+      #tt-boot-error button { font: inherit; color: #03201d; background: #45d0c4; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+    </style>
+    <script>
+      // Startup watchdog: if the application fails to mount (e.g. a module fails to load),
+      // show the first error instead of a blank screen.
+      (function () {
+        // Error details are shown ONLY in development builds (Vite replaces %DEV% at build time).
+        var DEV = '%DEV%' === 'true';
+        var first = null;
+        function record(msg) { if (!first) first = String(msg); }
+        window.addEventListener('error', function (e) { record((e.error && e.error.stack) || e.message || (e.target && e.target.src ? 'Failed to load ' + e.target.src : 'Unknown error')); }, true);
+        window.addEventListener('unhandledrejection', function (e) { record((e.reason && (e.reason.stack || e.reason.message)) || e.reason); });
+        window.addEventListener('vite:preloadError', function (e) { record('Failed to load module: ' + (e.payload && e.payload.message)); });
+        function check() {
+          var root = document.getElementById('root');
+          if (root && root.childElementCount > 0) return;
+          var box = document.getElementById('tt-boot-error');
+          if (!box) return;
+          var pre = box.querySelector('pre');
+          if (DEV) pre.textContent = first || 'The application did not start (see the browser console).';
+          else pre.parentNode.removeChild(pre);
+          box.style.display = 'grid';
+        }
+        window.addEventListener('load', function () { setTimeout(check, 6000); });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="tt-boot-error" role="alert">
+      <div>
+        <b>TERRATRACE could not load</b>
+        Please reload the page. If the problem persists, try again later.
+        <pre></pre>
+        <button onclick="location.reload()">Reload</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

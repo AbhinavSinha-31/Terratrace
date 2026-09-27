@@ -1,0 +1,56 @@
+# --- dependencies & builds
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+**/.venv/
+venv/
+
+# --- runtime caches (analysis results, tiles, explanations)
+backend/.cache/
+**/.cache/
+*.log
+
+# --- tooling & OS noise
+.vite/
+test-results/
+playwright-report/
+coverage/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# --- secrets & credentials (never commit)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+kaggle.json
+**/kaggle.json
+access_token
+*.pem
+*.key
+*service-account*.json
+*-ee-key*.json
+**/credentials.json
+**/*credentials*.json
+application_default_credentials.json
+*.p12
+.kaggle/
+.config/earthengine/
+*.token
+
+# --- ML data & model artefacts (datasets are downloaded locally, never committed)
+ml/data/
+ml/models/*.pt
+ml/models/*.pth
+ml/models/*.onnx
+ml/models/*.ckpt
+ml/models/*.safetensors
+ml/models/*.pkl
+ml/models/*.joblib
+ml/outputs/
