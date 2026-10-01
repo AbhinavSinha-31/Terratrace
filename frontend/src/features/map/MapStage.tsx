@@ -5,7 +5,7 @@ import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
 import { imageryErrorMessage } from '../../data/imagerySync';
 import { useEeTiles } from './eeTiles';
 import { useBasemaps, useCandidateAoi, useCurrentAnalysis, useCurrentBundle, useImageryDecision, useSelectedAoi } from '../../data/queries';
-import { CHROME, analysisPadding, landingInset, landingZoom, useBreakpoint } from '../../lib/useLayout';
+import { CHROME, LANDING_MIN_ZOOM, analysisPadding, landingInset, landingZoom, useBreakpoint } from '../../lib/useLayout';
 import { fmtCoord } from '../../lib/format';
 import { IconButton, Tooltip } from '../../design';
 import { MapCanvas } from './MapCanvas';
@@ -65,6 +65,13 @@ export function MapStage() {
     served.current = camera.nonce;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primary, camera?.nonce, aoi?.id, analysis]);
+
+  // The landing globe may need to be smaller than the normal minimum zoom to fit short viewports (e.g. 1280×720).
+  // The lower floor applies only on the intro landing; Explore and analysis keep the normal minimum.
+  // Declared before the fly-home effect below, so its target zoom is not clamped by the old floor.
+  useEffect(() => {
+    primary?.setMinZoom(phase === 'intro' && !aoi ? LANDING_MIN_ZOOM : 1);
+  }, [primary, phase, aoi]);
 
   // Landing: keep the globe composed around the hero column / panels.
   useEffect(() => {

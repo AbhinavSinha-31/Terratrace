@@ -19,6 +19,22 @@ const LC: Record<LandCover, string> = {
 };
 export const landCoverLabel = (lc: LandCover) => LC[lc] ?? lc;
 
+// Short card labels for full biome names; the full name stays available as a tooltip.
+const BIOME_SHORT: Record<string, string> = {
+  'tropical moist broadleaf forest': 'Moist broadleaf',
+  'tropical dry deciduous (sal) forest': 'Dry deciduous',
+  'tropical moist deciduous forest': 'Moist deciduous',
+  'tropical wet evergreen forest': 'Wet evergreen',
+};
+/** Unmapped biomes fall back to the text before any qualifier, without a leading "Tropical". */
+export const shortBiome = (biome: string | null | undefined): string => {
+  if (!biome) return '—';
+  const known = BIOME_SHORT[biome.trim().toLowerCase()];
+  if (known) return known;
+  const base = biome.split(/[—–(]/)[0].replace(/\bforests?\b/i, '').replace(/^tropical\s+/i, '').trim();
+  return base ? base[0].toUpperCase() + base.slice(1) : biome;
+};
+
 export const severityLabel: Record<Severity, string> = { low: 'Low', moderate: 'Moderate', high: 'High', critical: 'Critical' };
 export const changeTypeLabel: Record<ChangeType, string> = {
   clearing: 'Forest clearing', fire: 'Burn scar', degradation: 'Degradation', unknown: 'Unclassified',

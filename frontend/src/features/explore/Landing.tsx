@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, Shi
 import { useHealth, useReadyResults, useStudyAreas, useStudyCard } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
-import { fmtKm2 } from '../../lib/format';
+import { fmtHa, fmtKm2, shortBiome } from '../../lib/format';
 import { useBreakpoint } from '../../lib/useLayout';
 import { DEFAULT_ANALYSIS_WINDOW, ERAS } from '../../lib/time';
 import { Badge, Button, IconButton, Skeleton, StateView, TerratraceMark, Tooltip } from '../../design';
@@ -29,7 +29,7 @@ function Hero() {
         <br /> are changing —
         <br /><span className="tt-hero-accent">and the evidence<br />behind it.</span>
       </h1>
-      <p className="mt-[clamp(14px,2.4vh,24px)] max-w-[500px] text-[clamp(13.5px,1.65vh,15.5px)] leading-[1.6] text-ink-2">
+      <p className="mt-[clamp(14px,2.4vh,24px)] max-w-[500px] text-[clamp(13.5px,1.65vh,15.5px)] leading-[1.6] text-ink-2 lg:[@media(max-height:760px)]:hidden">
         TERRATRACE uses decades of satellite data, advanced analysis and explainable AI to detect, quantify and investigate forest-cover change anywhere on Earth.
       </p>
       <div className="mt-[clamp(16px,2.8vh,30px)] flex flex-wrap gap-3">
@@ -37,7 +37,7 @@ function Hero() {
           Explore Earth
         </Button>
       </div>
-      <div className="mt-[clamp(20px,3.2vh,36px)] grid max-w-[560px] grid-cols-3 gap-4 [@media(max-height:820px)]:hidden">
+      <div className="mt-[clamp(20px,3.2vh,36px)] grid max-w-[560px] grid-cols-3 gap-4 [@media(max-height:960px)]:hidden">
         {[
           { icon: Database, t: 'Decades of data', d: 'Landsat + Sentinel-2' },
           { icon: Layers3, t: 'Scientific analysis', d: 'NDVI • NBR • Land cover' },
@@ -61,12 +61,18 @@ function OverviewPanel() {
   const areas = useStudyAreas();
   const ready = useReadyResults();
   const { data: health } = useHealth();
-  // Detected change is summed ONLY over completed live analyses — never estimated.
-  // Missing (null) losses are skipped, never counted as 0; no measured loss at all -> null.
-  const losses = ready.map((r) => r.bundle?.summary.kpis.total_loss_ha).filter((v): v is number => typeof v === 'number');
-  const totalLoss = losses.length ? losses.reduce((a, v) => a + v, 0) : null;
-  const events = ready.reduce((a, r) => a + (r.bundle?.events.features.length ?? 0), 0);
-  const n = areas.data?.items.length ?? 0;
+  const items = areas.data?.items ?? [];
+  // Control sites (stable forest, tagged in the featured data) measure the false-alarm rate: their detections are
+  // reported separately and never added to the detected-change total.
+  const isControl = (id: string) => !!items.find((a) => a.id === id)?.tags.some((t) => /control site/i.test(t));
+  const counted = ready.filter((r) => !isControl(r.id));
+  const controls = ready.filter((r) => isControl(r.id));
+  // "Detected change" = area of the detected change events (the polygons drawn on the map) of completed live
+  // analyses — not total_loss_ha, which sums gross year-to-year forest-mask transitions (including reversals).
+  const eventsOf = (rs: typeof ready) => rs.flatMap((r) => r.bundle?.events.features ?? []);
+  const areaOf = (rs: typeof ready) => eventsOf(rs).reduce((a, f) => a + f.properties.area_ha, 0);
+  const events = eventsOf(counted).length;
+  const n = items.length;
   const eeReady = health?.analysis.status === 'ready';
   return (
     <section className="tt-panel pointer-events-auto px-5 py-4" aria-labelledby="gfo" data-map-occluder>
@@ -88,22 +94,37 @@ function OverviewPanel() {
       <div className="my-3.5 h-px bg-line" />
       <div data-testid="overview-detected-change">
         <div className="text-[12px] text-ink-3">Detected change · TERRATRACE</div>
-        {ready.length > 0 ? (
-          <div className="mt-1 flex items-end justify-between gap-3">
-            <div className="t-data text-[26px] font-medium leading-none text-[#ff8a6b]">
-              {totalLoss === null ? '—' : <>−<AnimatedNumber value={totalLoss} format={(v) => Math.round(v).toLocaleString('en-US')} /> <span className="text-[16px] text-ink-2">ha</span></>}
+        {counted.length > 0 ? (
+          <>
+            <div className="mt-1 flex items-end justify-between gap-3">
+              <div className="t-data text-[26px] font-medium leading-none text-[#ff8a6b]">
+                <AnimatedNumber value={areaOf(counted)} format={(v) => fmtHa(v)} /> <span className="text-[16px] text-ink-2">ha</span>
+              </div>
+              <div className="text-right">
+                <div className="t-data text-[15px] text-ink">{events}</div>
+                <div className="text-[10.5px] text-ink-3">events · {counted.length} live {counted.length === 1 ? 'analysis' : 'analyses'}</div>
+              </div>
             </div>
-            <div className="text-right">
-              <div className="t-data text-[15px] text-ink">{events}</div>
-              <div className="text-[10.5px] text-ink-3">events · {ready.length} live {ready.length === 1 ? 'analysis' : 'analyses'}</div>
-            </div>
-          </div>
+            <div className="mt-1.5 text-[10.5px] text-ink-4">Area of detected change events{controls.length ? ' · control sites excluded' : ''}</div>
+          </>
         ) : (
           <div className="mt-1.5">
-            <div className="flex items-center gap-2 text-[13px] font-medium text-ink-2"><span className={`h-1.5 w-1.5 rounded-full ${eeReady ? 'bg-live' : 'bg-warn'}`} />No completed live analyses</div>
+            <div className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
+              <span className={`h-1.5 w-1.5 rounded-full ${eeReady ? 'bg-live' : 'bg-warn'}`} />
+              {controls.length ? 'No change-site analyses yet' : 'No completed live analyses'}
+            </div>
             <div className="mt-1 text-[10.5px] leading-snug text-ink-4">{eeReady && health?.backend ? 'Open an area to run a live analysis.' : 'Live analysis is temporarily unavailable.'}</div>
           </div>
         )}
+        {controls.map((r) => {
+          const fs = eventsOf([r]);
+          const name = items.find((a) => a.id === r.id)?.short_name ?? r.id;
+          return (
+            <div key={r.id} className="mt-2 text-[10.5px] leading-snug text-ink-3">
+              Control site · {name}: {fs.length} {fs.length === 1 ? 'detection' : 'detections'} ({fmtHa(areaOf([r]))} ha) — false-alarm check, not counted
+            </div>
+          );
+        })}
       </div>
       <div className="my-3.5 h-px bg-line" />
       <div>
@@ -117,7 +138,7 @@ function OverviewPanel() {
 function DataSourcesPanel() {
   const colors = { L: '#5aa2ff', S: '#4cb782', D: '#a78bfa' };
   return (
-    <section className="tt-panel pointer-events-auto px-5 py-4 [@media(max-height:860px)]:hidden" aria-labelledby="ds" data-map-occluder>
+    <section className="tt-panel pointer-events-auto px-5 py-4 [@media(max-height:940px)]:hidden" aria-labelledby="ds" data-map-occluder>
       <div className="flex items-center gap-2.5">
         <Layers3 size={15} className="text-accent" />
         <h2 id="ds" className="t-label text-ink">Data sources</h2>
@@ -160,10 +181,10 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
       }}
       data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}
-      className={`tt-card group relative flex min-w-[260px] flex-col overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
+      className={`tt-card group relative flex min-w-[260px] flex-col lg:min-w-0 overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
       aria-label={`Open featured investigation: ${area.name}`}
     >
-      <div className="relative h-[clamp(64px,10vh,104px)] overflow-hidden">
+      <div className="relative h-[clamp(76px,10.5vh,124px)] overflow-hidden">
         <img src={img} alt="" loading="lazy" className="h-full w-full scale-105 object-cover transition duration-700 ease-out group-hover:scale-[1.12]" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-[#0b0f12]" />
         <div className="absolute left-3 top-3 flex gap-1.5">
@@ -182,26 +203,35 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
         <div className="mt-[clamp(8px,1.4vh,14px)] grid grid-cols-2 divide-x divide-line">
           {/* AOI facts only — measured results appear inside the analysis once it is READY. */}
           {[
-            [`${fmtKm2(area.area_km2)} km²`, 'area of interest'],
-            [area.biome?.split(/[—–(]/)[0].trim() || '—', 'biome'],
-          ].map(([v, l], i) => (
+            [`${fmtKm2(area.area_km2)} km²`, 'area of interest', null],
+            [shortBiome(area.biome), 'biome', area.biome],
+          ].map(([v, l, full], i) => (
             <div key={l} className={`min-w-0 ${i === 0 ? 'pr-3' : 'px-3'}`}>
-              <div className="t-data truncate text-[14px] font-medium text-ink" title={v}>{v}</div>
+              <div className={`t-data text-[14px] font-medium text-ink ${i === 1 ? 'line-clamp-2 leading-tight' : 'truncate'}`} title={full ?? v ?? undefined}>{v}</div>
               <div className="text-[10.5px] text-ink-3">{l}</div>
             </div>
           ))}
         </div>
-        {/* Live analysis state — its own full-width row so the status is never truncated. */}
-        <div className="mt-2.5 flex min-w-0 items-center gap-2 border-t border-line pt-2" title={reason ?? detail ?? status} data-testid="card-status">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
-          <span className={`t-data shrink-0 text-[12.5px] font-medium ${tone}`}>{status}</span>
-          {detail && <span className="min-w-0 truncate text-[11px] text-ink-3">· {detail}</span>}
-          <span className="ml-auto shrink-0 text-[10.5px] text-ink-4">live analysis</span>
+        {/* Live analysis state. The detail gets its own line: next to the long status label it had no room left. */}
+        <div className="mt-2.5 min-w-0 border-t border-line pt-2" title={reason ?? detail ?? status} data-testid="card-status">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+            <span className={`t-data min-w-0 truncate text-[12.5px] font-medium ${tone}`}>{status}</span>
+            {!detail?.trim() && <LiveAnalysisLabel />}
+          </div>
+          {detail?.trim() && (
+            <div className="mt-0.5 flex min-w-0 items-center gap-2 pl-4">
+              <span className="min-w-0 truncate text-[11px] text-ink-3">{detail}</span>
+              <LiveAnalysisLabel />
+            </div>
+          )}
         </div>
       </div>
     </motion.button>
   );
 }
+
+const LiveAnalysisLabel = () => <span className="ml-auto shrink-0 text-[10.5px] text-ink-4">live analysis</span>;
 
 function Featured() {
   const { data, isLoading, isError, error, refetch } = useStudyAreas();
@@ -220,12 +250,12 @@ function Featured() {
   return (
     <section ref={ref} className="pointer-events-auto" aria-labelledby="fi" data-map-occluder>
       <div className="mb-3 flex items-end justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <TerratraceMark size={22} />
-          <div>
-            <h2 id="fi" className="t-label text-[11px] text-ink">Featured investigations</h2>
-            <p className="mt-1 text-[12px] text-ink-3">Real-world examples to explore. You can also select any area on Earth.</p>
+        <div>
+          <div className="flex items-center gap-2.5">
+            <TerratraceMark size={18} />
+            <h2 id="fi" className="t-label text-[11px] leading-none text-ink">Featured investigations</h2>
           </div>
+          <p className="mt-1.5 text-[12px] text-ink-3">Real-world examples to explore. You can also select any area on Earth.</p>
         </div>
         <button onClick={() => setPhase('explore')} className="tt-press flex shrink-0 items-center gap-1.5 text-[12px] text-accent hover:underline">
           Explore anywhere <ArrowRight size={14} />
@@ -258,27 +288,29 @@ export function Landing() {
     <div className="pointer-events-none absolute inset-0 z-30">
       <AnimatePresence mode="wait">
         {phase === 'intro' ? (
-          // Column layout: [header] [top region: hero · globe · panels · search] [featured row].
-          // The featured row is its own block, so nothing in the top region can overlap it.
-          <motion.div key="intro" className="absolute inset-0 flex flex-col pt-16" exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+          // Column layout: [header] [top region] [featured row]. Everything is in normal flow, so the top region is
+          // always at least as tall as the hero and the featured row always starts below it. When the viewport is too
+          // short for both, the overlay scrolls instead of overlapping.
+          // Top region (lg+): grid [hero | globe slot over search bar | panels (≥1320 px)]. The globe is framed inside
+          // the measured `data-globe-slot` (lib/useLayout.landingInset), so the search bar never covers it.
+          <motion.div key="intro" className="no-scrollbar absolute inset-0 flex flex-col overflow-y-auto pt-16" exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
             <div className="tt-hero-scrim absolute inset-y-0 left-0 w-[46%]" />
             <div className="tt-featured-scrim absolute inset-x-0 bottom-0 h-[42%]" />
-            <div className="relative min-h-0 flex-1">
-              <div className="absolute left-10 top-[clamp(20px,4.5vh,48px)] xl:left-14">
+            <div className="relative flex-1 px-6 pt-4 lg:grid min-[1024px]:grid-cols-[minmax(0,540px)_minmax(0,1fr)] lg:gap-x-8 lg:pl-10 xl:pl-14 min-[1320px]:grid-cols-[minmax(0,540px)_minmax(0,1fr)_292px]">
+              <div className="pt-[clamp(0px,calc(4.5vh-24px),24px)]">
                 <Hero />
               </div>
+              <div className="hidden min-h-[240px] flex-col lg:flex">
+                <GlobeSlot />
+                <div className="pointer-events-auto mx-auto w-full max-w-[720px] pt-3" data-map-occluder><SearchBar /></div>
+              </div>
               <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25, duration: 0.6, ease: EASE }}
-                className="absolute right-6 top-5 hidden w-[292px] space-y-3 min-[1320px]:block">
+                className="hidden space-y-3 self-start min-[1320px]:block">
                 <OverviewPanel />
                 <DataSourcesPanel />
               </motion.div>
-              {/* Search sits between the hero column and the right panels, overlapping the lower globe. */}
-              <div className="absolute bottom-3 left-[max(600px,44%)] right-6 hidden lg:block min-[1320px]:right-[332px] [@media(min-height:821px)]:left-[max(648px,44%)]">
-                <div className="pointer-events-auto mx-auto max-w-[720px]" data-map-occluder><SearchBar /></div>
-              </div>
-              <div className="absolute bottom-[84px] right-6 hidden lg:block min-[1320px]:right-[332px]" data-map-occluder><LandingMapControls /></div>
             </div>
-            <div className="relative shrink-0 px-6 pb-5 pt-4 xl:px-10">
+            <div className="relative shrink-0 px-6 pb-4 pt-4 xl:px-10">
               <div className="pointer-events-auto mb-4 lg:hidden"><SearchBar /></div>
               <Featured />
             </div>
@@ -313,6 +345,37 @@ export function Landing() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * The area the landing globe is framed into. When its size changes (window resize, panels or cards appearing),
+ * the globe is re-framed so it stays fully inside — the map reads the slot's rectangle in landingInset().
+ */
+function GlobeSlot() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let t = 0, last = '';
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => {
+        const r = el.getBoundingClientRect();
+        const size = `${Math.round(r.width)}x${Math.round(r.height)}`;
+        const s = useUi.getState();
+        if (size === last || s.phase !== 'intro' || selectCandidate(s) || s.drawTool) return;
+        last = size;
+        s.requestCamera({ kind: 'home' });
+      }, 200);
+    });
+    ro.observe(el);
+    return () => { window.clearTimeout(t); ro.disconnect(); };
+  }, []);
+  return (
+    <div ref={ref} data-globe-slot className="relative min-h-0 flex-1">
+      <div className="absolute bottom-2 right-0" data-map-occluder><LandingMapControls /></div>
     </div>
   );
 }

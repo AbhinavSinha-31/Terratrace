@@ -197,6 +197,7 @@ export class TerraMap {
   private hoverId: string | null = null;
   private resizeObs: ResizeObserver;
   private nightTimer = 0;
+  private minZoomTarget = 1;
   private destroyed = false;
   private dashStep = 0;
   private lastDash = 0;
@@ -279,6 +280,22 @@ export class TerraMap {
   /** Globe overview; the inset keeps the globe clear of the hero column / panels. */
   flyHome(inset: Partial<Padding> = {}, zoom = 2.15) {
     this.map.flyTo({ center: [-30, 4], zoom, bearing: 0, pitch: 0, duration: this.dur(2400), essential: true, padding: { ...NO_PAD, ...inset } });
+  }
+
+  /**
+   * Lowest zoom the camera may reach. Lowering applies at once. Raising it while the camera is still below the new
+   * floor would snap the view, so the floor is raised only once the camera has moved above it (e.g. after the
+   * fly-out of the landing globe). A later call always replaces a pending one.
+   */
+  setMinZoom(z: number) {
+    this.minZoomTarget = z;
+    const apply = () => {
+      if (this.destroyed || this.minZoomTarget !== z) return;
+      if (this.map.getZoom() >= z) this.map.setMinZoom(z);
+      else this.map.once('moveend', apply);
+    };
+    if (this.map.getZoom() >= z || z <= this.map.getMinZoom()) this.map.setMinZoom(z);
+    else this.map.once('moveend', apply);
   }
 
   setInset(inset: Partial<Padding>) {

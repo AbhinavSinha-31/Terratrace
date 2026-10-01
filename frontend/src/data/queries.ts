@@ -60,7 +60,12 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
   const fromResult = (s: string | undefined | null, code?: string | null): CardStatus | null =>
     code === 'analysis_too_large' ? 'Area exceeds limit'
       : s === 'READY' ? 'Analysis ready' : s === 'INVALID_ANALYSIS' ? 'Scientific validation required' : s === 'UNAVAILABLE' || s === 'ERROR' ? 'Unavailable' : s === 'RUNNING' || s === 'PROCESSING' ? 'Processing' : null;
-  const limitDetail = (max?: number | null) => `area exceeds ${max ? fmtKm2(max) : fmtKm2(health?.limits.max_aoi_km2 ?? 1500)} km² limit`;
+  // The status already says the area is too large; the detail adds the limit itself — the backend's interactive
+  // analysis limit (the value the check uses), never the larger selection limit (max_aoi_km2).
+  const limitDetail = (max?: number | null) => {
+    const limit = max ?? health?.limits.interactive_max_km2;
+    return limit ? `max ${fmtKm2(limit)} km²` : null;
+  };
   const pairs = (ys: number[][] | undefined) => (ys?.length ? `unstable forest mask ${ys.map(([a, b]) => `${a}→${String(b).slice(2)}`).join(', ')}` : null);
   const card = (status: CardStatus, detail: string | null = null, reason: string | null = null) => ({ status, detail, reason });
   if (isThis) {
