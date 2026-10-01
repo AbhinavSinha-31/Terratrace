@@ -119,6 +119,51 @@ def test_impossible_or_unstable_results_are_invalid(patch, rule):
     assert status == "INVALID_ANALYSIS" and rule in [i["rule"] for i in issues]
 
 
+# ----------------------------------------------------------------------------- validation scope = analysed window
+def history_and_window_rows(in_window_gain=100.0):
+    """1990→1995 (historical) is unstable; 2017→2018 (the transition INTO the baseline) is unstable;
+    the requested 2018→2025 window itself is clean unless `in_window_gain` says otherwise."""
+    rows = [row(1990, forest_ha=5000.0), row(1995, forest_ha=5000.0), row(2017, forest_ha=5000.0),
+            row(2018, forest_ha=6000.0, forest_pct=63.2), row(2025, forest_ha=5800.0, forest_pct=61.1)]
+    p.link_transitions(rows)
+    by = {r["year"]: r for r in rows}
+    by[1995].update(loss_ha=10.0, gain_ha=4_000.0, compared_ha=9000.0)   # 8.9 %/yr — unstable, historical
+    by[2018].update(loss_ha=10.0, gain_ha=1_000.0, compared_ha=9000.0)   # 11 %/yr — unstable, 2017→2018
+    by[2025].update(loss_ha=300.0, gain_ha=in_window_gain, compared_ha=9000.0)
+    return rows
+
+
+def test_out_of_window_transitions_never_invalidate_the_requested_analysis():
+    """Regression (Hasdeo Arand 2018→2025 listed 1990→1995 as a reason)."""
+    rows = history_and_window_rows()
+    k = sc.kpis_for(rows, [], 2018, 2025, {"loss": 300.0, "gain": 100.0, "compared": 9000.0, "forest_b": 6000.0})
+    status, code, reason, issues = sc.evaluate(rows, AOI_HA, (2018, 2025), k)
+    assert status == "READY" and issues == []
+    ctx = sc.context_issues(rows, AOI_HA, (2018, 2025))
+    assert {tuple(i["years"]) for i in ctx} == {(1990, 1995), (2017, 2018)}, "reported as context only"
+
+
+def test_in_window_instability_still_invalidates_with_the_unchanged_rule():
+    rows = history_and_window_rows(in_window_gain=3_540.0)          # 2018→2025: 5.6 %/yr > 5 %
+    status, code, reason, issues = sc.evaluate(rows, AOI_HA, (2018, 2025))
+    assert status == "INVALID_ANALYSIS" and code == "unstable_forest_mask"
+    assert [i["years"] for i in issues] == [[2018, 2025]], "only the in-window transition decides"
+    assert "1990" not in reason and "2017" not in reason and "ecologically plausible 5%" in reason
+
+
+def test_cached_invalid_results_are_rescoped_or_recomputed():
+    msg = lambda a, b: f"{a}→{b}: forest gain exceeds the ecologically plausible 5% ..."
+    mixed = {"status": "INVALID_ANALYSIS", "quality": {"analyzable_window": [2018, 2025], "issues": [
+        {"rule": "unstable_forest_mask", "years": [1990, 1995], "message": msg(1990, 1995)},
+        {"rule": "unstable_forest_mask", "years": [2019, 2020], "message": msg(2019, 2020)}]}}
+    assert analysis._rescope_invalid(mixed) is True
+    assert [i["years"] for i in mixed["quality"]["issues"]] == [[2019, 2020]] and "1990" not in mixed["reason"]
+    assert [i["years"] for i in mixed["quality"]["context_issues"]] == [[1990, 1995]]
+    only_history = {"status": "INVALID_ANALYSIS", "quality": {"analyzable_window": [2018, 2025], "issues": [
+        {"rule": "unstable_forest_mask", "years": [1990, 1995], "message": msg(1990, 1995)}]}}
+    assert analysis._rescope_invalid(only_history) is False, "never turned into READY without statistics: recompute"
+
+
 def test_cumulative_loss_beyond_available_forest_is_invalid():
     rows = ready_rows()
     k = {"baseline_year": 2019, "latest_year": 2025, "forest_baseline_ha": 1_000.0, "total_loss_ha": 5_000.0, "total_gain_ha": 100.0}
@@ -143,7 +188,8 @@ def test_results_from_an_older_method_are_never_reused(tmp_path, monkeypatch):
     legacy = tmp_path / "aoi-7e6d17858ee8-2016-2025.json"   # the pre-versioning file name
     legacy.write_text(json.dumps({"summary": {}}), encoding="utf-8")
     assert analysis.purge_stale_results() == 1 and not legacy.exists()
-    current = {"status": "INVALID_ANALYSIS", "reasonCode": "unstable_forest_mask", "reason": "r", "quality": {}}
+    current = {"status": "INVALID_ANALYSIS", "reasonCode": "unstable_forest_mask", "reason": "r",
+               "quality": {"analyzable_window": [2016, 2025], "issues": [{"rule": "unstable_forest_mask", "years": [2019, 2020], "message": "m"}]}}
     analysis._save_result(analysis._key("aoi-x", 2016, 2025), current, {})
     analysis._results.clear()
     assert analysis._load_result(analysis._key("aoi-x", 2016, 2025))["status"] == "INVALID_ANALYSIS"
@@ -234,3 +280,58 @@ def test_no_global_2016_or_2018_minimum_in_the_backend():
     rows = [{"year": y, "era": sc.era_of(y), "passes_quality": True} for y in (1984, 1990, 2016, 2017, 2020)]
     window, hist = p.choose_windows(rows, 1984, 2020)
     assert window == (2016, 2020) and hist == (1984, 1990)
+
+
+class _Px:
+    """Tiny masked-pixel stand-in for ee.Image algebra (Earth Engine semantics: an operation is masked wherever any
+    input is masked; And/Not/gte keep the mask). Used to test the REAL transition expression offline."""
+    def __init__(self, v, m):
+        self.v, self.m = list(v), list(m)
+    def _op(self, o, f):
+        o = o if isinstance(o, _Px) else _Px([o] * len(self.v), [True] * len(self.v))
+        return _Px([f(a, b) for a, b in zip(self.v, o.v)], [a and b for a, b in zip(self.m, o.m)])
+    def And(self, o): return self._op(o, lambda a, b: int(bool(a) and bool(b)))
+    def Not(self): return _Px([int(not a) for a in self.v], self.m)
+    def gte(self, o): return self._op(o, lambda a, b: int(a >= b))
+    def multiply(self, o): return self._op(o, lambda a, b: a * b)
+    def updateMask(self, o): return _Px(self.v, [a and b and bool(bv) for a, b, bv in zip(self.m, o.m, o.v)])
+    def rename(self, _): return self
+    def total(self): return sum(v for v, m in zip(self.v, self.m) if m)   # reducers sum observed pixels only
+
+
+def test_unobserved_pixels_never_become_gain_or_loss():
+    from app.providers.earth_engine.provider import transition_bands
+    # pixel:        0 F->F  1 N->F  2 F->N  3 nodata->F  4 nodata->N  5 F->nodata  6 N->nodata  7 N->N
+    fa = _Px([1, 0, 1, 0, 0, 1, 0, 0], [True, True, True, False, False, True, True, True])
+    fb = _Px([1, 1, 0, 1, 0, 0, 0, 0], [True, True, True, True, True, False, False, True])
+    area = _Px([1.0] * 8, [True] * 8)
+    loss, gain, cmp_, fbase = (b.total() for b in transition_bands(fa, fb, area, "t"))
+    assert gain == 1.0 and loss == 1.0, "only observed N->F is gain and observed F->N is loss"
+    assert cmp_ == 4.0, "compared area = pixels observed in BOTH years (0, 1, 2, 7)"
+    assert fbase == 2.0
+
+
+def test_unstable_mask_issue_carries_the_measured_evidence():
+    rows = [
+        {"year": 2019, "era": "modern", "passes_quality": True, "previous_year": None, "forest_ha": 100.0, "forest_pct": 10.0,
+         "loss_ha": None, "gain_ha": None, "compared_ha": None, "valid_ha": 1000.0},
+        {"year": 2020, "era": "modern", "passes_quality": True, "previous_year": 2019, "forest_ha": 158.0, "forest_pct": 15.8,
+         "loss_ha": 2.0, "gain_ha": 60.0, "compared_ha": 1000.0, "valid_ha": 1000.0},
+    ]
+    status, code, _, issues = sc.evaluate(rows, 1000.0, (2019, 2020))
+    assert status == "INVALID_ANALYSIS" and code == "unstable_forest_mask"
+    ev = issues[0]["evidence"]
+    assert ev == {"measured_pct_per_year": 6.0, "threshold_pct_per_year": 5.0, "gain_ha": 60.0, "compared_ha": 1000.0}
+    assert sc.MAX_ANNUAL_GAIN_FRACTION == 0.05, "the plausibility guardrail is unchanged"
+
+
+def test_forest_mask_uses_leaf_on_ndvi_with_unchanged_thresholds():
+    """tt-ee-2.1: the NDVI floor applies to leaf-on NDVI (per-pixel p90 of clear observations), not the annual median;
+    the thresholds themselves are unchanged and results of the previous method are never reused (version bump)."""
+    import inspect
+    src = inspect.getsource(p.LiveProvider._s2) if hasattr(p, "LiveProvider") else inspect.getsource(type(p.provider)._s2)
+    assert "Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])" in src
+    assert 'trees.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid)' in src
+    assert (sc.FOREST_TREE_PROB, sc.FOREST_NDVI, sc.FOREST_NDVI_PERCENTILE) == (0.50, 0.60, 90)
+    assert (sc.MAX_ANNUAL_GAIN_FRACTION, sc.MIN_PIXEL_CLEAR_OBS, sc.MIN_PIXEL_DW_OBS, sc.MIN_YEAR_COVERAGE) == (0.05, 3, 3, 0.80)
+    assert sc.METHOD_VERSION == "tt-ee-2.1"

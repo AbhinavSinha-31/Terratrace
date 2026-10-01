@@ -13,11 +13,12 @@ from typing import Any
 # --------------------------------------------------------------------------- method version
 # Bump whenever any rule below (or the Earth Engine pipeline) changes: cached results
 # computed under another version are never reused.
-METHOD_VERSION = "tt-ee-2.0"
+METHOD_VERSION = "tt-ee-2.1"   # 2.1: forest-mask NDVI = leaf-on (p90) instead of annual median; thresholds unchanged
 
 # --------------------------------------------------------------------------- definitions
 FOREST_TREE_PROB = 0.50   # Dynamic World annual mean "trees" probability
 FOREST_NDVI = 0.60        # NDVI floor for the operational forest mask
+FOREST_NDVI_PERCENTILE = 90  # the floor is applied to leaf-on NDVI: per-pixel 90th percentile of clear observations
 LANDSAT_FOREST_NDVI = 0.60  # historical proxy (no Dynamic World before mid-2015)
 D_NDVI = -0.20
 D_NBR = -0.25
@@ -54,7 +55,7 @@ METHOD: dict[str, Any] = {
     "version": METHOD_VERSION,
     "eras": (
         "Historical (1984–2015): Landsat 5/7/8/9 Collection 2 surface reflectance, multi-year median composites, forest proxy NDVI ≥ 0.60 at 30 m. "
-        "Modern (2016→): Sentinel-2 SR Harmonized annual median + Dynamic World V1 annual mean tree probability. "
+        "Modern: Sentinel-2 SR Harmonized (catalogue from 2017-03-28) calendar-year composites + Dynamic World V1 annual mean tree probability. "
         "Forest from the two eras is never compared: loss/gain are computed only between years of the same era."
     ),
     "cloud_masking": "Sentinel-2: Cloud Score+ cs_cdf ≥ 0.60 (scenes without Cloud Score+ are excluded). Landsat: QA_PIXEL dilated cloud, cloud and cloud-shadow bits.",
@@ -63,7 +64,7 @@ METHOD: dict[str, Any] = {
         f" (and ≥ {MIN_PIXEL_DW_OBS} Dynamic World observations in the modern era). Unobserved pixels stay no-data: they are never counted as non-forest, "
         "and every statistic is computed over observed pixels only. Missing statistics are reported as null, never 0."
     ),
-    "forest_rule": f"Modern: Dynamic World annual mean tree probability ≥ {FOREST_TREE_PROB:.2f} AND NDVI ≥ {FOREST_NDVI:.2f}. Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
+    "forest_rule": f"Modern: Dynamic World annual mean tree probability ≥ {FOREST_TREE_PROB:.2f} AND leaf-on NDVI (per-pixel {FOREST_NDVI_PERCENTILE}th percentile of clear observations) ≥ {FOREST_NDVI:.2f}. Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
     "coverage_rule": f"A year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI is observed; forest % is relative to the observed area.",
     "change_rule": (
         f"forest(t−1) ∧ [ΔNDVI ≤ {D_NDVI:.2f} ∨ ΔNBR ≤ {D_NBR:.2f}] ∧ Δtree-probability ≤ {D_TREE:.2f} ∧ ¬forest(t); "
@@ -266,8 +267,69 @@ def history_for(years: list[dict[str, Any]], pair: dict[str, float | None] | Non
 
 
 # --------------------------------------------------------------------------- validity
-def _issue(rule: str, years: list[int], message: str) -> dict[str, Any]:
-    return {"rule": rule, "years": years, "message": message}
+def _issue(rule: str, years: list[int], message: str, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {"rule": rule, "years": years, "message": message}
+    if evidence:
+        out["evidence"] = evidence   # the measured value that failed the check (never shown as a finding)
+    return out
+
+
+def _row_issues(y: dict[str, Any], aoi_ha: float, first_year: int | None = None) -> list[dict[str, Any]]:
+    """Physical-validity and stability checks for one analysable year and its transition from `previous_year`.
+    The transition is checked only when it starts at or after `first_year` (None = any)."""
+    tol = 1 + AREA_TOLERANCE
+    issues: list[dict[str, Any]] = []
+    if not y.get("passes_quality"):
+        return issues
+    yr = y["year"]
+    for k in ("forest_ha", "loss_ha", "gain_ha", "valid_ha", "compared_ha"):
+        if y.get(k) is not None and y[k] < 0:
+            issues.append(_issue("negative_area", [yr], f"{yr}: a measured area ({k}) is negative."))
+    if y.get("forest_pct") is not None and not (0 <= y["forest_pct"] <= 100 * tol):
+        issues.append(_issue("forest_pct_out_of_range", [yr], f"{yr}: forest share is outside 0–100 %."))
+    if y.get("forest_ha") is not None and y["forest_ha"] > aoi_ha * tol:
+        issues.append(_issue("forest_exceeds_area", [yr], f"{yr}: forest area exceeds the area of interest."))
+    prev = y.get("previous_year")
+    if prev is None or y.get("loss_ha") is None or (first_year is not None and prev < first_year):
+        return issues
+    cmp_ha = y.get("compared_ha")
+    limit = min(aoi_ha, cmp_ha) * tol if cmp_ha is not None else aoi_ha * tol
+    if y["loss_ha"] > limit:
+        issues.append(_issue("loss_exceeds_area", [prev, yr], f"{prev}→{yr}: forest loss exceeds the compared area."))
+    if y["gain_ha"] > limit:
+        issues.append(_issue("gain_exceeds_area", [prev, yr], f"{prev}→{yr}: forest gain exceeds the compared area."))
+    if cmp_ha and y["gain_ha"] / cmp_ha / (yr - prev) > MAX_ANNUAL_GAIN_FRACTION:
+        # Denominator = compared area: pixels validly observed in BOTH years (never the whole AOI, never unobserved pixels).
+        issues.append(_issue("unstable_forest_mask", [prev, yr],
+                             f"{prev}→{yr}: forest gain exceeds the ecologically plausible {MAX_ANNUAL_GAIN_FRACTION:.0%} of the compared area per year — "
+                             "the forest classification is unstable here, so loss figures cannot be trusted either.",
+                             {"measured_pct_per_year": round(100 * y["gain_ha"] / cmp_ha / (yr - prev), 2),
+                              "threshold_pct_per_year": round(100 * MAX_ANNUAL_GAIN_FRACTION, 2),
+                              "gain_ha": round(y["gain_ha"], 1), "compared_ha": round(cmp_ha, 1)}))
+    return issues
+
+
+def in_window(issue: dict[str, Any], window: tuple[int, int] | list[int] | None) -> bool:
+    """True when every year of an issue lies inside the analysed window (the data the result is built from)."""
+    return window is not None and window[0] <= min(issue["years"]) and max(issue["years"]) <= window[1]
+
+
+NO_WINDOW_REASON = (
+    "Insufficient clear observations: fewer than two modern years in the requested window meet the analysis-quality requirements, "
+    "so no change detection is possible."
+)
+
+
+def invalid_reason(issues: list[dict[str, Any]]) -> str:
+    return ("The computation finished, but its results fail TERRATRACE's scientific validity checks, so they are not shown as findings. "
+            + " ".join(i["message"] for i in issues[:3]))
+
+
+def context_issues(years: list[dict[str, Any]], aoi_ha: float, event_window: tuple[int, int] | None) -> list[dict[str, Any]]:
+    """The same checks for years/transitions OUTSIDE the analysed window (e.g. historical Landsat pairs).
+    Informational for the history view only — they never decide the status of the requested analysis."""
+    found = [i for y in years for i in _row_issues(y, aoi_ha)]
+    return [i for i in found if not in_window(i, event_window)]
 
 
 def evaluate(years: list[dict[str, Any]], aoi_ha: float, event_window: tuple[int, int] | None,
@@ -278,47 +340,23 @@ def evaluate(years: list[dict[str, Any]], aoi_ha: float, event_window: tuple[int
     Hard physical violations and an unstable forest classification make the analysis
     INVALID; a baseline/comparison year without sufficient observations makes it
     UNAVAILABLE. Nothing is clamped or repaired.
+
+    Scope: only what the requested result is built from — the years of the analysed window
+    (`event_window`) and the transitions inside it (see `kpis_for`). Years and transitions outside
+    it (historical Landsat pairs, the transition INTO the baseline year) never invalidate the result;
+    they are reported separately by `context_issues`. The rules themselves are unchanged.
     """
-    tol = 1 + AREA_TOLERANCE
     issues: list[dict[str, Any]] = []
-    for y in years:
-        if not y.get("passes_quality"):
-            continue
-        yr = y["year"]
-        for k in ("forest_ha", "loss_ha", "gain_ha", "valid_ha", "compared_ha"):
-            if y.get(k) is not None and y[k] < 0:
-                issues.append(_issue("negative_area", [yr], f"{yr}: a measured area ({k}) is negative."))
-        if y.get("forest_pct") is not None and not (0 <= y["forest_pct"] <= 100 * tol):
-            issues.append(_issue("forest_pct_out_of_range", [yr], f"{yr}: forest share is outside 0–100 %."))
-        if y.get("forest_ha") is not None and y["forest_ha"] > aoi_ha * tol:
-            issues.append(_issue("forest_exceeds_area", [yr], f"{yr}: forest area exceeds the area of interest."))
-        prev = y.get("previous_year")
-        if prev is None or y.get("loss_ha") is None:
-            continue
-        cmp_ha = y.get("compared_ha")
-        limit = min(aoi_ha, cmp_ha) * tol if cmp_ha is not None else aoi_ha * tol
-        if y["loss_ha"] > limit:
-            issues.append(_issue("loss_exceeds_area", [prev, yr], f"{prev}→{yr}: forest loss exceeds the compared area."))
-        if y["gain_ha"] > limit:
-            issues.append(_issue("gain_exceeds_area", [prev, yr], f"{prev}→{yr}: forest gain exceeds the compared area."))
-        if cmp_ha and y["gain_ha"] / cmp_ha / (yr - prev) > MAX_ANNUAL_GAIN_FRACTION:
-            issues.append(_issue("unstable_forest_mask", [prev, yr],
-                                 f"{prev}→{yr}: forest gain exceeds the ecologically plausible {MAX_ANNUAL_GAIN_FRACTION:.0%} of the compared area per year — "
-                                 "the forest classification is unstable here, so loss figures cannot be trusted either."))
+    if event_window is not None:
+        for y in years:
+            if event_window[0] <= y["year"] <= event_window[1]:
+                issues += _row_issues(y, aoi_ha, first_year=event_window[0])
     if kpis and kpis.get("forest_baseline_ha") is not None:
         if kpis["total_loss_ha"] > (kpis["forest_baseline_ha"] + kpis["total_gain_ha"]) + aoi_ha * AREA_TOLERANCE:
             issues.append(_issue("cumulative_loss_exceeds_forest", [kpis["baseline_year"], kpis["latest_year"]],
                                  "Cumulative forest loss exceeds the initial forest plus all measured gain."))
-    no_window = (
-        "Insufficient clear observations: fewer than two modern years in the requested window meet the analysis-quality requirements, "
-        "so no change detection is possible."
-    )
     if issues:
-        return "INVALID_ANALYSIS", issues[0]["rule"], (
-            "The computation finished, but its results fail TERRATRACE's scientific validity checks, so they are not shown as findings. "
-            + " ".join(i["message"] for i in issues[:3])
-            + (f" In addition: {no_window}" if event_window is None else "")
-        ), issues
+        return "INVALID_ANALYSIS", issues[0]["rule"], invalid_reason(issues), issues
     if event_window is None:
-        return "UNAVAILABLE", "insufficient_clear_observations", no_window, issues
+        return "UNAVAILABLE", "insufficient_clear_observations", NO_WINDOW_REASON, issues
     return "READY", None, None, issues

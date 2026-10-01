@@ -48,7 +48,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
         {analysis && <>
         <LayerToggle icon={<TreePine size={14} />} label="Forest cover" hint={`Operational forest mask for ${year}`} on={layers.forest} onChange={(v) => set('forest', v)}>
           <div className="flex items-center gap-3">
-            <input className="tt-range" type="range" min={0.15} max={0.95} step={0.05} value={layers.forestOpacity} onChange={(e) => setOpacity(Number(e.target.value))} aria-label="Forest layer opacity" />
+            <input className="tt-range" type="range" min={0.1} max={0.75} step={0.05} value={layers.forestOpacity} onChange={(e) => setOpacity(Number(e.target.value))} aria-label="Forest layer opacity" />
             <span className="t-data w-8 text-right text-[10px] text-ink-3">{Math.round(layers.forestOpacity * 100)}%</span>
           </div>
         </LayerToggle>

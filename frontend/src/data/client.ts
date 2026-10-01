@@ -7,8 +7,8 @@
  * and real reference imagery — never metrics, events or narratives.
  */
 import type {
-  AnalysisEnvelope, AnalysisResult, AnalyzeRequest, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
-  ImageryAvailability, ImageryDecision, LayerCatalog, SearchResult, StudyAreaIndex, SystemHealth,
+  AnalysisEnvelope, AnalysisResult, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
+  AnalysisHistory, AnalysisJob, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -90,7 +90,7 @@ function normalizeLayers(cat: LayerCatalog): LayerCatalog {
 
 
 /** Envelope → UI result. Metrics are only ever taken from a READY envelope. */
-function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
+export function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
   const ready = env.analysisStatus === 'READY' && !!env.summary && !!env.events && !!env.layers;
   return {
     id: env.analysis_id,
@@ -116,11 +116,6 @@ const offlineFeatured = async () => (featuredCache ??= await request<StudyAreaIn
 
 export const client = {
   isBackendUp: () => backend,
-
-  /** REAL backend stage of an in-flight analysis (null when unknown or finished). */
-  progress(rid: string): Promise<{ stage: string | null; elapsed_s: number | null }> {
-    return request(`${API}/progress/${encodeURIComponent(rid)}`, { timeoutMs: 4000 });
-  },
 
   async health(): Promise<SystemHealth> {
     // Generous timeout + one retry: during first load the main thread is busy
@@ -148,38 +143,51 @@ export const client = {
     return withFallback(() => request(`${API}/study-areas`), offlineFeatured);
   },
 
-  /**
-   * Analysis of a featured or registered AOI. Returns what the backend computed, or throws a truthful
-   * error. There is NO offline fallback: the frontend never constructs an AnalysisResult itself.
-   */
-  async getAnalysis(id: string, window: { baseline_year: number; comparison_year: number }, rid?: string): Promise<AnalysisResult> {
-    const q = `?baseline=${window.baseline_year}&comparison=${window.comparison_year}${rid ? `&rid=${rid}` : ''}`;
+  /** Static base layers (backend-owned URLs). Offline: the backend-generated copy in public/data/basemaps.json. */
+  basemaps(): Promise<Basemaps> {
+    return withFallback(() => request(`${API}/imagery/basemaps`), () => request(`${BASE}data/basemaps.json`));
+  },
+
+  /** Start (or join) an analysis job. Returns immediately; poll getAnalysisJob. */
+  async createAnalysisJob(body: { aoi_id?: string; geometry?: AoiGeometry; name?: string; baseline: number; comparison: number }, rid?: string): Promise<AnalysisJob> {
     try {
-      const env = await request<AnalysisEnvelope>(`${API}/analysis/${encodeURIComponent(id)}${q}`, { timeoutMs: ANALYSIS_TIMEOUT_MS });
+      const job = await request<AnalysisJob>(`${API}/analysis-jobs${rid ? `?rid=${rid}` : ''}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 20000,
+      });
       backend = true;
-      return fromEnvelope(env);
+      return job;
     } catch (e) {
       if (isOffline(e)) { backend = false; throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable'); }
       throw e;
     }
   },
 
-  async analyze(req: AnalyzeRequest, rid?: string): Promise<AnalysisResult> {
-    try {
-      const env = await request<AnalysisEnvelope>(`${API}/analyze${rid ? `?rid=${rid}` : ''}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req), timeoutMs: ANALYSIS_TIMEOUT_MS,
-      });
-      backend = true;
-      return fromEnvelope(env);
-    } catch (e) {
-      if (isOffline(e)) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');
-      throw e;
-    }
+  getAnalysisJob(jobId: string): Promise<AnalysisJob> {
+    return request<AnalysisJob>(`${API}/analysis-jobs/${encodeURIComponent(jobId)}`, { timeoutMs: 15000 });
   },
 
-  /** Static base layers (backend-owned URLs). Offline: the backend-generated copy in public/data/basemaps.json. */
-  basemaps(): Promise<Basemaps> {
-    return withFallback(() => request(`${API}/imagery/basemaps`), () => request(`${BASE}data/basemaps.json`));
+  cancelAnalysisJob(jobId: string): Promise<AnalysisJob> {
+    return request<AnalysisJob>(`${API}/analysis-jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', timeoutMs: 15000 });
+  },
+
+  /** Years outside the analysed window (Time Machine / charts). Never affects the window's result. */
+  analysisHistory(id: string, window: { start: number; end: number }): Promise<AnalysisHistory> {
+    return request<AnalysisHistory>(`${API}/analysis/${encodeURIComponent(id)}/history?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: ANALYSIS_TIMEOUT_MS });
+  },
+
+  /** Stored analysis status (READY / INVALID_ANALYSIS / UNAVAILABLE / RUNNING / NOT_RUN). Read-only: never analyses. */
+  analysisStatus(id: string, window: { start: number; end: number }): Promise<{ status: string; reasonCode: string | null; reason: string | null; issueYears?: number[][]; selected_area_km2?: number; maximum_area_km2?: number }> {
+    return request(`${API}/analysis-status/${encodeURIComponent(id)}?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: 15000 });
+  },
+
+  /** Registers a selected area (no analysis, no Earth Engine) so its live imagery can load before Analyze. */
+  registerAoi(geometry: AoiGeometry, name?: string): Promise<StudyArea> {
+    return request<StudyArea>(`${API}/aoi`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geometry, name }), timeoutMs: 15000 });
+  },
+
+  /** A registered area's geometry + metadata (no analysis). Needed for custom areas opened by link / reload. */
+  getAoi(id: string): Promise<StudyArea> {
+    return request<StudyArea>(`${API}/aoi/${encodeURIComponent(id)}`, { timeoutMs: 15000 });
   },
 
   /** Real Earth Engine imagery for an AOI and year. Independent of analysis; never constructed here. */
@@ -231,7 +239,8 @@ export const client = {
       const nq = q.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
       for (const a of featured?.items ?? []) {
         const hay = `${a.name} ${a.region} ${a.country ?? ''}`.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
-        if (hay.includes(nq)) results.push({ name: a.name, detail: `Featured investigation · ${a.region}`, kind: 'featured', center: a.center, bbox: a.bbox, study_area_id: a.id, source: 'TERRATRACE' });
+        const short = a.short_name.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
+        if (hay.includes(nq) || nq.includes(short)) results.push({ name: a.name, detail: `Featured investigation · ${a.region}`, kind: 'featured', center: a.center, bbox: a.bbox, study_area_id: a.id, source: 'TERRATRACE' });
       }
       return { results, notice: 'Search is offline — featured investigations and coordinates only.' };
     };

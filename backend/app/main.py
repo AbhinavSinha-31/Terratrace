@@ -1,6 +1,6 @@
 """TERRATRACE backend entry point.
 
-    uvicorn app.main:app --port 8000          (from backend/)
+    uvicorn app.main:app --host 127.0.0.1 --port 8001   (from backend/)
 
 Serves the API under /api and, when frontend/dist exists, the built app at /.
 """

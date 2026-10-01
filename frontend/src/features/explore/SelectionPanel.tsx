@@ -92,7 +92,7 @@ export function SelectionPanel() {
       <div className="mt-5 space-y-3">
         {tooLarge && <StateView compact kind="error" title="Area too large">Please select a smaller area for analysis — up to {max.toLocaleString()} km² (this selection is {area.toLocaleString('en-US', { maximumFractionDigits: 0 })} km²).</StateView>}
         {tooSmall && <StateView compact kind="error" title="Area too small">Select at least {min} km² so change regions can exceed the minimum mapping unit.</StateView>}
-        {tooHeavy && <StateView compact kind="error" title="Analysis too large for interactive mode">This investigation covers a large area or time range that cannot be completed interactively. Try a smaller area (up to {interactiveMax?.toLocaleString()} km²) or shorter analysis window.</StateView>}
+        {tooHeavy && <StateView compact kind="error" title="Analysis area exceeds the interactive limit">Analysis area exceeds TerraTrace's {interactiveMax?.toLocaleString()} km² limit. Select a smaller area — no forest-change analysis is run for this one.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && backendDown && <StateView compact kind="service-unavailable" title="Live analysis unavailable">Live Earth observation is temporarily unavailable. TERRATRACE does not display estimated, simulated, or placeholder measurements.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && !backendDown && health && !eeReady && (
           <StateView compact kind="service-unavailable" title="Live analysis unavailable">

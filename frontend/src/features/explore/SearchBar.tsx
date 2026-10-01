@@ -10,7 +10,12 @@ import { useMapRegistry } from '../map/registry';
 import { bboxAreaKm2, bboxPolygon, squareAround } from '../../lib/geo';
 import { Tooltip } from '../../design';
 
-const MAX_DIRECT_KM2 = 2500;
+/**
+ * A searched region is selected as-is only up to the backend's interactive analysis limit
+ * (TT_INTERACTIVE_MAX_KM2, default 1,500 km²); larger regions get a sample square at their centre,
+ * so a search never selects an area that cannot be analysed. Navigation is never limited.
+ */
+const MAX_DIRECT_KM2 = 1500;
 
 export function selectSearchResult(r: SearchResult) {
   const ui = useUi.getState();
@@ -24,6 +29,7 @@ export function selectSearchResult(r: SearchResult) {
     geometry: small ? bboxPolygon(r.bbox!) : squareAround(r.center, r.kind === 'coordinates' ? 10 : 20),
     source: 'search',
     name: small ? r.name : `${r.name} · sample area`,
+    point: r.center,
   });
 }
 
@@ -131,7 +137,7 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
         const ui = useUi.getState();
         ui.setPhase('explore');
         ui.requestCamera({ kind: 'point', point: p });
-        ui.setSelection({ geometry: squareAround(p, 10), source: 'search', name: 'Your location · 10 km area' });
+        ui.setSelection({ geometry: squareAround(p, 10), source: 'search', name: 'Your location · 10 km area', point: p });
       },
       () => setLocating(false),
       { timeout: 8000 },

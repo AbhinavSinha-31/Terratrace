@@ -244,6 +244,12 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
                   <span className="text-ink-3">Events</span><span className="t-data text-right text-ink">{hs.event_count}</span>
                 </div>
               )}
+              {(hover < win.start || hover > win.end) && (
+                <div className="mt-1.5 border-t border-line pt-1.5 text-[10.5px] leading-snug text-ink-4" data-testid="year-context">
+                  Single-year context · outside the {win.start} → {win.end} analysis window. The headline figures still describe {win.start} → {win.end}.
+                  {hs.source === 'landsat' && ' Landsat NDVI proxy (30 m) — not comparable with the modern forest mask.'}
+                </div>
+              )}
             </div>
           )}
           {/* hover preview for years without measured statistics */}

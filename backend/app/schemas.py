@@ -63,6 +63,20 @@ class AoiPreviewRequest(BaseModel):
     geometry: dict[str, Any]
 
 
+class AnalysisJobRequest(BaseModel):
+    """Start an analysis job for a registered area (`aoi_id`) or a new area (`geometry`, registered first)."""
+    aoi_id: str | None = Field(None, max_length=80)
+    geometry: dict[str, Any] | None = None
+    name: str | None = Field(None, max_length=120)
+    baseline: int = Field(2018, ge=1984, le=2100)
+    comparison: int = Field(2025, ge=1984, le=2100)
+
+
+class AoiRegisterRequest(BaseModel):
+    geometry: dict[str, Any]
+    name: str | None = Field(None, max_length=120)
+
+
 class AoiPreview(BaseModel):
     valid: bool
     message: str | None = None

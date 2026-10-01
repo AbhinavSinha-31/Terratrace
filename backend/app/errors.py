@@ -27,6 +27,12 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "insufficient_imagery": ("Insufficient usable imagery: there is not enough satellite imagery over this area for the requested years. "
                              "No forest-change measurements were generated.", False),
     "analysis_failed": ("The analysis could not be completed. No forest-change measurements were generated.", True),
+    # Earth Engine could not be reached at all (DNS / network down on the machine running TERRATRACE).
+    "earth_engine_unreachable": ("Live Earth observation could not be reached — the network connection to Google Earth Engine failed. "
+                                 "Check the internet connection and try again. No forest-change measurements were generated.", True),
+    # Earth Engine answered 429: the project's concurrency quota is exhausted (noncommercial Restricted Mode).
+    "earth_engine_throttled": ("Google Earth Engine is throttling requests for this project right now. "
+                               "Try again in a minute. No forest-change measurements were generated.", True),
     "internal_error": ("Something went wrong while preparing this request. No measurements were generated.", True),
     "not_found": ("This area is not available. Select or draw the area again.", False),
     "invalid_request": ("The request could not be processed. Check the selected area and years.", False),

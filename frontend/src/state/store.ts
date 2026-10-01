@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
-import type { AnalysisResult, AoiGeometry, ChangeType, Severity } from '../data/contracts';
+import type { AnalysisHistory, AnalysisJobStage, AnalysisResult, AoiGeometry, ChangeType, Severity } from '../data/contracts';
 import { newRid } from '../data/client';
 import { DEFAULT_ANALYSIS_WINDOW, DEFAULT_YEARS } from '../lib/time';
 
@@ -38,6 +38,8 @@ export interface Selection {
   geometry: AoiGeometry;
   source: 'study' | 'draw' | 'search' | 'click';
   name?: string;
+  /** The exact searched / located point [lon, lat] (shown as a pin while this selection is active). */
+  point?: [number, number];
 }
 
 /** A registered area (featured study or a custom AOI the backend has registered). */
@@ -71,6 +73,15 @@ export interface InvestigationState {
   analysisRequestId: string | null;
   analysisResult: AnalysisResult | null;
   analysisError: { code?: string; message: string } | null;
+  /** REAL progress of the running analysis job (backend stage + elapsed time); null when no job is running. */
+  analysisJob: AnalysisJobProgress | null;
+}
+
+export interface AnalysisJobProgress {
+  id: string;
+  stage: AnalysisJobStage;
+  elapsedS: number;
+  stages: { stage: AnalysisJobStage; duration_s: number | null }[];
 }
 
 /** Identity of an analysis request; a response is applied only if it still matches the state. */
@@ -115,7 +126,8 @@ interface UiState {
    * Open a registered study: populates the investigation (study, AOI, default or given years) and leaves
    * the analysis IDLE ("Ready to analyze"). It NEVER starts an analysis — only requestAnalysis() does.
    */
-  openAnalysis(id: string, opts?: { view?: View; window?: { start: number; end: number }; name?: string; geometry?: AoiGeometry; imageryYear?: number }): void;
+  /** Open a study. `run: true` (Featured investigation cards only) also starts its REAL analysis immediately. */
+  openAnalysis(id: string, opts?: { view?: View; window?: { start: number; end: number }; name?: string; geometry?: AoiGeometry; imageryYear?: number; run?: boolean }): void;
   goExplore(phase?: ExplorePhase): void;
   setYears(years: number[]): void;
   /** Set baseline/comparison. Resets an incompatible analysis to idle; never starts one. */
@@ -131,6 +143,10 @@ interface UiState {
   requestAnalysis(): void;
   acceptAnalysis(meta: AnalysisRequestMeta, result: AnalysisResult): boolean;
   failAnalysis(meta: AnalysisRequestMeta, error: { code?: string; message: string }): boolean;
+  /** Real job progress for the current request (ignored for a stale request). */
+  setAnalysisJob(meta: AnalysisRequestMeta, job: AnalysisJobProgress): boolean;
+  /** Merge measured out-of-window years (history) into the current READY result (ignored when stale). */
+  mergeHistory(meta: { studyId: string; baselineYear: number; comparisonYear: number; resultId: string }, history: AnalysisHistory): boolean;
   /** Discard the analysis (e.g. closing a failed custom-area request). */
   resetAnalysis(): void;
   setPlaying(p: boolean): void;
@@ -170,6 +186,7 @@ const IDLE_ANALYSIS = {
   analysisRequestId: null,
   analysisResult: null,
   analysisError: null,
+  analysisJob: null,
 };
 
 const EMPTY_INVESTIGATION: InvestigationState = {
@@ -199,7 +216,7 @@ export const useUi = create<UiState>((set, get) => ({
   playing: false,
   compare: false,
   imagery: 'sentinel',
-  layers: { satellite: true, forest: true, ndvi: false, change: true, intensity: true, boundary: true, labels: false, globalForest: true, forestOpacity: 0.4 },
+  layers: { satellite: true, forest: true, ndvi: false, change: true, intensity: true, boundary: true, labels: false, globalForest: true, forestOpacity: 0.3 },
   drawTool: null,
   selectedEventId: null,
   hoveredEventId: null,
@@ -253,6 +270,10 @@ export const useUi = create<UiState>((set, get) => ({
       sheet: 'peek',
       camera: { kind: 'aoi', id, nonce: ++nonce },
     });
+    if (opts?.run) {
+      if (import.meta.env.DEV) console.debug('[analysis] featured investigation opened with run', { id, window: w });
+      get().requestAnalysis();
+    }
   },
   goExplore: (phase) =>
     set((s) => ({
@@ -307,6 +328,7 @@ export const useUi = create<UiState>((set, get) => ({
         analysisStatus: 'complete',
         analysisResult: result,
         analysisError: null,
+        analysisJob: null,
       },
       ...(wasCustom ? { view: 'analysis' as View, tab: 'overview' as PanelTab, drawerOpen: true, drawTool: null, sheet: 'peek' as SheetSnap, camera: { kind: 'aoi' as const, id: result.id, nonce: ++nonce } } : {}),
     });
@@ -315,7 +337,29 @@ export const useUi = create<UiState>((set, get) => ({
   failAnalysis: (meta, error) => {
     const s = get();
     if (!requestMatches(s.investigation, meta)) return false;   // stale response - discarded
-    set({ investigation: { ...s.investigation, analysisStatus: 'error', analysisResult: null, analysisError: error } });
+    set({ investigation: { ...s.investigation, analysisStatus: 'error', analysisResult: null, analysisError: error, analysisJob: null } });
+    return true;
+  },
+  setAnalysisJob: (meta, job) => {
+    const s = get();
+    if (!requestMatches(s.investigation, meta)) return false;
+    set({ investigation: { ...s.investigation, analysisJob: job } });
+    return true;
+  },
+  mergeHistory: (meta, history) => {
+    const inv = get().investigation;
+    const r = inv.analysisResult;
+    if (!r?.bundle || r.id !== meta.resultId || inv.study?.id !== meta.studyId || inv.baselineYear !== meta.baselineYear || inv.comparisonYear !== meta.comparisonYear) return false;
+    const own = new Set(r.bundle.summary.years.map((y) => y.year));
+    const years = [...r.bundle.summary.years, ...history.years.filter((y) => !own.has(y.year))].sort((a, b) => a.year - b.year);
+    const periods = [...(history.periods ?? []), ...(r.bundle.summary.periods ?? []).filter((p) => !(history.periods ?? []).some((h) => h.from_year === p.from_year && h.to_year === p.to_year))];
+    // Forest-mask tiles exist for every analysable history year too (rebuilt server-side from the registered AOI).
+    const histOk = history.years.filter((y) => y.passes_quality && !own.has(y.year)).map((y) => y.year);
+    const overlays = r.bundle.layers.overlays.map((o) => (o.kind === 'forest' && o.tiles_by_year
+      ? { ...o, tiles_by_year: { ...Object.fromEntries(histOk.map((y) => [String(y), [`/api/tiles/${r.id}/forest/${y}/{z}/{x}/{y}`]])), ...o.tiles_by_year } }
+      : o));
+    const summary = { ...r.bundle.summary, years, periods, history: r.bundle.summary.history ?? history.history ?? undefined };
+    set({ investigation: { ...inv, analysisResult: { ...r, bundle: { ...r.bundle, summary, layers: { ...r.bundle.layers, overlays } } } } });
     return true;
   },
   resetAnalysis: () => set((s) => ({ investigation: { ...s.investigation, ...IDLE_ANALYSIS } })),

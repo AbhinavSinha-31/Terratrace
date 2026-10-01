@@ -36,6 +36,13 @@ class Settings:
     ee_project: str | None = os.environ.get("EE_PROJECT") or None
     ee_service_account_key: str | None = os.environ.get("EE_SERVICE_ACCOUNT_KEY") or None
     ee_timeout_s: float = _float("EE_TIMEOUT_S", 120.0)
+    # Per-request HTTP deadline for Earth Engine calls (getInfo / getMapId). Without it a request can block a worker
+    # forever (observed 2026-09-27: one getInfo hung 40,471 s across a network drop). Longer than any measured
+    # legitimate request (≤ ~62 s), so late results can still finish and be cached for Retry.
+    ee_request_deadline_s: float = _float("EE_REQUEST_DEADLINE_S", 180.0)
+    # Dedicated worker threads for analysis jobs (separate from tile/imagery work, so analyses never queue behind
+    # map tiles). Earth Engine Restricted Mode throttles concurrency, so a small number is deliberate.
+    analysis_workers: int = int(_float("TT_ANALYSIS_WORKERS", 3))
     # Largest AOI accepted for an INTERACTIVE (synchronous) analysis. Measured 2026-09-27 (tt-ee-2.0): AOIs up to
     # 1,215 km² completed within the 120 s window; 1,773 km² and 1,822 km² exceeded it on cold runs.
     # Every composite year is always computed, so the requested window does not change the cost.

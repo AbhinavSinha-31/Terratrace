@@ -153,6 +153,8 @@ export interface QualityIssue {
   rule: string;
   years: number[];
   message: string;
+  /** The measured value that failed the check (unstable_forest_mask: gain % of the compared area per year). */
+  evidence?: { measured_pct_per_year: number; threshold_pct_per_year: number; gain_ha: number; compared_ha: number };
 }
 
 export interface AnalysisQuality {
@@ -441,13 +443,6 @@ export interface AoiPreview {
   forest_source?: string | null;
 }
 
-export interface AnalyzeRequest {
-  geometry: AoiGeometry;
-  baseline_period: { year: number };
-  comparison_period: { year: number };
-  name?: string;
-}
-
 // ----------------------------------------------------------------------------- imagery (backend-owned; never an analysis)
 export type ImageryYearStatus = 'AVAILABLE' | 'INSUFFICIENT' | 'UNAVAILABLE';
 
@@ -514,4 +509,31 @@ export interface Basemaps {
   hires: BaseLayer;
   labels: BaseLayer;
   reference_forest: BaseLayer;
+}
+
+// ----------------------------------------------------------------------------- asynchronous analysis jobs
+/** Real backend job stage (never estimated). */
+export type AnalysisJobStage = 'QUEUED' | 'VALIDATING' | 'PREPARING_IMAGERY' | 'MEASURING_OBSERVATION_COVERAGE' | 'MEASURING_FOREST_COVER'
+  | 'DETECTING_CHANGE' | 'VALIDATING_RESULT' | 'READY' | 'INVALID_ANALYSIS' | 'UNAVAILABLE' | 'ERROR' | 'CANCELLED';
+
+export interface AnalysisJob {
+  job_id: string;
+  analysis_id: string;
+  window: { baseline_year: number; comparison_year: number };
+  /** QUEUED | PROCESSING while running; the analysis status once terminal. */
+  status: 'QUEUED' | 'PROCESSING' | 'READY' | 'INVALID_ANALYSIS' | 'UNAVAILABLE' | 'ERROR' | 'CANCELLED';
+  stage: AnalysisJobStage;
+  elapsed_s: number;
+  stages: { stage: AnalysisJobStage; duration_s: number | null }[];
+  /** The analysis envelope — only once the job is terminal. */
+  result: AnalysisEnvelope | null;
+}
+
+/** Measured statistics for the years OUTSIDE the analysed window (Time Machine / charts only). */
+export interface AnalysisHistory {
+  aoi_id: string;
+  window: [number, number];
+  years: YearStat[];
+  periods: ChangePeriod[];
+  history: AoiSummary['history'] | null;
 }

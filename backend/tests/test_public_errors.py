@@ -70,7 +70,8 @@ def test_large_aoi_is_refused_before_any_computation(ee_ready, monkeypatch):
     env = client.get("/api/analysis/rondonia-frontier", params={"baseline": 1984, "comparison": 2025}).json()   # 1,773 km²
     assert called == [], "no Earth Engine work may start for an over-limit AOI"
     assert env["analysisStatus"] == "UNAVAILABLE" and env["reasonCode"] == "analysis_too_large"
-    assert env["reason"].startswith("This investigation covers a large area or time range")
+    assert env["reason"].startswith("Analysis area exceeds TerraTrace's 1,500 km² limit (selected area: 1,773 km²)")
+    assert env["limits"] == {"selected_area_km2": pytest.approx(1772.6, abs=0.1), "maximum_area_km2": 1500}
     assert env["aoi"]["area_km2"] == pytest.approx(1772.6, abs=1), "the AOI is never silently reduced"
     assert env["window"] == {"baseline_year": 1984, "comparison_year": 2025}, "the window is never silently reduced"
 
@@ -169,3 +170,17 @@ def test_late_result_is_cached_for_retry(ee_ready, monkeypatch):
     assert first["reasonCode"] == "analysis_timeout"
     assert second["analysisStatus"] == "INVALID_ANALYSIS" and len(calls) == 1, "retry must reuse the late result"
     assert any(k.startswith("silent-valley-2021-2025") for k in saved)
+
+
+@pytest.mark.parametrize("aid", ["..%5C..%5C..%5Cfrontend%5Cpackage", "..%2F..%2F..%2Ffrontend%2Fpackage", "aoi-..%5Cx"])
+def test_aoi_id_cannot_read_files_outside_the_aoi_cache(aid):
+    # The AOI id comes from the URL; only ids the backend generates may map to a file.
+    for path in (f"/api/aoi/{aid}", f"/api/analysis-status/{aid}"):
+        r = client.get(path)
+        assert r.status_code == 404, (path, r.text)
+        assert "terratrace-frontend" not in r.text
+
+
+def test_aoi_id_in_query_cannot_read_files_outside_the_aoi_cache():
+    r = client.get("/api/imagery", params={"aoi": "../../../frontend/package", "year": 2020})
+    assert r.status_code == 404, r.text

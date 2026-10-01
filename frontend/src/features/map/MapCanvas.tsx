@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ChangeEvent, ChangeType, Severity, StudyArea } from '../../data/contracts';
-import { useBasemaps, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
+import { useBasemaps, useCandidateAoi, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import { EXPLORE_REGIONS } from '../../lib/regions';
 import { squareAround } from '../../lib/geo';
@@ -28,8 +28,12 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   const aoiId = useUi((s) => s.investigation.study?.id ?? null);
   const bundle = useCurrentBundle();
   const basemaps = useBasemaps().data ?? null;
+  // A search/drawn selection is registered so its live imagery loads before any analysis (never analyses).
+  const drawToolActive = useUi((s) => !!s.drawTool);
+  const candidateAoi = useCandidateAoi();
+  const imageryAoi = aoiId ? aoi : drawToolActive ? null : candidateAoi;
   // Real imagery for THIS map's year (compare mode's 'before' map asks for its own year).
-  const yearImagery = useImageryDecision(aoiId, year).data ?? null;
+  const yearImagery = useImageryDecision(imageryAoi?.id ?? null, year).data ?? null;
   const readyResults = useReadyResults();
   const imagery = useUi((s) => s.imagery);
   const layers = useUi((s) => s.layers);
@@ -55,9 +59,10 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   );
 
   const state = {
-    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, events, hotspots, year, imagery, layers, severities, types,
+    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, imageryAoi, events, hotspots, year, imagery, layers, severities, types,
     selectedId, hoveredId, hoveredAoiId,
     draft: drawTool ? draft : aoiId ? null : selection?.geometry ?? null,
+    pin: drawTool || aoiId ? null : selection?.point ?? null,
     drawing: !!drawTool, spin: role === 'primary', reducedMotion,
   };
   const stateRef = useRef(state);
@@ -104,7 +109,7 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
       reg().set({ primary: map, drawer });
       // Dev-only hooks for the regression/e2e scripts (never shipped in production builds).
       if (import.meta.env.DEV) Object.assign(window as object, { __tt: map, __ttUi: useUi });
-    }
+    } else if (import.meta.env.DEV) Object.assign(window as object, { __ttBefore: map });
     return () => {
       onReady(role, null);
       if (role === 'primary') reg().set({ primary: null, drawer: null });

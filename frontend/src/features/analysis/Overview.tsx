@@ -43,7 +43,9 @@ export function Overview() {
   const dist = evidenceDistribution(inWindow);
   // "No change" only when loss was actually measured as ~0 — never when it is missing.
   const noChange = k.total_loss_ha !== null && k.total_loss_ha < 1 && inWindow.length === 0;
-  const dash = (v: number | null, f: (n: number) => string) => (v === null ? '—' : f(v));
+  const dash = (v: number | null | undefined, f: (n: number) => string) => (v === null || v === undefined ? '—' : f(v));
+  // Observation coverage of the two compared composites (measured; '—' when not measured).
+  const cov = (y: number) => s.years.find((r) => r.year === y)?.coverage_pct ?? null;
 
   return (
     <div className="space-y-6">
@@ -54,15 +56,39 @@ export function Overview() {
           <Badge tone="forest">Live · Earth Engine</Badge>
         </div>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{aoi?.description}</p>
-        <div className="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-md bg-line">
-          {[
-            ['Area analysed', `${fmtKm2(aoi?.area_km2 ?? 0)} km²`],
-            ['Forest change', dash(k.net_change_pct, (v) => fmtSignedPct(v))],
-            ['Forest lost', dash(k.total_loss_ha, (v) => `${fmtHa(v)} ha`)],
-          ].map(([l, v]) => (
-            <div key={l} className="bg-surface px-3 py-2.5">
-              <div className="text-[10.5px] text-ink-3">{l}</div>
-              <div className="t-data mt-0.5 text-[14px] text-ink">{v}</div>
+        <div className="mt-4 space-y-3" data-testid="analysis-kpis">
+          {([
+            ['Analysis window', [
+              ['Area analysed', dash(aoi?.area_km2, (v) => `${fmtKm2(v)} km²`)],
+              ['Compared area', dash(k.compared_ha, (v) => `${fmtHa(v)} ha`)],
+              [`Observed ${win.start} / ${win.end}`, `${dash(cov(win.start), (v) => `${Math.round(v)}%`)} / ${dash(cov(win.end), (v) => `${Math.round(v)}%`)}`],
+            ]],
+            ['Forest cover', [
+              [`Forest ${k.baseline_year}`, dash(k.forest_baseline_ha, (v) => `${fmtHa(v)} ha`)],
+              [`Forest ${k.latest_year}`, dash(k.forest_latest_ha, (v) => `${fmtHa(v)} ha`)],
+            ]],
+            ['Forest change', [
+              ['Forest lost', dash(k.total_loss_ha, (v) => `${fmtHa(v)} ha`)],
+              ['Forest gained', dash(k.total_gain_ha, (v) => `${fmtHa(v)} ha`)],
+              ['Net change', dash(k.net_change_ha, (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtHa(Math.abs(v))} ha`)],
+              ['Net change %', dash(k.net_change_pct, (v) => fmtSignedPct(v))],
+            ]],
+            ['Events', [
+              ['Detected events', String(k.event_count)],
+              ['High / critical', String(k.high_severity_count)],
+              ['Mean evidence', dash(k.mean_confidence, (v) => `${Math.round(v * 100)}%`)],
+            ]],
+          ] as const).map(([group, cells]) => (
+            <div key={group}>
+              <div className="t-label mb-1.5 !text-[9px] text-ink-4">{group}</div>
+              <div className={`grid gap-px overflow-hidden rounded-md bg-line ${cells.length === 4 ? 'grid-cols-2' : cells.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                {cells.map(([l, v]) => (
+                  <div key={l} className="bg-surface px-3 py-2.5" data-kpi={l}>
+                    <div className="text-[10.5px] text-ink-3">{l}</div>
+                    <div className="t-data mt-0.5 text-[14px] text-ink">{v}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>

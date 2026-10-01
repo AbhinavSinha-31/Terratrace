@@ -54,3 +54,11 @@ ml/models/*.safetensors
 ml/models/*.pkl
 ml/models/*.joblib
 ml/outputs/
+
+# --- TypeScript incremental build info
+*.tsbuildinfo
+
+# --- local audit reports (kept on disk, not versioned)
+/TERRATRACE_PROJECT_AUDIT.md
+/TERRATRACE_STATUS.md
+/TERRATRACE_ARCHITECTURE.md

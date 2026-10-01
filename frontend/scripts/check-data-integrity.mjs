@@ -2,7 +2,7 @@
 /**
  * End-to-end data-integrity check (run against the dev server + backend):
  *
- *   npm run dev                  # frontend (and the backend on :8000)
+ *   npm run dev                  # frontend (and the backend on :8001)
  *   npm run test:integrity       # uses the locally installed Microsoft Edge / Chrome
  *
  * Works in both backend states (detected from /api/health):
@@ -125,7 +125,9 @@ async function run(label, { offline }) {
   check(!FORBIDDEN.test(await page.locator('body').innerText()), `${label}: no demonstration/simulated wording on landing`);
 
   // ---- request counter: every analysis request (GET /api/analysis/<id>?... or POST /api/analyze)
-  const ANALYSIS_URL = /\/api\/analysis\/[^/?]+\?|\/api\/analyze\b/;
+  // An analysis request = a job creation (POST /api/analysis-jobs) or a legacy synchronous endpoint. Job status polls
+  // (/api/analysis-jobs/<id>) and the history request (/api/analysis/<id>/history) are not new analyses.
+  const ANALYSIS_URL = /\/api\/analysis\/[^/?]+\?|\/api\/analyze\b|\/api\/analysis-jobs(\?|$)/;
   const analysisRequests = [];
   page.on('request', (r) => { if (ANALYSIS_URL.test(r.url())) analysisRequests.push(r.url()); });
   // Imagery decisions requested from the backend imagery endpoint.
@@ -291,7 +293,8 @@ async function run(label, { offline }) {
     const nA = analysisRequests.length;
     await page.goto(`${BASE}#/analysis/${AOI}?year=2020`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => !!window.__ttUi?.getState().investigation.study && window.__tt?.loaded, null, { timeout: 45000 }).catch(() => {});
-    await page.waitForFunction(() => document.querySelector('button[data-imagery-status="UNAVAILABLE"]'), null, { timeout: 30000 }).catch(() => {});
+    // Generous wait: under heavy load (build + live Earth Engine) the analysis view can take > 30 s to mount.
+    await page.waitForFunction(() => document.querySelector('button[data-imagery-status="UNAVAILABLE"]'), null, { timeout: 90000 }).catch(() => {});
     const ticks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button[data-imagery-status]')].map((b) => [b.textContent, [b.getAttribute('data-imagery-status'), b.hasAttribute('data-unavailable')]])));
     check(JSON.stringify(ticks['’95']) === '["UNAVAILABLE",true]', `${label}: timeline marks an UNAVAILABLE year from the availability endpoint`, JSON.stringify(ticks['’95']));
     check(JSON.stringify(ticks['’18']) === '["INSUFFICIENT",true]', `${label}: timeline marks an INSUFFICIENT year`, JSON.stringify(ticks['’18']));
@@ -342,11 +345,12 @@ async function run(label, { offline }) {
     const btn = page.getByRole('button', { name: live ? /Analyze forest change/ : /Open area · imagery only/ });
     await btn.waitFor({ timeout: 10000 });
     check(analysisRequests.filter((u) => u.includes('/api/analyze')).length === 0, `${label}: selecting a custom area sends 0 analysis requests`);
-    const resp = page.waitForResponse((r) => r.url().includes('/api/analyze'), { timeout: ANALYSIS_TIMEOUT }).catch(() => null);
     const nA = analysisRequests.length;
     await btn.click();
-    const env = await (await resp)?.json().catch(() => null);
     await page.waitForFunction(() => window.__ttUi.getState().investigation.study?.id?.startsWith('aoi-'), null, { timeout: 90000 });
+    // The analysis runs as a job; its terminal envelope is what the app accepted (read from the investigation).
+    const env = await page.evaluate(() => { const r = window.__ttUi.getState().investigation.analysisResult;
+      return r ? { analysisStatus: r.status, summary: r.bundle?.summary ?? null } : null; });
     check(analysisRequests.length - nA === 1, `${label}: explicit Analyze sends exactly 1 analysis request`, `${analysisRequests.length - nA} sent`);
     if (live && env?.analysisStatus === 'READY') {
       const errs = validityErrors(env);

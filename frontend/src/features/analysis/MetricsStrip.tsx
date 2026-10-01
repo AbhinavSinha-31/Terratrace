@@ -90,7 +90,7 @@ function NoMetrics({ status }: { status: string }) {
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <SatelliteDish size={16} className="shrink-0 text-warn" />
         <div className="min-w-0">
-          <div className="t-label text-warn">{status === 'INVALID_ANALYSIS' ? 'Analysis failed scientific validation' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}</div>
+          <div className="t-label text-warn">{status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}</div>
           <div className="mt-1 truncate text-[11.5px] text-ink-3">No result means no result: forest-change measurements appear only for completed, validated analyses.</div>
         </div>
       </div>

@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import { skipToken, useQueries, useQuery } from '@tanstack/react-query';
 import { ApiError, client } from './client';
 import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, StudyArea } from './contracts';
-import { useUi } from '../state/store';
+import { selectCandidate, useUi } from '../state/store';
 import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
+import { fmtKm2 } from '../lib/format';
 
 export const useHealth = () => useQuery({ queryKey: ['health'], queryFn: () => client.health(), staleTime: 20000, refetchInterval: 30000 });
 
@@ -16,6 +17,69 @@ export const useImageryDecision = (aoi: string | null, year: number) =>
     // Only a 429 (throttled) is retried, exactly once; every other failure is shown as it is.
     retry: (n, e) => n < 1 && e instanceof ApiError && e.status === 429, retryDelay: 1500,
   });
+
+/**
+ * The candidate selection (search / drawn / clicked area, no study yet) registered with the backend so its
+ * live imagery can load before any analysis. Registration is cheap (validation only) and never analyses.
+ */
+export function useCandidateAoi(): StudyArea | null {
+  const candidate = useUi(selectCandidate);
+  const geometry = candidate?.geometry ?? null;
+  const q = useQuery({
+    queryKey: ['aoi-register', geometry ? JSON.stringify(geometry.coordinates) : null],
+    queryFn: geometry ? () => client.registerAoi(geometry, candidate?.name) : skipToken,
+    staleTime: Infinity, retry: false,
+  });
+  return geometry ? q.data ?? null : null;
+}
+
+export type CardStatus = 'Not run' | 'Processing' | 'Analysis ready' | 'Scientific validation required' | 'Area exceeds limit' | 'Unavailable' | '…';
+
+/**
+ * Featured card status, derived from REAL state — never a static label:
+ *   1. the live investigation, when this study is the one open (running / its result / its error);
+ *   2. otherwise the backend's stored outcome for the default window (/api/analysis-status — read-only).
+ */
+export function useStudyCardStatus(id: string): CardStatus {
+  return useStudyCard(id).status;
+}
+
+/** Card status plus a short, factual detail (why validation failed / why unavailable) and the full reason. */
+export function useStudyCard(id: string): { status: CardStatus; detail: string | null; reason: string | null } {
+  const inv = useUi((s) => s.investigation);
+  const health = useHealth().data;
+  const isThis = inv.study?.id === id && inv.baselineYear === DEFAULT_ANALYSIS_WINDOW.start && inv.comparisonYear === DEFAULT_ANALYSIS_WINDOW.end;
+  const stored = useQuery({
+    // Re-read whenever this study's analysis settles, so returning to the cards shows the new state.
+    queryKey: ['analysis-status', id, isThis ? `${inv.analysisStatus}:${inv.analysisRequestId}` : 'other'],
+    queryFn: health?.backend === false ? skipToken : () => client.analysisStatus(id, DEFAULT_ANALYSIS_WINDOW),
+    staleTime: 30_000, retry: false,
+  });
+  // The card shows the REAL failure category from the backend: an oversized area is a deterministic AOI validation
+  // result, never a scientific one; a failed validity check is never shown as "unavailable".
+  const fromResult = (s: string | undefined | null, code?: string | null): CardStatus | null =>
+    code === 'analysis_too_large' ? 'Area exceeds limit'
+      : s === 'READY' ? 'Analysis ready' : s === 'INVALID_ANALYSIS' ? 'Scientific validation required' : s === 'UNAVAILABLE' || s === 'ERROR' ? 'Unavailable' : s === 'RUNNING' || s === 'PROCESSING' ? 'Processing' : null;
+  const limitDetail = (max?: number | null) => `area exceeds ${max ? fmtKm2(max) : fmtKm2(health?.limits.max_aoi_km2 ?? 1500)} km² limit`;
+  const pairs = (ys: number[][] | undefined) => (ys?.length ? `unstable forest mask ${ys.map(([a, b]) => `${a}→${String(b).slice(2)}`).join(', ')}` : null);
+  const card = (status: CardStatus, detail: string | null = null, reason: string | null = null) => ({ status, detail, reason });
+  if (isThis) {
+    const r = inv.analysisResult;
+    if (inv.analysisStatus === 'running') return card('Processing', 'live Earth Engine computation');
+    if (inv.analysisStatus === 'complete') {
+      const s = fromResult(r?.status, r?.reasonCode) ?? 'Unavailable';
+      return card(s, s === 'Scientific validation required' ? pairs(r?.quality?.issues.map((i) => i.years)) : s === 'Area exceeds limit' ? limitDetail() : s === 'Unavailable' ? r?.reason ?? null : null, r?.reason ?? null);
+    }
+    if (inv.analysisStatus === 'error') return card('Unavailable', inv.analysisError?.message ?? null, inv.analysisError?.message ?? null);
+  }
+  if (!health) return card('…');
+  if (health.backend === false) return card('Unavailable', 'backend offline');
+  const d = stored.data;
+  const s = fromResult(d?.status, d?.reasonCode);
+  if (s) return card(s, s === 'Scientific validation required' ? pairs(d?.issueYears) : s === 'Area exceeds limit' ? limitDetail(d?.maximum_area_km2) : s === 'Unavailable' ? d?.reason ?? null : null, d?.reason ?? null);
+  if (d?.status === 'NOT_RUN') return health.analysis.status === 'ready' ? card('Not run', 'click to run live analysis') : card('Unavailable', 'Earth Engine unavailable');
+  return card(stored.isError ? 'Unavailable' : '…');
+}
 
 /** Measured per-year availability for the timeline. */
 export const useImageryAvailability = (aoi: string | null) =>
@@ -75,12 +139,19 @@ export const useExplanation = (facts: ExplanationFacts | null, enabled: boolean)
     retry: false,
   });
 
-/** The StudyArea of the active investigation (featured list entry or the analysis' own AOI). */
+/**
+ * The StudyArea of the active investigation: featured list entry, the analysis' own AOI, or — for a custom
+ * area opened before any analysis (link / reload) — its registered definition from /api/aoi/{id}.
+ */
 export function useSelectedAoi(): StudyArea | null {
   const id = useUi((s) => s.investigation.study?.id ?? null);
-  const featured = useStudyAreas().data?.items.find((a) => a.id === id);
+  const featuredList = useStudyAreas().data;
+  const featured = featuredList?.items.find((a) => a.id === id);
   const analysis = useUi((s) => s.investigation.analysisResult);
-  return featured ?? (analysis && analysis.id === id ? analysis.aoi : null);
+  const fromResult = analysis && analysis.id === id ? analysis.aoi : null;
+  const needDoc = !!id && !!featuredList && !featured && !fromResult;
+  const doc = useQuery({ queryKey: ['aoi', id], queryFn: needDoc ? () => client.getAoi(id!) : skipToken, staleTime: Infinity, retry: false });
+  return featured ?? fromResult ?? (doc.data && doc.data.id === id ? doc.data : null);
 }
 
 /** Events passing the severity/type filters (all years). Empty unless READY. */

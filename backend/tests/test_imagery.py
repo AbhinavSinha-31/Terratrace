@@ -149,7 +149,7 @@ def fake_imagery(monkeypatch):
         n = scenes.get(year, 50)
         url = f"https://earthengine.example/v1/maps/{aid}-{year}/tiles/{{z}}/{{x}}/{{y}}" if n else None
         if url:
-            imagery.ee_provider._mapids[(aid, "aoi-imagery", year)] = url
+            imagery.ee_provider.store_mapid((aid, "aoi-imagery", year), url)
         return {"dataset": "COPERNICUS/S2_SR_HARMONIZED", "dateRange": {"start": f"{year}-01-01", "end": f"{year + 1}-01-01"},
                 "sceneCount": n, "bands": ["B4", "B3", "B2"], "tileUrl": url}
 
@@ -267,3 +267,34 @@ def test_frontend_source_constructs_no_imagery_urls():
             text = f.read_text(encoding="utf-8")
             offenders += [f"{f.relative_to(REPO)}: {h}" for h in IMAGERY_HOSTS if h in text]
     assert offenders == [], offenders
+
+
+def test_tiles_work_after_a_backend_restart(fake_imagery):
+    """Regression (2026-09-28): after a backend restart the in-memory imagery decisions were gone and EVERY tile
+    request answered 404, so the map was black everywhere. A tile request must re-create the decision itself."""
+    imagery._decisions.clear()
+    imagery.ee_provider._mapids.clear()          # nothing in memory, exactly like a fresh process
+    r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"].endswith("/tiles/10/1/2")
+    for x in range(3, 8):                         # the rest of the map's tiles reuse it
+        assert client.get(f"/api/imagery/tiles/{AID}/2020/10/{x}/2", follow_redirects=False).status_code == 307
+    assert fake_imagery == [2020], "one Earth Engine decision for all tiles"
+    # a year without scenes is still refused — never another year's imagery
+    assert client.get(f"/api/imagery/tiles/{AID}/2016/10/1/2", follow_redirects=False).status_code == 404
+
+
+def test_expired_map_ids_are_rebuilt(fake_imagery, monkeypatch):
+    client.get("/api/imagery", params={"aoi": AID, "year": 2020})
+    monkeypatch.setattr(imagery.ee_provider, "MAPID_TTL_S", -1)       # every cached map id counts as expired
+    assert imagery.ee_provider.cached_imagery_url(AID, 2020) is None
+    r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
+    assert r.status_code == 307 and fake_imagery == [2020, 2020], "rebuilt from the same real inputs"
+
+
+def test_tile_failure_caused_by_earth_engine_is_transient(monkeypatch):
+    """A network/Earth Engine failure while re-creating a tile's decision is transient (503, retried by the tile
+    loader) — only 'no scenes' is a final 404. Otherwise a network blip leaves permanent black tiles."""
+    imagery._decisions.clear()
+    monkeypatch.setattr(imagery.ee_provider, "status", lambda: ("error", "HTTPSConnectionPool: Max retries exceeded (NameResolutionError)"))
+    r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
+    assert r.status_code == 503 and r.json()["detail"]["retryable"] is True

@@ -13,6 +13,15 @@ from app.providers.earth_engine import provider as p
 class FakeEE:
     def __init__(self, init_error: Exception | None = None, answer: int = 2):
         self.init_error, self.answer, self.init_calls, self.project = init_error, answer, 0, None
+        fake = self
+
+        class Data:   # ee.data: records the per-request deadline set at initialisation
+            deadline_ms = None
+
+            @staticmethod
+            def setDeadline(ms):
+                fake.data.deadline_ms = ms
+        self.data = Data()
 
     def Initialize(self, credentials=None, project=None):
         self.init_calls += 1
@@ -50,6 +59,7 @@ def test_ready_only_after_real_initialisation_and_request(prov, monkeypatch):
     monkeypatch.setattr(p, "_ee", lambda: fake)
     status, detail = prov.status()
     assert status == "ready" and fake.init_calls == 1 and fake.project == "proj-test"
+    assert fake.data.deadline_ms == int(p.settings.ee_request_deadline_s * 1000), "every Earth Engine request is bounded"
     assert "user credentials" in detail and "proj-test" in detail
     prov.status()
     assert fake.init_calls == 1, "a successful initialisation is reused"

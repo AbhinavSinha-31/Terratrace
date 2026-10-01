@@ -1,69 +1,75 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { client } from '../../data/client';
+import { Check, X } from 'lucide-react';
+import { cancelRunningAnalysis } from '../../data/analysisRunner';
+import type { AnalysisJobStage } from '../../data/contracts';
 import { useSelectedAoi } from '../../data/queries';
 import { useUi } from '../../state/store';
 import { Button, Panel, StateView } from '../../design';
 
 /**
- * REAL analysis stages, reported by the backend for this request (GET /api/progress/<rid>).
- * No percentage is shown: the duration of an Earth Engine computation cannot be predicted,
- * so the indicator is indeterminate and only the actual current stage is highlighted.
+ * REAL analysis stages of the backend job (GET /api/analysis-jobs/{id}, polled by the analysis runner).
+ * No percentage is shown: the duration of an Earth Engine computation cannot be predicted, so the indicator
+ * is indeterminate and only the actual current stage is highlighted.
  */
-const STAGES: [string, string][] = [
-  ['validating_aoi', 'Validating area'],
-  ['preparing_imagery', 'Preparing imagery'],
-  ['measuring_coverage', 'Measuring observation coverage'],
-  ['measuring_forest', 'Measuring forest cover'],
-  ['detecting_change', 'Detecting change'],
-  ['validating_result', 'Validating result'],
+const STAGES: [AnalysisJobStage, string][] = [
+  ['VALIDATING', 'Validating area'],
+  ['PREPARING_IMAGERY', 'Preparing imagery'],
+  ['MEASURING_OBSERVATION_COVERAGE', 'Measuring observation coverage & forest cover'],
+  // Reported only when a separate request runs (transitions that skip a year without usable imagery).
+  ['MEASURING_FOREST_COVER', 'Measuring forest transitions (skipped year)'],
+  ['DETECTING_CHANGE', 'Detecting change'],
+  ['VALIDATING_RESULT', 'Validating result'],
 ];
+const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-function StageProgress({ title, subtitle, rid }: { title: string; subtitle: React.ReactNode; rid: string | null }) {
-  const [elapsed, setElapsed] = useState(0);
+function StageProgress({ title, subtitle }: { title: string; subtitle: React.ReactNode }) {
+  const job = useUi((s) => s.investigation.analysisJob);
+  // Elapsed time comes from the backend job; it ticks locally between polls.
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t0 = Date.now();
-    const id = window.setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
+    setTick(0);
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
-  }, [rid]);
-  const p = useQuery({
-    queryKey: ['progress', rid],
-    queryFn: () => client.progress(rid!),
-    enabled: !!rid,
-    refetchInterval: 1000,
-    retry: false,
-  });
-  const current = p.data?.stage ?? null;
-  const idx = current ? STAGES.findIndex(([k]) => k === current) : -1;
+  }, [job?.elapsedS]);
+  const stage = job?.stage ?? 'QUEUED';
+  // Show the optional transitions step only when the backend actually ran it.
+  const shown = STAGES.filter(([k]) => k !== 'MEASURING_FOREST_COVER' || job?.stages.some((s) => s.stage === k));
+  const idx = shown.findIndex(([k]) => k === stage);
+  const label = stage === 'QUEUED' ? 'Waiting for an analysis worker' : shown[idx]?.[1] ?? stage;
+  const elapsed = (job?.elapsedS ?? 0) + tick;
   return (
-    <div role="status" aria-live="polite" aria-label={`${title}: ${current ? STAGES[idx]?.[1] : 'starting'}`} data-testid="stage-progress" data-stage={current ?? ''}>
-      <div className="flex items-baseline justify-between gap-3">
+    <div role="status" aria-live="polite" aria-label={`${title}: ${label}`} data-testid="stage-progress" data-stage={stage}>
+      <div className="t-label text-accent">Live analysis</div>
+      <div className="mt-1 flex items-baseline justify-between gap-3">
         <div className="t-h2">{title}</div>
-        <div className="t-data text-[11px] text-ink-3" title="Elapsed time">{elapsed}s</div>
+        <div className="t-data text-[11px] text-ink-3" title="Elapsed time" data-testid="elapsed">Elapsed {mmss(elapsed)}</div>
       </div>
       <div className="mt-1 text-[12px] text-ink-3">{subtitle}</div>
       <div className="tt-indeterminate mt-4 h-1 overflow-hidden rounded-full bg-white/[0.06]" aria-hidden>
         <motion.div className="h-full w-1/3 rounded-full bg-accent" animate={{ x: ['-100%', '300%'] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }} />
       </div>
-      <ol className="mt-4 space-y-1.5 text-[12px]">
-        {STAGES.map(([k, label], i) => {
+      <div className="mt-3 text-[12px] text-ink-2">Current stage: <span className="text-ink" data-testid="current-stage">{label}</span></div>
+      <ol className="mt-3 space-y-1.5 text-[12px]">
+        {shown.map(([k, lbl], i) => {
           const done = idx > i;
           const active = idx === i;
+          const took = job?.stages.find((s) => s.stage === k)?.duration_s;
           return (
             <li key={k} className={`flex items-center gap-2.5 ${active ? 'text-ink' : done ? 'text-ink-2' : 'text-ink-4'}`}>
               <span className={`grid h-4 w-4 place-items-center rounded-full ${done ? 'bg-accent/20 text-accent' : active ? 'shadow-[0_0_0_1.5px_rgba(69,208,196,0.8)]' : 'shadow-[0_0_0_1px_rgba(255,255,255,0.15)]'}`}>
                 {done ? <Check size={10} /> : active ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> : null}
               </span>
-              {label}
+              {lbl}
+              {done && took != null && <span className="t-data ml-auto text-[10.5px] text-ink-4">{took.toFixed(1)}s</span>}
             </li>
           );
         })}
       </ol>
-      <p className="mt-4 text-[11px] leading-relaxed text-ink-4">
-        Live Earth observation typically takes under two minutes for areas around 100 km². No partial or estimated results are shown.
-      </p>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className="text-[11px] leading-relaxed text-ink-4">No partial or estimated results are shown.</p>
+        <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => void cancelRunningAnalysis()} data-testid="cancel-analysis">Cancel analysis</Button>
+      </div>
     </div>
   );
 }
@@ -109,7 +115,7 @@ export function AnalysisProgressOverlay() {
   if (!running || !slow) return null;
   return (
     <Overlay>
-      <StageProgress title="Running live analysis" subtitle={<>{featured?.name ?? study?.name ?? aoiName ?? 'Selected area'} · {years}</>} rid={rid} />
+      <StageProgress title="Processing" subtitle={<>{featured?.name ?? study?.name ?? aoiName ?? 'Selected area'} · {years}</>} />
     </Overlay>
   );
 }

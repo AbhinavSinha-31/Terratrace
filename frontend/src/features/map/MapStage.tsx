@@ -4,7 +4,7 @@ import { Compass, Minus, Plus, RotateCcw, WifiOff, X } from 'lucide-react';
 import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
 import { imageryErrorMessage } from '../../data/imagerySync';
 import { useEeTiles } from './eeTiles';
-import { useBasemaps, useCurrentAnalysis, useCurrentBundle, useImageryDecision, useSelectedAoi } from '../../data/queries';
+import { useBasemaps, useCandidateAoi, useCurrentAnalysis, useCurrentBundle, useImageryDecision, useSelectedAoi } from '../../data/queries';
 import { CHROME, analysisPadding, landingInset, landingZoom, useBreakpoint } from '../../lib/useLayout';
 import { fmtCoord } from '../../lib/format';
 import { IconButton, Tooltip } from '../../design';
@@ -205,12 +205,16 @@ function ReferenceImageryNotice() {
   const q = useCurrentAnalysis();
   const bundle = q.data?.bundle ?? null;
   const img = bundle?.layers.imagery.find((i) => i.year === year);
-  const live = useImageryDecision(studyId, year);
+  // The open study, or a registered search/drawn selection (imagery before any analysis).
+  const candidate = useCandidateAoi();
+  const drawing = useUi((s) => !!s.drawTool);
+  const imageryId = studyId ?? (drawing ? null : candidate?.id ?? null);
+  const live = useImageryDecision(imageryId, year);
   const hiresLabel = useBasemaps().data?.hires.label ?? 'Esri World Imagery (current, undated)';
   const d = live.data;
   const throttling = useEeTiles((s) => s.throttling);
   // Imagery is independent of analysis: shown whenever no READY analysis layer covers this year.
-  const show = satellite && !!studyId && !img;
+  const show = satellite && !!imageryId && !img;
   const box = 'pointer-events-none absolute left-1/2 top-[76px] z-20 -translate-x-1/2 rounded-md bg-[#0c1116]/92 px-3 py-1.5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.12)]';
   return (
     <AnimatePresence>

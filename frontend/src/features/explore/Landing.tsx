@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
-import { useHealth, useReadyResults, useStudyAreas } from '../../data/queries';
+import { useHealth, useReadyResults, useStudyAreas, useStudyCard } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
 import { fmtKm2 } from '../../lib/format';
 import { useBreakpoint } from '../../lib/useLayout';
-import { ERAS } from '../../lib/time';
+import { DEFAULT_ANALYSIS_WINDOW, ERAS } from '../../lib/time';
 import { Badge, Button, IconButton, Skeleton, StateView, TerratraceMark, Tooltip } from '../../design';
 import { AnimatedNumber } from '../../design/Metric';
 import { DrawHint, SearchBar } from './SearchBar';
@@ -62,7 +62,9 @@ function OverviewPanel() {
   const ready = useReadyResults();
   const { data: health } = useHealth();
   // Detected change is summed ONLY over completed live analyses — never estimated.
-  const totalLoss = ready.reduce((a, r) => a + (r.bundle?.summary.kpis.total_loss_ha ?? 0), 0);
+  // Missing (null) losses are skipped, never counted as 0; no measured loss at all -> null.
+  const losses = ready.map((r) => r.bundle?.summary.kpis.total_loss_ha).filter((v): v is number => typeof v === 'number');
+  const totalLoss = losses.length ? losses.reduce((a, v) => a + v, 0) : null;
   const events = ready.reduce((a, r) => a + (r.bundle?.events.features.length ?? 0), 0);
   const n = areas.data?.items.length ?? 0;
   const eeReady = health?.analysis.status === 'ready';
@@ -89,7 +91,7 @@ function OverviewPanel() {
         {ready.length > 0 ? (
           <div className="mt-1 flex items-end justify-between gap-3">
             <div className="t-data text-[26px] font-medium leading-none text-[#ff8a6b]">
-              −<AnimatedNumber value={totalLoss} format={(v) => Math.round(v).toLocaleString('en-US')} /> <span className="text-[16px] text-ink-2">ha</span>
+              {totalLoss === null ? '—' : <>−<AnimatedNumber value={totalLoss} format={(v) => Math.round(v).toLocaleString('en-US')} /> <span className="text-[16px] text-ink-2">ha</span></>}
             </div>
             <div className="text-right">
               <div className="t-data text-[15px] text-ink">{events}</div>
@@ -146,13 +148,17 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
   const [state, ...rest] = area.region.split(',').map((s) => s.trim());
   // Static thumbnail from the backend's study metadata (imagery only; URLs are never built here).
   const img = area.thumbnail_url;
-  const ready = useReadyResults().some((r) => r.id === area.id);
-  const { data: health } = useHealth();
-  const status = ready ? 'Ready' : !health ? '…' : health.backend && health.analysis.status === 'ready' ? 'Not run' : 'Unavailable';
+  const { status, detail, reason } = useStudyCard(area.id);
+  const tone = status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' ? 'text-bad' : 'text-warn';
+  const dot = status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' ? 'bg-bad' : 'bg-warn';
   return (
     <motion.button
       initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + index * 0.07, duration: 0.5, ease: EASE }}
-      onClick={() => open(area.id, { name: area.name, geometry: area.geometry })}
+      onClick={() => {
+        if (import.meta.env.DEV) console.debug('[analysis] featured card click', { id: area.id, bbox: area.bbox, window: DEFAULT_ANALYSIS_WINDOW });
+        open(area.id, { name: area.name, geometry: area.geometry, run: true });
+      }}
+      data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}
       className={`tt-card group relative flex min-w-[260px] flex-col overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
       aria-label={`Open featured investigation: ${area.name}`}
@@ -173,18 +179,24 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
           </div>
           <ChevronRight size={18} className="mt-0.5 shrink-0 text-ink-3 transition group-hover:translate-x-1 group-hover:text-accent" />
         </div>
-        <div className="mt-[clamp(8px,1.4vh,14px)] grid grid-cols-3 divide-x divide-line">
+        <div className="mt-[clamp(8px,1.4vh,14px)] grid grid-cols-2 divide-x divide-line">
           {/* AOI facts only — measured results appear inside the analysis once it is READY. */}
           {[
-            [`${fmtKm2(area.area_km2)} km²`, 'area of interest', 'text-ink'],
-            [area.biome?.split(/[—–(]/)[0].trim() || '—', 'biome', 'text-ink'],
-            [status, 'live analysis', ready ? 'text-live' : 'text-warn'],
-          ].map(([v, l, c], i) => (
+            [`${fmtKm2(area.area_km2)} km²`, 'area of interest'],
+            [area.biome?.split(/[—–(]/)[0].trim() || '—', 'biome'],
+          ].map(([v, l], i) => (
             <div key={l} className={`min-w-0 ${i === 0 ? 'pr-3' : 'px-3'}`}>
-              <div className={`t-data truncate text-[14px] font-medium ${c}`} title={v}>{v}</div>
+              <div className="t-data truncate text-[14px] font-medium text-ink" title={v}>{v}</div>
               <div className="text-[10.5px] text-ink-3">{l}</div>
             </div>
           ))}
+        </div>
+        {/* Live analysis state — its own full-width row so the status is never truncated. */}
+        <div className="mt-2.5 flex min-w-0 items-center gap-2 border-t border-line pt-2" title={reason ?? detail ?? status} data-testid="card-status">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+          <span className={`t-data shrink-0 text-[12.5px] font-medium ${tone}`}>{status}</span>
+          {detail && <span className="min-w-0 truncate text-[11px] text-ink-3">· {detail}</span>}
+          <span className="ml-auto shrink-0 text-[10.5px] text-ink-4">live analysis</span>
         </div>
       </div>
     </motion.button>
@@ -262,12 +274,12 @@ export function Landing() {
               </motion.div>
               {/* Search sits between the hero column and the right panels, overlapping the lower globe. */}
               <div className="absolute bottom-3 left-[max(600px,44%)] right-6 hidden lg:block min-[1320px]:right-[332px] [@media(min-height:821px)]:left-[max(648px,44%)]">
-                <div className="mx-auto max-w-[720px]" data-map-occluder><SearchBar /></div>
+                <div className="pointer-events-auto mx-auto max-w-[720px]" data-map-occluder><SearchBar /></div>
               </div>
               <div className="absolute bottom-[84px] right-6 hidden lg:block min-[1320px]:right-[332px]" data-map-occluder><LandingMapControls /></div>
             </div>
             <div className="relative shrink-0 px-6 pb-5 pt-4 xl:px-10">
-              <div className="mb-4 lg:hidden"><SearchBar /></div>
+              <div className="pointer-events-auto mb-4 lg:hidden"><SearchBar /></div>
               <Featured />
             </div>
           </motion.div>

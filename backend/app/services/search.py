@@ -88,6 +88,8 @@ async def _nominatim(q: str) -> list[dict[str, Any]]:
             "center": (round(float(d["lon"]), 5), round(float(d["lat"]), 5)), "bbox": (w, s, e, n), "source": "OpenStreetMap Nominatim",
         })
     _cache[key] = out
+    if len(_cache) > 500:   # keyed by free text: bounded, oldest first
+        _cache.pop(next(iter(_cache)))
     return out
 
 
@@ -106,7 +108,8 @@ async def search(q: str) -> tuple[list[dict[str, Any]], str | None]:
     results: list[dict[str, Any]] = []
     for a in registry.featured()["items"]:
         hay = _norm(" ".join([a["name"], a["short_name"], a["region"], a["country"]]))
-        if nq in hay or any(w.startswith(nq) for w in hay.split()):
+        # Also when the study's short name is part of a longer query ("Similipal National Park").
+        if nq in hay or any(w.startswith(nq) for w in hay.split()) or _norm(a["short_name"]) in nq:
             results.append({"name": a["name"], "detail": f"Featured investigation · {a['region']}", "kind": "featured",
                             "center": tuple(a["center"]), "bbox": tuple(a["bbox"]), "study_area_id": a["id"], "source": "TERRATRACE"})
     for f in FORESTS:

@@ -244,6 +244,10 @@ IMAGERY_MESSAGES = {
     "NETWORK_ERROR": "Live satellite imagery is unavailable: the imagery service could not be reached.",
 }
 _decisions: dict[tuple[str, int], dict[str, Any]] = {}
+# Imagery failures caused by Earth Engine itself (not by the data): a tile request may be retried.
+TRANSIENT_CODES = {"EARTH_ENGINE_AUTH_ERROR", "EARTH_ENGINE_PERMISSION_ERROR", "EARTH_ENGINE_COMPUTATION_ERROR", "NETWORK_ERROR"}
+# One in-flight decision per (AOI, year): a map requests a dozen tiles at once; they share one Earth Engine call.
+_deciding: dict[tuple[str, int], asyncio.Future] = {}
 
 
 def classify_ee_failure(status: str | None, detail: str | None) -> str:
@@ -320,8 +324,23 @@ async def decide(aid: str, year: int) -> dict[str, Any]:
 
 
 async def tile_url(aid: str, year: int) -> str:
-    """Earth Engine tile template — only for a year whose imagery decision is READY (scenes > 0)."""
-    d = _decisions.get((aid, year))
+    """Earth Engine tile template — only for a year whose imagery decision is READY (scenes > 0).
+
+    The decision is NOT required to be in memory: after a backend restart (or for a link opened directly) it is
+    re-created from the same real inputs (scene count + map ID). Concurrent tile requests share one re-creation."""
+    key = (aid, year)
+    d = _decisions.get(key)
+    if d is None:
+        fut = _deciding.get(key)
+        if fut is None:
+            fut = asyncio.ensure_future(decide(aid, year))
+            _deciding[key] = fut
+            fut.add_done_callback(lambda _f: _deciding.pop(key, None))
+        d = await asyncio.shield(fut)
+    if d and d["status"] != "READY" and d.get("code") in TRANSIENT_CODES:
+        # Earth Engine itself failed (network / auth / computation): transient, so the tile loader retries it
+        # instead of treating it as "no imagery exists" (a 404 would leave a permanent black tile).
+        raise ImageryError(503, "tiles_unavailable", "Satellite imagery is temporarily unavailable.", True)
     if not d or d["status"] != "READY":
         raise ImageryError(404, "tiles_unavailable", "No satellite imagery for this year.", False)
     url = ee_provider.cached_imagery_url(aid, year)

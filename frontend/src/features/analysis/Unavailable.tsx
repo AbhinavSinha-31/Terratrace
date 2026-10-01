@@ -1,5 +1,5 @@
-import { AlertTriangle, Check, Clock, Loader2, Maximize2, RotateCcw, Satellite, ScanSearch, ShieldAlert, X } from 'lucide-react';
-import type { AnalysisQuality, AnalysisResult } from '../../data/contracts';
+import { AlertTriangle, CalendarRange, Check, Clock, Loader2, Maximize2, RotateCcw, Satellite, ScanSearch, ShieldAlert, X } from 'lucide-react';
+import type { AnalysisQuality, AnalysisResult, QualityIssue } from '../../data/contracts';
 import { useUi } from '../../state/store';
 import { fmtKm2 } from '../../lib/format';
 import { Button } from '../../design';
@@ -11,9 +11,11 @@ import { Button } from '../../design';
 export function statusCopy(r: AnalysisResult) {
   const code = r.error?.code ?? r.reasonCode;
   if (r.status === 'PROCESSING') return { title: 'Analysis in progress', Icon: Loader2, tone: 'text-accent' };
-  if (r.status === 'INVALID_ANALYSIS') return { title: 'Analysis failed scientific validation', Icon: ShieldAlert, tone: 'text-bad' };
+  if (r.status === 'INVALID_ANALYSIS') return { title: 'Scientific validation failed', Icon: ShieldAlert, tone: 'text-bad' };
   if (code === 'analysis_timeout') return { title: 'Analysis could not be completed', Icon: Clock, tone: 'text-warn' };
-  if (code === 'analysis_too_large') return { title: 'Analysis too large for interactive mode', Icon: Maximize2, tone: 'text-warn' };
+  if (code === 'earth_engine_unreachable') return { title: 'Earth Engine could not be reached', Icon: AlertTriangle, tone: 'text-warn' };
+  if (code === 'earth_engine_throttled') return { title: 'Earth Engine is throttling requests', Icon: Clock, tone: 'text-warn' };
+  if (code === 'analysis_too_large') return { title: 'Analysis area exceeds the interactive limit', Icon: Maximize2, tone: 'text-warn' };
   if (code === 'insufficient_imagery' || code === 'insufficient_clear_observations') return { title: 'Insufficient usable imagery', Icon: AlertTriangle, tone: 'text-warn' };
   if (r.status === 'ERROR') return { title: 'Analysis could not be completed', Icon: AlertTriangle, tone: 'text-warn' };
   return { title: 'Live analysis unavailable', Icon: AlertTriangle, tone: 'text-warn' };
@@ -31,8 +33,10 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
   const ui = useUi.getState;
   const b = useUi((s) => s.investigation.baselineYear);
   const c = useUi((s) => s.investigation.comparisonYear);
-  const title = error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
-    : error.code === 'analysis_too_large' ? 'Analysis too large for interactive mode' : 'Live analysis unavailable';
+  const title = error.code === 'earth_engine_unreachable' ? 'Earth Engine could not be reached'
+    : error.code === 'earth_engine_throttled' ? 'Earth Engine is throttling requests'
+    : error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
+    : error.code === 'analysis_too_large' ? 'Analysis area exceeds the interactive limit' : 'Live analysis unavailable';
   return (
     <div className="space-y-5" data-testid="analysis-unavailable" data-status="ERROR" data-code={error.code ?? ''}>
       <section>
@@ -55,19 +59,37 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
   const aoi = result.aoi;
   const ui = useUi.getState;
   const smaller = code === 'analysis_timeout' || code === 'analysis_too_large';
+  const invalid = result.status === 'INVALID_ANALYSIS';
+  // The backend reason repeats the generic sentence before the specific rule; show the specific part as the reason.
+  const specific = result.quality?.issues.map((i) => i.message).join(' ');
+  const validationReason = specific || result.reason;
+  /** Hands focus to the timeline's start-year selector (the analysis window lives there). */
+  const focusWindow = () => {
+    ui().setDrawerOpen(false);
+    window.setTimeout(() => (document.querySelector('[aria-label="Start year"]') as HTMLElement | null)?.focus(), 50);
+  };
   return (
     <div className="space-y-5" data-testid="analysis-unavailable" data-status={result.status} data-code={code ?? ''}>
       <section>
         <div className={`t-label flex items-center gap-2 ${tone}`} data-testid="status-title">
           <Icon size={14} className={result.status === 'PROCESSING' ? 'animate-spin' : ''} /> {title}
         </div>
-        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{result.reason}</p>
-        {result.status === 'INVALID_ANALYSIS' && (
-          <p className="mt-2 text-[12px] leading-relaxed text-ink-3">The results failed TERRATRACE’s scientific validity checks, so they are withheld rather than shown as findings. This is not a “no change” result.</p>
+        {invalid ? (
+          <>
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-2" data-testid="status-message"><span className="t-label mr-1.5 !text-[9px] text-ink-3">Reason</span>{validationReason}</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-3" data-testid="invalid-explanation">
+              The computation completed, but TERRATRACE withheld the result because the observations/classification did not satisfy the scientific validity checks.
+            </p>
+            <p className="mt-2 rounded-sm bg-bad/10 px-2.5 py-1.5 text-[11.5px] font-medium text-bad" data-testid="not-no-change">Not a “no change” result — no forest-change measurement is reported for this window.</p>
+          </>
+        ) : (
+          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{result.reason}</p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
           {retryable && <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry}>Retry</Button>}
           {smaller && <Button size="sm" variant="secondary" icon={<ScanSearch size={13} />} onClick={() => ui().goExplore('explore')}>Try a smaller area</Button>}
+          {invalid && <Button size="sm" variant="secondary" icon={<ScanSearch size={13} />} onClick={() => ui().goExplore('explore')}>Change analysis area</Button>}
+          {invalid && <Button size="sm" variant="secondary" icon={<CalendarRange size={13} />} onClick={focusWindow}>Change analysis window</Button>}
           <Button size="sm" variant="ghost" icon={<Satellite size={13} />} onClick={() => ui().setDrawerOpen(false)}>Continue exploring imagery</Button>
         </div>
       </section>
@@ -107,7 +129,7 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
         <section className="overflow-hidden rounded-md shadow-[0_0_0_1px_rgba(255,107,82,0.35)]" data-testid="validity-issues">
           <div className="t-label border-b border-line px-3.5 py-2.5 text-bad">Failed validity checks</div>
           <ul className="space-y-2 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-2">
-            {q.issues.map((i) => <li key={`${i.rule}-${i.years.join('-')}`} className="flex gap-2"><X size={12} className="mt-1 shrink-0 text-bad" />{i.message}</li>)}
+            {q.issues.map((i) => <IssueItem key={`${i.rule}-${i.years.join('-')}`} issue={i} q={q} />)}
           </ul>
         </section>
       )}
@@ -117,7 +139,7 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
         </div>
         <table className="w-full text-[11px]">
           <thead className="text-ink-4">
-            <tr><th className="px-3.5 py-1.5 text-left font-normal">Year</th><th className="py-1.5 text-left font-normal">Era</th><th className="py-1.5 text-right font-normal">Observed</th><th className="px-3.5 py-1.5 text-right font-normal">Usable</th></tr>
+            <tr><th className="px-3.5 py-1.5 text-left font-normal">Year</th><th className="py-1.5 text-left font-normal">Era</th><th className="py-1.5 text-right font-normal">Observed</th><th className="py-1.5 text-right font-normal">Clear obs</th><th className="px-3.5 py-1.5 text-right font-normal">Usable</th></tr>
           </thead>
           <tbody>
             {q.years.map((y) => (
@@ -125,6 +147,7 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
                 <td className="t-data px-3.5 py-1.5 text-ink">{y.year}</td>
                 <td className="py-1.5 text-ink-3">{y.era === 'historical' ? 'Landsat' : 'S2 + DW'}</td>
                 <td className="t-data py-1.5 text-right text-ink-2">{y.coverage_pct === null ? '—' : `${y.coverage_pct.toFixed(0)}%`}</td>
+                <td className="t-data py-1.5 text-right text-ink-2" title="Median clear observations per pixel">{y.clear_obs_median ?? '—'}</td>
                 <td className="px-3.5 py-1.5 text-right">{y.passes ? <Check size={12} className="ml-auto text-live" /> : <X size={12} className="ml-auto text-warn" />}</td>
               </tr>
             ))}
@@ -132,9 +155,34 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
         </table>
         <p className="border-t border-line px-3.5 py-2.5 text-[10.5px] leading-relaxed text-ink-4">
           Observed = share of the area with ≥ {q.thresholds.min_pixel_clear_obs ?? 3} clear observations (and Dynamic World observations in the modern era) — not a scene count.
-          A year is usable at ≥ {Math.round((q.thresholds.min_year_coverage ?? 0.8) * 100)}%. Hover a row for the reason.
+          Clear obs = median number of clear observations per pixel. A year is usable at ≥ {Math.round((q.thresholds.min_year_coverage ?? 0.8) * 100)}%. Hover a row for the reason.
         </p>
       </section>
     </>
+  );
+}
+
+/** One failed validity check with its measured evidence and the observation quality of both years (never a finding). */
+function IssueItem({ issue, q }: { issue: QualityIssue; q: AnalysisQuality }) {
+  const e = issue.evidence;
+  const yrs = issue.years.map((y) => q.years.find((r) => r.year === y)).filter((r): r is NonNullable<typeof r> => !!r);
+  return (
+    <li className="flex gap-2" data-testid="validity-issue" data-rule={issue.rule}>
+      <X size={12} className="mt-1 shrink-0 text-bad" />
+      <div className="min-w-0">
+        <div className="t-data text-ink">{issue.years.join(' → ')}</div>
+        <div>{issue.rule === 'unstable_forest_mask' ? 'Forest-mask gain exceeded the plausibility threshold.' : issue.message}</div>
+        {e && (
+          <div className="t-data mt-1 text-[11px] text-ink-3" data-testid="issue-evidence">
+            Measured {e.measured_pct_per_year.toFixed(2)}% of the compared area per year · threshold {e.threshold_pct_per_year}% · compared area {Math.round(e.compared_ha).toLocaleString('en-US')} ha
+          </div>
+        )}
+        {yrs.length > 0 && (
+          <div className="t-data text-[11px] text-ink-3">
+            {yrs.map((r) => `${r.year}: ${r.coverage_pct === null ? '—' : `${r.coverage_pct.toFixed(0)}%`} observed, ${r.clear_obs_median ?? '—'} clear obs`).join(' · ')}
+          </div>
+        )}
+      </div>
+    </li>
   );
 }

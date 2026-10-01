@@ -84,7 +84,7 @@ def test_empty_periods_are_never_composited(prov, monkeypatch):
     counts = {**CAMEROON_COUNTS, "2018": {"sentinel2": 0, "dynamicWorld": 40}}   # 2016/2017 absent → empty
     monkeypatch.setattr(prov, "source_sizes", lambda geom, years: _Info(counts))
     with pytest.raises(_StopAtReductions):
-        prov.analyze(aoi(), "aoi-test", "Test", 2016, 2025)
+        prov.analyze(aoi(), "aoi-test", "Test", 2016, 2025, scope="all")   # every era: historical AND modern
     assert 1995 not in prov.built and 2016 not in prov.built and 2017 not in prov.built and 2018 not in prov.built
     assert prov.built == [1984, 1990, 2000, 2005, 2010, 2015, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 
@@ -97,3 +97,18 @@ def test_change_period_needs_real_composites_at_both_ends():
     spans = [(q["from_year"], q["to_year"]) for q in periods]
     assert (1984, 1995) not in spans and (1995, 2005) not in spans, "1995 has no composite"
     assert (2005, 2015) in spans
+
+def test_live_analysis_composites_only_the_requested_window(prov, monkeypatch):
+    """The live analysis builds composites ONLY for the years its result uses: the window plus the next modern year
+    (event persistence). Historical years belong to the separate history request, not to every analysis."""
+    monkeypatch.setattr(prov, "source_sizes", lambda geom, years: _Info(CAMEROON_COUNTS))
+    with pytest.raises(_StopAtReductions):
+        prov.analyze(aoi(), "aoi-test", "Test", 2019, 2023)
+    assert prov.built == [2019, 2020, 2021, 2022, 2023, 2024]
+
+
+def test_history_request_composites_only_years_outside_the_window(prov, monkeypatch):
+    monkeypatch.setattr(prov, "source_sizes", lambda geom, years: _Info(CAMEROON_COUNTS))
+    with pytest.raises(_StopAtReductions):
+        prov.analyze(aoi(), "aoi-test", "Test", 2018, 2025, scope="history")
+    assert prov.built == [1984, 1990, 2000, 2005, 2010, 2015]   # 1995 has no scenes; 2016/2017 have none in this fixture

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import RedirectResponse
 
 from ..config import settings
@@ -14,7 +14,7 @@ from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import provider as ee_provider
-from ..schemas import AnalysisEnvelope, AnalyzeRequest, AoiPreview, AoiPreviewRequest, Explanation, ExplainRequest, Health
+from ..schemas import AnalysisEnvelope, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
 from ..services import analysis, imagery, search
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
@@ -71,10 +71,91 @@ def study_areas() -> dict[str, Any]:
     return registry.featured()
 
 
+@router.post("/aoi")
+def register_aoi(req: AoiRegisterRequest) -> dict[str, Any]:
+    """Register a selected area (validation + a small definition file) so its live imagery can load BEFORE any
+    analysis. No Earth Engine call, no analysis. The same geometry always gets the same id (as POST /analyze)."""
+    try:
+        _, doc = analysis.register_aoi(req.geometry, req.name)
+    except AoiError as e:
+        raise _err(422, e.code, e.message) from None
+    return doc
+
+
+@router.get("/aoi/{aid}")
+def get_aoi(aid: str) -> dict[str, Any]:
+    """A registered area (featured or custom): geometry and metadata only — no analysis, no Earth Engine call."""
+    try:
+        return analysis.aoi_doc(aid)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+
+
+@router.get("/analysis/{aid}/history")
+async def get_analysis_history(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
+    """Measured per-year statistics for the years OUTSIDE the analysed window (Time Machine and charts). They never
+    change the window's result or validation. A public error — never estimates — when they cannot be measured."""
+    try:
+        return await analysis.history(aid, baseline or DEFAULT_B, comparison or DEFAULT_C)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except analysis.HistoryUnavailable as e:
+        raise _err(e.status, e.code, e.message) from None
+
+
 @router.get("/analysis/{aid}", response_model=AnalysisEnvelope)
 async def get_analysis(aid: str, baseline: int | None = None, comparison: int | None = None,
                        rid: str | None = Query(None, pattern=RID)) -> dict[str, Any]:
     return await _run(aid, baseline, comparison, rid)
+
+
+# ----------------------------------------------------------------------------- asynchronous analysis jobs
+JOB_ID = r"^[0-9a-f]{16}$"
+
+
+@router.post("/analysis-jobs")
+def create_analysis_job(req: AnalysisJobRequest, rid: str | None = Query(None, pattern=RID)) -> dict[str, Any]:
+    """Start (or join) an analysis job and return immediately: {job_id, status, stage, ...}. Poll GET /analysis-jobs/{id}."""
+    try:
+        if req.aoi_id:
+            aid = req.aoi_id
+        elif req.geometry:
+            aid, _ = analysis.register_aoi(req.geometry, req.name)
+        else:
+            raise _err(422, "invalid_request", "Select or draw an area to analyse.")
+        return analysis.create_job(aid, req.baseline, req.comparison, rid).public()
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except AoiError as e:
+        raise _err(422, e.code, e.message) from None
+
+
+@router.get("/analysis-jobs/{job_id}")
+def get_analysis_job(job_id: str = Path(..., pattern=JOB_ID)) -> dict[str, Any]:
+    """Real job state: status (QUEUED / PROCESSING / terminal), current stage, elapsed time, per-stage durations,
+    and — only once terminal — the analysis envelope."""
+    job = analysis.get_job(job_id)
+    if job is None:
+        raise _err(404, "not_found", "This analysis job is no longer available. Run the analysis again.")
+    return job.public()
+
+
+@router.post("/analysis-jobs/{job_id}/cancel")
+def cancel_analysis_job(job_id: str = Path(..., pattern=JOB_ID)) -> dict[str, Any]:
+    job = analysis.cancel_job(job_id)
+    if job is None:
+        raise _err(404, "not_found", "This analysis job is no longer available.")
+    return job.public()
+
+
+@router.get("/analysis-status/{aid}")
+def get_analysis_status(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
+    """Stored status of an analysis (RUNNING / READY / INVALID_ANALYSIS / UNAVAILABLE / NOT_RUN). Read-only: it never
+    starts or runs an analysis, so featured cards can show real state without triggering Earth Engine work."""
+    try:
+        return analysis.stored_status(aid, baseline or DEFAULT_B, comparison or DEFAULT_C)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
 
 
 @router.get("/progress/{rid}")
@@ -120,7 +201,11 @@ async def tiles(aid: str, kind: str, year: int, z: int, x: int, y: int) -> Redir
     if kind not in ("imagery", "forest", "change"):
         raise _err(404, "not_found")
     try:
-        url = await asyncio.to_thread(ee_provider.tile_url, aid, kind, year)
+        try:
+            geometry = analysis.aoi_doc(aid)["geometry"]   # registered AOI on disk: layers survive a backend restart
+        except analysis.AnalysisNotFound:
+            raise _err(404, "not_found") from None
+        url = await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry)
     except Exception as e:  # noqa: BLE001 — EarthEngineError or ee transport errors; details stay in the log
         log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
         raise _err(503, "tiles_unavailable") from None

@@ -32,6 +32,8 @@ export interface MapState {
   basemaps: Basemaps | null;
   /** Backend imagery decision for the open AOI + this map's year (real Earth Engine imagery; never analysis). */
   yearImagery: ImageryDecision | null;
+  /** The area whose live imagery is drawn: the open study, or a registered search/drawn selection before any analysis. */
+  imageryAoi: StudyArea | null;
   events: ChangeEvent[];
   hotspots: GlobalHotspot[];
   year: number;
@@ -43,6 +45,8 @@ export interface MapState {
   hoveredId: string | null;
   hoveredAoiId: string | null;
   draft: AoiGeometry | null;
+  /** Searched / located point [lon, lat] — a pin marker (never a result). */
+  pin: [number, number] | null;
   drawing: boolean;
   spin: boolean;
   reducedMotion: boolean;
@@ -107,8 +111,10 @@ function baseStyle(): StyleSpecification {
       { id: 'anchor-imagery', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'anchor-reference', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'night', type: 'fill', source: 'night', paint: { 'fill-color': '#01040a', 'fill-opacity': 0.2, 'fill-antialias': false } },
-      { id: 'aoi-mask', type: 'fill', source: 'aoi-mask', paint: { 'fill-color': '#020406', 'fill-opacity': 0.5 } },
       { id: 'anchor-overlays', type: 'background', paint: { 'background-opacity': 0 } },
+      // Dims everything OUTSIDE the study area — above the analysis overlays (forest tiles are square and spill past
+      // the boundary; the live imagery is clipped to it), below change polygons, boundary and markers.
+      { id: 'aoi-mask', type: 'fill', source: 'aoi-mask', paint: { 'fill-color': '#020406', 'fill-opacity': 0.78 } },
       { id: 'anchor-labels', type: 'background', paint: { 'background-opacity': 0 } },
       {
         id: 'global-hotspots-glow', type: 'circle', source: 'global-hotspots',
@@ -127,22 +133,18 @@ function baseStyle(): StyleSpecification {
         paint: {
           'heatmap-weight': ['interpolate', ['linear'], ['get', 'area_ha'], 0, 0.15, 800, 1],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 6, 0.7, 12, 1.5],
-          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 6, 10, 10, 38, 13, 110],
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.8, 11, 0.45, 13, 0],
-          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.15, 'rgba(236,122,60,0.18)', 0.4, 'rgba(236,122,60,0.45)', 0.7, 'rgba(212,69,47,0.7)', 1, 'rgba(255,214,170,0.9)'],
+          // An overlay, not a replacement: kept small and translucent so the imagery stays readable underneath.
+          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 6, 8, 10, 24, 13, 64],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.6, 11, 0.32, 13, 0],
+          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.15, 'rgba(236,122,60,0.12)', 0.4, 'rgba(236,122,60,0.32)', 0.7, 'rgba(212,69,47,0.5)', 1, 'rgba(255,214,170,0.7)'],
         },
       },
-      { id: 'events-fill', type: 'fill', source: 'events', paint: { 'fill-color': sevMatch(SEVERITY_COLOR), 'fill-opacity': 0.3, 'fill-opacity-transition': { duration: 250 } } },
+      { id: 'events-fill', type: 'fill', source: 'events', paint: { 'fill-color': sevMatch(SEVERITY_COLOR), 'fill-opacity': 0.2, 'fill-opacity-transition': { duration: 250 } } },
       {
         id: 'events-line', type: 'line', source: 'events',
         paint: { 'line-color': sevMatch(SEVERITY_LINE), 'line-width': ['case', ['boolean', ['feature-state', 'hover'], false], 2.4, 1.2], 'line-opacity': 0.95 },
       },
-      { id: 'events-selected-halo', type: 'line', source: 'events', filter: ['==', ['get', 'id'], ''], paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.16, 'line-blur': 3 } },
-      { id: 'events-selected', type: 'line', source: 'events', filter: ['==', ['get', 'id'], ''], paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2.5, 1.5] } },
-      {
-        id: 'events-pulse', type: 'circle', source: 'event-points',
-        paint: { 'circle-radius': 8, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-width': 1.25, 'circle-stroke-color': sevMatch(SEVERITY_LINE), 'circle-stroke-opacity': 0.8, 'circle-pitch-alignment': 'map' },
-      },
+      // Study boundary sits above the change polygons and below the event markers.
       {
         id: 'aoi-glow', type: 'line', source: 'aoi-all',
         paint: {
@@ -159,6 +161,12 @@ function baseStyle(): StyleSpecification {
           'line-opacity': ['case', ['boolean', ['feature-state', 'active'], false], 0.95, ['boolean', ['feature-state', 'hover'], false], 1, 0.55],
           'line-dasharray': [4, 3],
         },
+      },
+      { id: 'events-selected-halo', type: 'line', source: 'events', filter: ['==', ['get', 'id'], ''], paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.16, 'line-blur': 3 } },
+      { id: 'events-selected', type: 'line', source: 'events', filter: ['==', ['get', 'id'], ''], paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2.5, 1.5] } },
+      {
+        id: 'events-pulse', type: 'circle', source: 'event-points',
+        paint: { 'circle-radius': 6, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-width': 1, 'circle-stroke-color': sevMatch(SEVERITY_LINE), 'circle-stroke-opacity': 0.55, 'circle-pitch-alignment': 'map' },
       },
       { id: 'draft-fill', type: 'fill', source: 'draft', paint: { 'fill-color': ACCENT, 'fill-opacity': 0.1 } },
       { id: 'draft-glow', type: 'line', source: 'draft', paint: { 'line-color': ACCENT, 'line-width': 8, 'line-blur': 6, 'line-opacity': 0.35 } },
@@ -188,6 +196,7 @@ export class TerraMap {
   private tileErrors = 0;
   private hoverId: string | null = null;
   private resizeObs: ResizeObserver;
+  private nightTimer = 0;
   private destroyed = false;
   private dashStep = 0;
   private lastDash = 0;
@@ -225,7 +234,7 @@ export class TerraMap {
     this.resizeObs = new ResizeObserver(() => this.map.resize());
     this.resizeObs.observe(container);
     this.raf = requestAnimationFrame(this.tick);
-    window.setInterval(() => this.loaded && (this.map.getSource('night') as GeoJSONSource | undefined)?.setData(nightPolygons()), 60000);
+    this.nightTimer = window.setInterval(() => this.loaded && (this.map.getSource('night') as GeoJSONSource | undefined)?.setData(nightPolygons()), 60000);
   }
 
   update(patch: Partial<MapState>) {
@@ -236,6 +245,7 @@ export class TerraMap {
   destroy() {
     this.destroyed = true;
     cancelAnimationFrame(this.raf);
+    window.clearInterval(this.nightTimer);
     this.resizeObs.disconnect();
     this.markers.forEach((m) => m.marker.remove());
     this.popup.remove();
@@ -338,6 +348,8 @@ export class TerraMap {
       this.markers.forEach((mk, id) => mk.marker.getElement().classList.toggle('is-hover', id === s.hoveredAoiId));
     }
 
+    if (this.changed('pin', s.pin ? s.pin.join(',') : null)) this.updatePin();
+
     if (this.changed('boundary', s.layers.boundary)) {
       const v = s.layers.boundary ? 'visible' : 'none';
       for (const id of ['aoi-outline', 'aoi-glow', 'aoi-mask']) m.setLayoutProperty(id, 'visibility', v);
@@ -346,7 +358,7 @@ export class TerraMap {
     if (this.changed('catalog', s.catalog)) this.rebuildOverlays();
 
     const live = this.liveImagery();
-    const imageryKey = `${s.layers.satellite}:${s.imagery}:${s.year}:${s.catalog?.aoi_id ?? ''}:${s.aoi?.id ?? ''}:${live?.tileUrl ?? ''}:${this.basemapsAdded}`;
+    const imageryKey = `${s.layers.satellite}:${s.imagery}:${s.year}:${s.catalog?.aoi_id ?? ''}:${s.aoi?.id ?? ''}:${s.imageryAoi?.id ?? ''}:${live?.tileUrl ?? ''}:${this.basemapsAdded}`;
     if (this.changed('imagery', imageryKey)) this.showImagery();
 
     const ovKey = `${s.year}|${s.layers.forest}|${s.layers.ndvi}|${s.layers.forestOpacity}|${s.catalog?.aoi_id}`;
@@ -391,6 +403,22 @@ export class TerraMap {
   }
 
   /** TerratraceMapMarker: featured investigations (reticle) + exploration regions (pin). */
+  /** One pin at the searched / located point (created on demand, removed when the selection goes). */
+  private pinMarker: maplibregl.Marker | null = null;
+  private updatePin() {
+    const p = this.state.pin;
+    if (!p) { this.pinMarker?.remove(); this.pinMarker = null; return; }
+    if (!this.pinMarker) {
+      const el = document.createElement('div');
+      el.className = 'tt-search-pin';
+      el.dataset.testid = 'search-pin';
+      el.setAttribute('aria-label', 'Searched location');
+      el.innerHTML = '<svg width="26" height="34" viewBox="0 0 26 34" aria-hidden="true"><path d="M13 1C6.4 1 1 6.3 1 12.9 1 22 13 33 13 33s12-11 12-20.1C25 6.3 19.6 1 13 1z" fill="#45d0c4" stroke="#03201d" stroke-width="1.5"/><circle cx="13" cy="13" r="4.5" fill="#03201d"/></svg>';
+      this.pinMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' });
+    }
+    this.pinMarker.setLngLat(p).addTo(this.map);
+  }
+
   private buildMarkers() {
     this.markers.forEach((mk) => mk.marker.remove());
     this.markers.clear();
@@ -482,20 +510,25 @@ export class TerraMap {
 
   /** The backend imagery decision, only if it is READY for exactly the open AOI and this map's year. */
   private liveImagery(): ImageryDecision | null {
-    const { yearImagery: d, aoi, year } = this.state;
+    const { yearImagery: d, imageryAoi: aoi, year } = this.state;
     return d && d.status === 'READY' && d.tileUrl && aoi && d.aoi_id === aoi.id && d.year === year ? d : null;
   }
 
-  /** Raster layer for this year: the READY analysis' own composite if present, else the live imagery decision. */
+  /**
+   * Raster layer for this year: the live imagery decision if it is READY for this AOI + year, else the READY
+   * analysis' own composite. Both are the same Earth Engine composite (same collection, cloud mask, median and
+   * visualisation; the live one is clipped to the AOI), so reusing the already-loaded live layer avoids fetching
+   * every tile a second time — which Earth Engine's Restricted-Mode concurrency limit makes slow.
+   */
   private ensureImagery(year: number): string | null {
-    const spec = this.state.catalog?.imagery.find((i) => i.year === year);
-    const live = spec ? null : this.liveImagery();
+    const live = this.liveImagery();
+    const spec = live ? undefined : this.state.catalog?.imagery.find((i) => i.year === year);
     if (!spec && !live) return null;
     const layerId = spec ? `img-s2-${year}${spec.reference ? '-ref' : ''}` : `img-s2-live-${live!.aoi_id}-${year}`;
     if (!this.map.getSource(layerId)) {
       // Earth Engine tiles go through the bounded loader (eeTiles.ts); `bounds` = the AOI, so MapLibre never
       // requests tiles outside the study area (the live composite is clipped to it).
-      const bounds = this.state.aoi?.bbox;
+      const bounds = this.state.imageryAoi?.bbox ?? this.state.aoi?.bbox;
       this.map.addSource(layerId, spec
         ? { type: 'raster', tiles: spec.tiles.map(eeTiles), tileSize: spec.tile_size, maxzoom: spec.max_zoom, attribution: spec.attribution, ...(bounds ? { bounds } : {}) }
         : { type: 'raster', tiles: [eeTiles(live!.tileUrl!)], tileSize: 256, maxzoom: live!.max_zoom ?? 15, attribution: live!.attribution ?? '', ...(bounds ? { bounds } : {}) });
@@ -522,9 +555,10 @@ export class TerraMap {
     if (m.getLayer('img-hires')) m.setLayoutProperty('img-hires', 'visibility', s.imagery === 'hires' && s.layers.satellite ? 'visible' : 'none');
     // Live-imagery layers of other areas are removed (each is clipped to its own AOI).
     for (const l of m.getStyle().layers) {
-      if (l.id.startsWith('img-s2-live-') && !l.id.startsWith(`img-s2-live-${s.aoi?.id ?? '-'}-`)) { m.removeLayer(l.id); m.removeSource(l.id); if (prev === l.id) this.imageryLayer = null; }
+      if (l.id.startsWith('img-s2-live-') && !l.id.startsWith(`img-s2-live-${s.imageryAoi?.id ?? '-'}-`)) { m.removeLayer(l.id); m.removeSource(l.id); if (prev === l.id) this.imageryLayer = null; }
     }
-    if (!s.aoi || !s.layers.satellite) return this.hideImagery(this.imageryLayer);
+    // No study open: only a registered selection's READY live imagery is drawn (over the globe basemap).
+    if (!s.layers.satellite || (!s.aoi && !this.liveImagery())) return this.hideImagery(this.imageryLayer);
     // No READY imagery for this exact year: draw NOTHING rather than another year's imagery — the map notice explains why.
     const next = s.imagery === 'hires' ? (m.getLayer('img-hires') ? 'img-hires' : null) : this.ensureImagery(s.year);
     if (!next) return this.hideImagery(this.imageryLayer);
@@ -599,7 +633,7 @@ export class TerraMap {
     for (const id of ['events-fill', 'events-line']) m.setFilter(id, base);
     m.setFilter('events-pulse', fresh);
     m.setFilter('hotspots', base);
-    m.setPaintProperty('events-fill', 'fill-opacity', ['case', ['boolean', ['feature-state', 'hover'], false], 0.6, ['==', ['get', 'year_to'], year], 0.46, 0.22]);
+    m.setPaintProperty('events-fill', 'fill-opacity', ['case', ['boolean', ['feature-state', 'hover'], false], 0.55, ['==', ['get', 'year_to'], year], 0.34, 0.16]);
     const vis = (on: boolean) => (on ? 'visible' : 'none');
     for (const id of ['events-fill', 'events-line', 'events-selected', 'events-selected-halo', 'events-pulse']) m.setLayoutProperty(id, 'visibility', vis(layers.change));
     m.setLayoutProperty('hotspots', 'visibility', vis(layers.intensity));
@@ -681,8 +715,8 @@ export class TerraMap {
     if (this.loaded && !s.reducedMotion) {
       if (s.aoi && s.layers.change) {
         const t = (now % 2200) / 2200;
-        this.map.setPaintProperty('events-pulse', 'circle-radius', 6 + 26 * t);
-        this.map.setPaintProperty('events-pulse', 'circle-stroke-opacity', 0.8 * (1 - t) ** 1.5);
+        this.map.setPaintProperty('events-pulse', 'circle-radius', 5 + 14 * t);
+        this.map.setPaintProperty('events-pulse', 'circle-stroke-opacity', 0.55 * (1 - t) ** 1.5);
       }
       if (s.draft && now - this.lastDash > 70) {
         this.lastDash = now;
