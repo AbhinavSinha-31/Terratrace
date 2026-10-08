@@ -259,13 +259,28 @@ async function run(label, { offline }) {
     const reqs = [];
     const onReq = (r) => { if (ANALYSIS_URL.test(r.url())) reqs.push(r.url()); };
     page.on('request', onReq);
-    await page.goto(`${BASE}#/analysis/${FEATURED[1]}?from=2019&to=2024&year=2021`, { waitUntil: 'domcontentloaded' });
+    // Both endpoints are analysable years at this site (an unanalysable endpoint is moved inward — check G2).
+    await page.goto(`${BASE}#/analysis/${FEATURED[1]}?from=2020&to=2023&year=2021`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => !!window.__ttUi && !!window.__ttUi.getState().investigation.study, null, { timeout: 45000 }).catch(() => {});
     await page.waitForTimeout(2500);
     const h = await inv();
     const y = await page.evaluate(() => window.__ttUi.getState().investigation.imageryYear);
-    check(h.study === FEATURED[1] && h.b === 2019 && h.c === 2024 && y === 2021, `${label}: URL hydration mirrors study + years into InvestigationState`, JSON.stringify({ study: h.study, b: h.b, c: h.c, y }));
+    check(h.study === FEATURED[1] && h.b === 2020 && h.c === 2023 && y === 2021, `${label}: URL hydration mirrors study + years into InvestigationState`, JSON.stringify({ study: h.study, b: h.b, c: h.c, y }));
     check(reqs.length === 0 && h.status === 'idle' && !h.has, `${label}: URL hydration executes 0 analysis requests`, `${reqs.length} sent, status ${h.status}`);
+    page.off('request', onReq);
+  }
+
+  // ---- G2: the analysis window offers only analysable years. Hasdeo Arand 2024 is MEASURED unanalysable (Jul–Sep only
+  // 79.8 % observed), so a link ending in 2024 moves inward to 2023 — and still runs nothing.
+  if (!offline) {
+    const reqs = [];
+    const onReq = (r) => { if (ANALYSIS_URL.test(r.url())) reqs.push(r.url()); };
+    page.on('request', onReq);
+    await page.goto(`${BASE}#/analysis/hasdeo-arand?from=2019&to=2024&year=2021`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.__ttUi?.getState().investigation.comparisonYear === 2023, null, { timeout: 180000 }).catch(() => {});
+    const h = await inv();
+    check(h.b === 2019 && h.c === 2023, `${label}: an unanalysable window end (Hasdeo 2024) moves inward to the nearest analysable year`, JSON.stringify({ b: h.b, c: h.c }));
+    check(reqs.length === 0 && h.status === 'idle', `${label}: adjusting the window executes 0 analysis requests`, `${reqs.length} sent`);
     page.off('request', onReq);
   }
 

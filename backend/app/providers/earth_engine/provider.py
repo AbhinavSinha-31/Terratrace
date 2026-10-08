@@ -4,8 +4,9 @@ Pipeline (per AOI) — rules and thresholds live in services/science.py (method 
   0. Scene counts per composite; empty periods are reported unavailable, never composited.
   Modern era          COPERNICUS/S2_SR_HARMONIZED (Earth Engine catalogue: 2017-03-28 onward; a year is composited only
                        where scenes exist), Cloud Score+ masked (cs_cdf ≥ 0.6), calendar-year (1 Jan–31 Dec) composites
-                       + GOOGLE/DYNAMICWORLD/V1 annual mean "trees" probability and modal label
-                       forest = trees ≥ 0.50 AND leaf-on NDVI (per-pixel 90th percentile) ≥ 0.60
+                       + GOOGLE/DYNAMICWORLD/V1 "trees" probability (leaf-on p90 for the forest mask,
+                         annual mean for change evidence) and modal label
+                       forest = leaf-on trees ≥ 0.50 AND leaf-on NDVI (both per-pixel 90th percentile) ≥ 0.60
   Historical (1984–2015) Landsat Collection 2 Level-2 (L5/L7/L8/L9), QA_PIXEL cloud/shadow masked,
                        multi-year median composites; forest proxy = NDVI ≥ 0.60 at 30 m (no Dynamic World)
   1. Observation coverage: a pixel is observed only with enough clear (and Dynamic World) observations;
@@ -440,19 +441,24 @@ class EarthEngineProvider:
         # forest "gained" 31 % in one year). The median NDVI band is kept for event detection and reported means.
         ndvi_leafon = col.map(lambda img: img.normalizedDifference(["nir", "red"]).rename("ndvi"))             .reduce(_ee().Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])).rename("ndvi_leafon")
         dwc = self._dw_collection(geom, year)
-        trees = dwc.select("trees").mean().rename("trees")
+        trees = dwc.select("trees").mean().rename("trees")   # annual mean: event evidence (Δ tree probability) and reporting
+        # Forest-mask tree probability = LEAF-ON Dynamic World "trees" (method tt-ee-2.3): the same per-pixel upper
+        # percentile as the NDVI half. The annual MEAN sits near 0.50 for deciduous sal forest (leaf-off scenes pull it
+        # down) and flipped with each year's sampling: Hasdeo Arand forest share went 45.7 % -> 53.3 % -> 47.7 % over
+        # 2019-2021 (8.2 %/yr "gain" then 6.0 % "loss"); leaf-on it is 59.3 % -> 60.4 % -> 59.7 % (measured 2026-10-09).
+        trees_leafon = dwc.select("trees").reduce(_ee().Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])).rename("trees_leafon")
         label = dwc.select("label").mode().rename("label")
         # Observation counts are measured facts (0 = observed zero times), so unmask(0) is correct HERE only.
         clear = col.select("nir").count().unmask(0).rename("clear")
         dw_obs = dwc.select("trees").count().unmask(0).rename("dw_obs")
         valid = clear.gte(sc.MIN_PIXEL_CLEAR_OBS).And(dw_obs.gte(sc.MIN_PIXEL_DW_OBS)).rename("valid")
         # Forest only where observed; unobserved pixels stay MASKED (never "non-forest").
-        forest = trees.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid).rename("forest")
+        forest = trees_leafon.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid).rename("forest")
         # The two halves of the forest mask, over observed pixels — measured separately so an unstable mask can be
         # attributed to the component that moved (never used to decide forest).
-        tree_c = trees.gte(sc.FOREST_TREE_PROB).updateMask(valid).rename("forest_c_tree")
+        tree_c = trees_leafon.gte(sc.FOREST_TREE_PROB).updateMask(valid).rename("forest_c_tree")
         ndvi_c = ndvi_leafon.gte(sc.FOREST_NDVI).updateMask(valid).rename("forest_c_ndvi")
-        return comp.addBands([ndvi, nbr, ndvi_leafon, trees, label, clear, dw_obs, valid, forest, tree_c, ndvi_c]
+        return comp.addBands([ndvi, nbr, ndvi_leafon, trees, trees_leafon, label, clear, dw_obs, valid, forest, tree_c, ndvi_c]
                              + self._quarter_obs(geom, year)), col.size()
 
     def _quarter_obs(self, geom, year: int) -> list[Any]:
@@ -489,7 +495,8 @@ class EarthEngineProvider:
 
         Exactly the observation rules of the analysis (stage 0 + stage 1 coverage): scene counts per source,
         then the area whose composite pixel is `valid` (>= MIN_PIXEL_CLEAR_OBS clear observations, and
-        >= MIN_PIXEL_DW_OBS Dynamic World observations in the modern era). Two getInfo requests; years
+        >= MIN_PIXEL_DW_OBS Dynamic World observations in the modern era), and per calendar quarter the area with
+        >= 1 clear observation (the analysis' seasonal rule, modern era). Two getInfo requests; years
         without scenes are never composited. Returns raw measurements only — classification is done by
         services/imagery.py. No forest or change metric is computed here.
         """
@@ -505,7 +512,13 @@ class EarthEngineProvider:
             if deadline is not None and time.monotonic() > deadline:
                 raise EarthEngineError("analysis_timeout", "deadline passed before imagery coverage")
             area = ee.Image.pixelArea().divide(1e4)
-            img = ee.Image.cat([area.rename("aoi")] + [self._composite(geom, y)[0].select("valid").multiply(area).rename(f"valid_{y}") for y in with_scenes])
+            bands = [area.rename("aoi")]
+            for y in with_scenes:
+                comp = self._composite(geom, y)[0]
+                bands.append(comp.select("valid").multiply(area).rename(f"valid_{y}"))
+                if sc.era_of(y) == "modern":   # the analysis' seasonal rule, measured in the same request
+                    bands += [comp.select(f"obs_q{q}").multiply(area).rename(f"season{q}_{y}") for q in range(1, 5)]
+            img = ee.Image.cat(bands)
             with tm("imagery_coverage [getInfo #2]"):
                 coverage = img.reduceRegion(ee.Reducer.sum(), geom, ANALYSIS_SCALE, maxPixels=1e10, tileScale=TILE_SCALE).getInfo()
         tm.total("measured")

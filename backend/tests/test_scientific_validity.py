@@ -354,10 +354,10 @@ def test_forest_mask_uses_leaf_on_ndvi_with_unchanged_thresholds():
     import inspect
     src = inspect.getsource(p.LiveProvider._s2) if hasattr(p, "LiveProvider") else inspect.getsource(type(p.provider)._s2)
     assert "Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])" in src
-    assert 'trees.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid)' in src
+    assert 'trees_leafon.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid)' in src   # 2.3: leaf-on trees too
     assert (sc.FOREST_TREE_PROB, sc.FOREST_NDVI, sc.FOREST_NDVI_PERCENTILE) == (0.50, 0.60, 90)
     assert (sc.MAX_ANNUAL_GAIN_FRACTION, sc.MIN_PIXEL_CLEAR_OBS, sc.MIN_PIXEL_DW_OBS, sc.MIN_YEAR_COVERAGE) == (0.05, 3, 3, 0.80)
-    assert sc.METHOD_VERSION == "tt-ee-2.2"   # 2.2 added the seasonal-coverage rule; every threshold above is unchanged
+    assert sc.METHOD_VERSION == "tt-ee-2.3"   # 2.2 seasonal rule, 2.3 leaf-on tree probability; every threshold above is unchanged
 
 
 # ----------------------------------------------------------------------------- tt-ee-2.2 seasonal-coverage rule
@@ -432,3 +432,92 @@ def test_a_failing_seasonal_share_never_reads_as_the_threshold():
     """Measured Hasdeo 2024: 79.8 % in Jul–Sep fails the 80 % rule; the reason must not print it as '80%'."""
     passes, reason = sc.assess_year(2024, 45, 30, 1.0, [1.0, 1.0, 0.798, 1.0], forest_analysis=True)
     assert not passes and "79.8%" in reason
+
+
+# ----------------------------------------------------------------------------- tt-ee-2.3: leaf-on tree probability
+class _Expr:
+    """Records an Earth Engine expression graph (no Earth Engine call): every attribute is a call producing a node."""
+
+    def __init__(self, desc):
+        self.desc = desc
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _Expr(("attr", self, name))
+
+    def __call__(self, *a, **k):
+        return _Expr(("call", self, a))
+
+    def __repr__(self):
+        if isinstance(self.desc, str):
+            return self.desc
+        kind, parent, x = self.desc
+        return f"{parent!r}.{x}" if kind == "attr" else f"{parent!r}({', '.join(repr(a) for a in x)})"
+
+
+def _s2_bands(monkeypatch) -> dict[str, str]:
+    """The band expressions of the modern composite, by band name."""
+    monkeypatch.setattr(p, "_ee", lambda: _Expr("ee"))
+    comp, _ = p.EarthEngineProvider()._s2(_Expr("geom"), 2020)
+    out = {}
+    for band in comp.desc[2][0]:   # comp = <median>.addBands([bands]) -> the call's first argument is the band list
+        text = repr(band)
+        name = text.rsplit(".rename(", 1)[-1].rstrip(")").strip("'\"")
+        out[name] = text
+    return out
+
+
+def test_forest_mask_uses_leaf_on_tree_probability_not_the_annual_mean(monkeypatch):
+    """Regression (Hasdeo Arand, 2026-10-09): the annual MEAN of Dynamic World tree probability sat near 0.50 for
+    deciduous sal forest and flipped with each year's season mix (2019->2020 'gain' 8.2 %/yr, then 6.0 % 'loss').
+    Both forest-mask halves must use the leaf-on per-pixel percentile."""
+    bands = _s2_bands(monkeypatch)
+    forest, tree_c = bands["forest"], bands["forest_c_tree"]
+    for expr in (forest, tree_c):
+        assert "'trees'" in expr and f"percentile([{sc.FOREST_NDVI_PERCENTILE}])" in expr
+        assert ".mean()" not in expr, "the annual mean must not decide forest"
+    assert f"percentile([{sc.FOREST_NDVI_PERCENTILE}])" in bands["ndvi_leafon"]
+    # change EVIDENCE still uses the annual-mean tree probability (unchanged event rule)
+    assert "select('trees').mean()" in bands["trees"]
+
+
+def test_gain_plausibility_limit_is_not_loosened():
+    assert sc.MAX_ANNUAL_GAIN_FRACTION == 0.05
+    assert sc.FOREST_TREE_PROB == 0.50 and sc.FOREST_NDVI == 0.60
+    assert sc.METHOD_VERSION == "tt-ee-2.3" and "leaf-on Dynamic World" in sc.METHOD["forest_rule"]
+
+
+def test_imagery_availability_reports_whether_an_analysis_can_use_each_year():
+    from app.services import imagery
+    years = [2015, 2018, 2019, 2026]
+    counts = {"2015": {"landsat": 9}, "2018": {"sentinel2": 40, "dynamicWorld": 80}, "2019": {"sentinel2": 140, "dynamicWorld": 85},
+              "2026": {"sentinel2": 0, "dynamicWorld": 0}}
+    cov = {"aoi": 100.0, "valid_2015": 95.0, "valid_2018": 100.0, "valid_2019": 100.0,
+           "season1_2018": 100.0, "season2_2018": 100.0, "season3_2018": 0.0, "season4_2018": 100.0,
+           "season1_2019": 100.0, "season2_2019": 100.0, "season3_2019": 92.2, "season4_2019": 100.0}
+    by = {e["year"]: e for e in imagery.classify(years, counts, cov)}
+    # 2018: imagery exists (AVAILABLE to view), but no July–September observations -> not analysable, with the reason
+    assert by[2018]["status"] == "AVAILABLE" and by[2018]["analysable"] is False
+    assert "Jul–Sep: 0.0%" in by[2018]["analysisReason"] and by[2018]["seasonalCoverage"] == [1.0, 1.0, 0.0, 1.0]
+    assert by[2019]["analysable"] is True and by[2019]["analysisReason"] is None
+    assert by[2015]["analysable"] is True and by[2015]["seasonalCoverage"] is None   # historical: no seasonal rule
+    assert by[2026]["status"] == "UNAVAILABLE" and by[2026]["analysable"] is False and by[2026]["analysisReason"]
+
+
+def test_unmeasured_seasonal_coverage_is_never_analysable():
+    from app.services import imagery
+    by = imagery.classify([2020], {"2020": {"sentinel2": 140, "dynamicWorld": 85}}, {"aoi": 100.0, "valid_2020": 100.0})
+    assert by[0]["status"] == "AVAILABLE" and by[0]["analysable"] is False and "could not be measured" in by[0]["analysisReason"]
+
+
+@live
+def test_hasdeo_arand_forest_mask_is_stable_2019_2021(ee_live):
+    """Opt-in live regression: with the leaf-on rule, no consecutive 2019–2021 pair at Hasdeo exceeds the
+    unchanged 5 %/yr gain limit (the annual-mean rule measured 8.2 %)."""
+    from app.services import analysis
+    from app.services.geometry import validate_aoi
+    aoi = validate_aoi(analysis.analysis_target(analysis.aoi_doc("hasdeo-arand"))["geometry"], enforce_limits=False)
+    res = p.provider.analyze(aoi, "hasdeo-arand#live-test", "Hasdeo", 2019, 2021)
+    issues = [i for i in (res.get("quality") or {}).get("issues", []) if i["rule"] == "unstable_forest_mask"]
+    assert issues == [], issues

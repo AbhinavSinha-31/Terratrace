@@ -1,4 +1,4 @@
-# TERRATRACE scientific method — `tt-ee-2.2`
+# TERRATRACE scientific method — `tt-ee-2.3`
 
 Every number TERRATRACE shows comes from a completed **Google Earth Engine** analysis that
 passed the validity rules below. Nothing is simulated, estimated, interpolated or clamped.
@@ -12,7 +12,7 @@ never reused (they are deleted at startup and rejected on load).
 | Era | Years | Imagery | Forest definition |
 |---|---|---|---|
 | Historical | 1984, 1990, 1995, 2000, 2005, 2010, 2015 | Landsat 5/7/8/9 Collection 2 Level-2 surface reflectance, multi-year median (e.g. 2005 = 2004–2006; 1984 = 1984–1985) | NDVI ≥ 0.60 (30 m proxy) |
-| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 annual mean | Dynamic World mean `trees` ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
+| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 `trees` probability | leaf-on Dynamic World `trees` (per-pixel 90th percentile, `tt-ee-2.3`) ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
 
 * Dynamic World starts mid-2015; it is never back-filled into historical years.
 * Sentinel-2 SR Harmonized is sparse before late 2018 outside Europe; such years are reported as
@@ -32,7 +32,7 @@ never reused (they are deleted at startup and rejected on load).
   reported in `unavailable_years` with the exact reason and scene counts.
 * A pixel is **observed** in a year only with ≥ 3 clear observations (`MIN_PIXEL_CLEAR_OBS`) and, in the
   modern era, ≥ 3 Dynamic World observations (`MIN_PIXEL_DW_OBS`). Rationale: a median needs ≥ 3 values to
-  reject a single missed cloud/shadow; an annual mean tree probability from 1–2 scenes is noise.
+  reject a single missed cloud/shadow; a tree-probability statistic from 1–2 scenes is noise.
 * The forest mask is **masked** (no-data) where a pixel is not observed. Unobserved is never treated as
   non-forest; reducers sum/average observed pixels only. The only `unmask(0)` in the pipeline is on
   observation **counts**, where 0 is a measured fact.
@@ -59,7 +59,25 @@ image keeps the band defined and contributes no observation).
 no usable January–March 2018 scenes over Rondônia (measured 2026-10-07). With only dry-season scenes,
 deciduous forest fails the leaf-on test, so 2018 under-counted forest and 2018→2019 showed spurious
 "gain" (Hasdeo: 7.0 % of the area). Every 2019–2025 year passes at all four featured sites. This rule does
-not apply to imagery availability (imagery is not a forest measurement).
+not apply to imagery *display*, but imagery availability reports it per year as `analysable` (with the
+reason), so the analysis-window selector offers only years an analysis can use.
+
+**Leaf-on tree probability (`tt-ee-2.3`, modern era).** Both halves of the forest test are judged with
+leaves on: Dynamic World `trees` uses the same per-pixel 90th percentile of the year's observations as
+NDVI (`FOREST_NDVI_PERCENTILE`; no new constant). The annual *mean* (`tt-ee-2.2` and earlier) sat near
+0.50 for deciduous sal forest, because leaf-off dry-season scenes pull it down, so pixels flipped with
+each year's mix of clear scenes. Measured at Hasdeo Arand (2026-10-09, all of 2019–2021 analysable, the
+whole AOI observed in both years):
+
+| DW statistic | forest 2019 | 2020 | 2021 | 2019→2020 gain | 2020→2021 loss |
+|---|---|---|---|---|---|
+| annual mean (old) | 45.7 % | 53.3 % | 47.7 % | 8.18 % | 6.04 % |
+| season-balanced mean (rejected) | 45.9 % | 52.2 % | 44.5 % | 7.06 % | 8.04 % |
+| leaf-on p90 (`tt-ee-2.3`) | 59.3 % | 60.4 % | 59.7 % | 3.11 % | 3.65 % |
+
+Re-weighting the seasons does not help (July–September has almost no Dynamic World scenes in any year);
+the leaf-on statistic does. The 5 %/yr gain-plausibility limit is unchanged. The annual-mean `trees` band
+is still used, unchanged, as change *evidence* (Δ tree probability ≤ −0.30) and in event reports.
 
 ## 5. Statistics (what each number means)
 
@@ -119,7 +137,7 @@ is measured metadata — not a forest or change measurement.
 
 ## 8. Known limitations
 
-* Dynamic World is a **probability**, not a measured forest percentage. The annual mean `trees ≥ 0.50`
+* Dynamic World is a **probability**, not a measured forest percentage. The leaf-on `trees ≥ 0.50`
   rule depends on enough Dynamic World observations; in persistently cloudy regions Dynamic World may
   observe pixels only 0–3 times a year, and those years are then not analysable.
 * The Landsat NDVI ≥ 0.60 proxy saturates in dense tropical vegetation and is sensitive to Landsat 7

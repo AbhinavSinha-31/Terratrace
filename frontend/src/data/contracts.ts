@@ -465,6 +465,11 @@ export interface ImageryYearAvailability {
   /** Share of the AOI with enough clear observations (0–1), null when not measured. */
   coverage: number | null;
   reason: string | null;
+  /** Could a forest-change analysis use this year (the analysis' own rule, incl. seasonal coverage)? Measured. */
+  analysable?: boolean;
+  analysisReason?: string | null;
+  /** Share of the AOI with >= 1 clear observation per calendar quarter (modern era), null when not measured. */
+  seasonalCoverage?: [number, number, number, number] | null;
 }
 
 export interface ImageryAvailability {

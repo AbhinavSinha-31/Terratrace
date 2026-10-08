@@ -65,16 +65,16 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
   const stats = analysis?.summary.years ?? [];
   const periods = analysis?.summary.periods ?? [];
   const events = analysis?.events.features ?? [];
-  const snap = (p: number) => {
+  const snap = (p: number, among: number[] = years) => {
     const y = axisYear(Math.min(1, Math.max(0, p)));
-    return years.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), years[0]);
+    return among.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), among[0]);
   };
   const pAt = (clientX: number) => {
     const r = track.current!.getBoundingClientRect();
     return (clientX - r.left) / r.width;
   };
   const move = (clientX: number) => {
-    const y = snap(pAt(clientX));
+    const y = snap(pAt(clientX), drag === 'cursor' ? years : windowYears);   // window handles land on analysable years only
     if (drag === 'cursor') ui().setYear(y);
     else if (drag === 'start' && y < shownWin.end) setDragWin({ start: y, end: shownWin.end });
     else if (drag === 'end' && y > shownWin.start) setDragWin({ start: shownWin.start, end: y });
@@ -101,7 +101,29 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
     if (q) return q.passes ? { ok: true, status: 'AVAILABLE', reason: '' } : { ok: false, status: 'INSUFFICIENT', reason: q.reason ?? 'Insufficient clear observations' };
     return { ok: null, status: null, reason: availability.isFetching ? 'Checking imagery availability…' : availability.isError ? 'Imagery availability could not be checked.' : '' };
   };
-  const yearOpts = years.map((y) => ({ value: y, label: String(y), meta: avail(y).ok === false ? 'unavailable' : eraOf(y) === 'historical' ? 'Landsat' : 'S2 · DW' }));
+  /**
+   * Can an ANALYSIS use this year? Measured only: the availability's `analysable` (the analysis' own rule, incl.
+   * seasonal coverage), else the stored analysis' quality decision; null = not measured yet (never assumed).
+   */
+  const analysable = (y: number): boolean | null => {
+    const q = result?.quality?.years.find((r) => r.year === y);
+    if (q) return q.passes;
+    const e = availability.data?.years.find((r) => r.year === y);
+    return e?.analysable ?? null;
+  };
+  // The window selectors offer only years an analysis can use (all years only while that is still being measured).
+  const windowYears = years.filter((y) => analysable(y) !== false);
+  const yearOpts = windowYears.map((y) => ({ value: y, label: String(y), meta: eraOf(y) === 'historical' ? 'Landsat' : 'S2 · DW' }));
+  // A window endpoint measured as not analysable moves inward to the nearest analysable year (never outward).
+  const measured = !!availability.data || !!result?.quality;
+  useEffect(() => {
+    if (!measured || !studyId) return;
+    const ok = (y: number) => analysable(y) === true;
+    if (ok(sel.start) && ok(sel.end)) return;
+    const inside = years.filter((y) => y >= sel.start && y <= sel.end && ok(y));
+    if (inside.length >= 2 && (inside[0] !== sel.start || inside[inside.length - 1] !== sel.end)) ui().setWindow(inside[0], inside[inside.length - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measured, studyId, sel.start, sel.end, availability.data, result?.quality]);
 
   return (
     <div className="flex h-full items-stretch gap-4 px-4 py-3">

@@ -107,14 +107,24 @@ def classify(years: list[int], counts: dict[str, dict[str, int]], coverage: dict
         entry: dict[str, Any] = {
             "year": y, "era": sc.era_of(y), "source": s["label"], "composite": s["composite"] or f"{y} annual composite",
             "sceneCount": _scene_count(y, scenes), "scenes": scenes, "coverage": None, "status": "UNAVAILABLE", "reason": None,
+            # Could a forest-change ANALYSIS use this year? The analysis' own rule (adds seasonal coverage in the
+            # modern era), so the window selector offers only years an analysis can compare. Imagery `status` is unchanged.
+            "analysable": False, "analysisReason": None, "seasonalCoverage": None,
         }
         if y in missing:
-            entry["reason"] = missing[y]
+            entry["reason"] = entry["analysisReason"] = missing[y]
         else:
             valid_ha = sc._num(coverage.get(f"valid_{y}"))
             cov = valid_ha / aoi_ha if valid_ha is not None and aoi_ha else None
             passes, reason = sc.assess_year(y, None, None, cov)
             entry.update(coverage=None if cov is None else round(cov, 4), status="AVAILABLE" if passes else "INSUFFICIENT", reason=reason)
+            seasonal = None
+            if sc.era_of(y) == "modern":
+                q_ha = [sc._num(coverage.get(f"season{q}_{y}")) for q in range(1, 5)]
+                seasonal = [None if v is None or not aoi_ha else v / aoi_ha for v in q_ha]
+                entry["seasonalCoverage"] = None if any(v is None for v in seasonal) else [round(v, 4) for v in seasonal]
+            ok, why = sc.assess_year(y, None, None, cov, seasonal, forest_analysis=True)
+            entry.update(analysable=ok, analysisReason=why)
         out.append(entry)
     return out
 
