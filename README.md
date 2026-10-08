@@ -69,6 +69,31 @@ at <http://127.0.0.1:8001>.
 Without a reachable backend the UI still opens. Featured areas and search keep working,
 but imagery and analysis show as unavailable, and nothing is substituted.
 
+## Deploy
+
+The frontend is a static build and runs on Vercel (`vercel.json` at the repo root builds `frontend/`
+and publishes `frontend/dist`; `.vercelignore` keeps `backend/` and every secret out of the upload).
+
+The backend does **not** fit serverless functions: analysis jobs run for minutes in background
+threads and are polled from in-memory state, registered areas and results live in `backend/.cache`,
+and rate limits are per process. Host it as one long-running process with a persistent disk
+(e.g. Render, Railway or Fly.io with a volume, or Cloud Run with max instances = 1):
+
+```sh
+uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="<your proxy's IP or *>"
+```
+
+`--proxy-headers` makes rate limits apply per real client instead of per proxy. On the host,
+Earth Engine needs a service account (`EE_PROJECT` + `EE_SERVICE_ACCOUNT_KEY` = path to the key
+file, uploaded as a secret file), since `earthengine authenticate` user credentials do not exist there.
+
+| Where | Variable | Value |
+| --- | --- | --- |
+| Vercel | `VITE_API_BASE` | backend public URL ending in `/api` (public; baked into the bundle) |
+| Backend | `TT_CORS_ORIGINS` | your Vercel production origin, e.g. `https://<project>.vercel.app` |
+| Backend | `EE_PROJECT`, `EE_SERVICE_ACCOUNT_KEY` | Earth Engine (secret) |
+| Backend | `ANTHROPIC_API_KEY` | optional AI briefings (secret) |
+
 ## Method (tt-ee-2.1)
 
 - **Data.** `COPERNICUS/S2_SR_HARMONIZED` masked with Cloud Score+ (`cs_cdf ≥ 0.60`, scenes without
