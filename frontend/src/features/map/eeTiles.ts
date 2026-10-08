@@ -18,6 +18,7 @@
  */
 import maplibregl from 'maplibre-gl';
 import { create } from 'zustand';
+import { apiUrl } from '../../data/client';
 
 const SCHEME = 'ttee';
 // Measured 2026-09-27 (Restricted Mode, fresh 256 px tiles, ~4–5 s each): 8 tiles took 26.9 s at 2 in flight and
@@ -125,7 +126,7 @@ async function fetchOnce(url: string, signal: AbortSignal): Promise<Response> {
   const id = ++activeId;
   active.set(id, { url, t: performance.now() });
   try {
-    return await fetch(url, { signal });
+    return await fetch(apiUrl(url), { signal });
   } finally {
     active.delete(id);
     release(overlay);

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, Printer } from 'lucide-react';
+import { apiUrl } from '../../data/client';
 import { useCurrentBundle, useExplanation, useSelectedAoi } from '../../data/queries';
 import { useUi } from '../../state/store';
 import { buildFacts } from '../../explain/facts';
@@ -18,7 +19,7 @@ function tileFrom(template: string | undefined, lon: number, lat: number) {
   const x = Math.floor(((lon + 180) / 360) * n);
   const r = (lat * Math.PI) / 180;
   const y = Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n);
-  return template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
+  return apiUrl(template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)));
 }
 
 /** EVENT BRIEF: downloadable as a self-contained HTML file, or printable (browser print → PDF). */

@@ -12,7 +12,12 @@ import type {
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
-const API = import.meta.env.VITE_API_BASE ?? '/api';
+// Same-origin "/api" in dev (Vite proxy) and single-port mode; the backend's public URL + "/api" when the frontend is
+// hosted separately (e.g. VITE_API_BASE=https://api.example.com/api). A public URL only — never a credential.
+const API = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '');
+
+/** Resolve a backend-relative path ("/api/tiles/…", as the backend returns tile templates) against the API base. */
+export const apiUrl = (path: string) => (path.startsWith('/api/') ? `${API}${path.slice(4)}` : path);
 const BASE = import.meta.env.BASE_URL;
 const ANALYSIS_TIMEOUT_MS = 200000;
 
