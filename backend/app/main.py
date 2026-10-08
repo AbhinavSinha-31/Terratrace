@@ -42,8 +42,51 @@ async def lifespan(_: FastAPI):
 
 
 log = logging.getLogger("terratrace")
+
+
+class BodySizeLimit:
+    """Refuse request bodies over `max_bytes` with a public 413 before any route parses them (uvicorn has no limit).
+    Declared Content-Length is checked first; a chunked body is buffered up to the limit and then replayed."""
+
+    def __init__(self, app, max_bytes: int):
+        self.app, self.max_bytes = app, max_bytes
+
+    async def _too_large(self, scope, receive, send) -> None:
+        log.warning("Request body over %d bytes refused on %s %s", self.max_bytes, scope.get("method"), scope.get("path"))
+        body = {**public_error("invalid_request", "This request is too large.", False), "message": "This request is too large."}
+        await JSONResponse(status_code=413, content={"detail": body})(scope, receive, send)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
+            return await self.app(scope, receive, send)
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > self.max_bytes):
+            return await self._too_large(scope, receive, send)
+        chunks, size, more = [], 0, True
+        while more:
+            msg = await receive()
+            if msg["type"] != "http.request":   # client disconnected
+                return
+            chunks.append(msg.get("body", b""))
+            size += len(chunks[-1])
+            if size > self.max_bytes:
+                return await self._too_large(scope, receive, send)
+            more = msg.get("more_body", False)
+        replayed = False
+
+        async def replay():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            return await receive()
+
+        return await self.app(scope, replay, send)
+
+
 app = FastAPI(title="TERRATRACE API", version=settings.version, description="Explainable satellite forest-change intelligence", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+app.add_middleware(BodySizeLimit, max_bytes=settings.max_request_bytes)
 app.include_router(router)
 
 

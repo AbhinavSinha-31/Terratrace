@@ -84,6 +84,9 @@ class Settings:
     # the method-versioned files in cache_dir or rebuilt from the same inputs; nothing measured is lost.
     memory_cache_entries: int = _bounded_int("TT_MEMORY_CACHE_ENTRIES", 256, 16, 100_000)
 
+    # Largest accepted request body. Real bodies are a drawn AOI polygon or one event's facts (a few KB).
+    max_request_bytes: int = _bounded_int("TT_MAX_REQUEST_BYTES", 1_000_000, 10_000, 20_000_000)
+
     # Per-client request limits (requests per minute; 0 disables a limit). Generous defaults: they stop runaway
     # clients from exhausting the Earth Engine quota without getting in the way of normal use.
     rate_analysis_per_min: int = _bounded_int("TT_RATE_ANALYSIS_PER_MIN", 30, 0, 10_000)

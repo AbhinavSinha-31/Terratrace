@@ -91,3 +91,22 @@ def test_valid_tile_year_still_reaches_the_tile_service(monkeypatch):
     monkeypatch.setattr(analysis.ee_provider, "tile_url", lambda *a, **k: "https://ee.example/{z}/{x}/{y}")
     r = client.get(f"/api/tiles/silent-valley/forest/{year}/3/7/7", follow_redirects=False)
     assert r.status_code == 307 and r.headers["location"] == "https://ee.example/3/7/7"
+
+
+def test_oversized_request_bodies_are_refused_before_parsing():
+    from app.config import settings
+    big = b'{"geometry": {"type": "Polygon", "coordinates": [' + b"[0,0]," * (settings.max_request_bytes // 6 + 10) + b"[0,0]]}}"
+    r = client.post("/api/aoi", content=big, headers={"Content-Type": "application/json"})
+    assert r.status_code == 413 and public(r)["code"] == "invalid_request" and public(r)["retryable"] is False
+
+    def chunked():   # no Content-Length: the body is counted as it arrives
+        for i in range(0, len(big), 65536):
+            yield big[i:i + 65536]
+    r = client.post("/api/aoi", content=chunked(), headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+
+
+def test_normal_bodies_still_pass_the_size_limit():
+    from app.services.geometry import bbox_polygon
+    r = client.post("/api/aoi/preview", json={"geometry": bbox_polygon((76.4, 11.0, 76.5, 11.1))})
+    assert r.status_code == 200 and r.json()["valid"] is True
