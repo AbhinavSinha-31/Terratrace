@@ -13,7 +13,7 @@ from typing import Any
 # --------------------------------------------------------------------------- method version
 # Bump whenever any rule below (or the Earth Engine pipeline) changes: cached results
 # computed under another version are never reused.
-METHOD_VERSION = "tt-ee-2.1"   # 2.1: forest-mask NDVI = leaf-on (p90) instead of annual median; thresholds unchanged
+METHOD_VERSION = "tt-ee-2.2"   # 2.2: seasonal-coverage rule (every calendar quarter observed); 2.1: leaf-on (p90) forest NDVI
 
 # --------------------------------------------------------------------------- definitions
 FOREST_TREE_PROB = 0.50   # Dynamic World annual mean "trees" probability
@@ -25,6 +25,8 @@ D_NBR = -0.25
 D_TREE = -0.30
 MIN_CLEAR_OBS = 5         # event evidence check (per-pixel minimum inside an event)
 MMU_HA = 2.0
+# Only the largest change polygons are measured and returned (events_meta records whether more were found).
+MAX_EVENTS = 60
 PERSISTENCE_OK = 0.70
 REFERENCE_OK = 0.30
 
@@ -38,6 +40,12 @@ MIN_PIXEL_DW_OBS = 3
 # A year is analysable only if ≥ 80 % of the AOI is observed; below that the AOI-level
 # figures would describe a fragment rather than the area.
 MIN_YEAR_COVERAGE = 0.80
+# Modern era: the forest test uses LEAF-ON NDVI (an upper percentile over the year's clear observations), so a year must
+# sample the whole phenological cycle. A year is analysable only if, in EVERY calendar quarter, the same share of the AOI
+# (MIN_YEAR_COVERAGE) has at least one clear Sentinel-2 observation. Without it a missing season (e.g. the 2017–2018
+# Sentinel-2 SR archive gaps: no July–September scenes over parts of India) makes deciduous forest fail the leaf-on test
+# and shows up as spurious forest gain in the next year. Same threshold as the coverage rule; no new tuning constant.
+QUARTERS = ("Jan–Mar", "Apr–Jun", "Jul–Sep", "Oct–Dec")
 # Tree canopy cannot establish over large areas within a year. Forest GAIN above 5 % of
 # the compared area per year signals an unstable forest classification (e.g. cloud or
 # phenology artefacts), which makes the same classifier's LOSS figures untrustworthy too.
@@ -66,6 +74,11 @@ METHOD: dict[str, Any] = {
     ),
     "forest_rule": f"Modern: Dynamic World annual mean tree probability ≥ {FOREST_TREE_PROB:.2f} AND leaf-on NDVI (per-pixel {FOREST_NDVI_PERCENTILE}th percentile of clear observations) ≥ {FOREST_NDVI:.2f}. Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
     "coverage_rule": f"A year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI is observed; forest % is relative to the observed area.",
+    "seasonal_rule": (
+        f"Modern era: a year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI has at least one clear Sentinel-2 observation in "
+        "EVERY calendar quarter, because the forest test uses leaf-on (90th-percentile) NDVI over the whole phenological year. "
+        "A year missing a season is reported as insufficient — never composited into a forest measurement."
+    ),
     "change_rule": (
         f"forest(t−1) ∧ [ΔNDVI ≤ {D_NDVI:.2f} ∨ ΔNBR ≤ {D_NBR:.2f}] ∧ Δtree-probability ≤ {D_TREE:.2f} ∧ ¬forest(t); "
         "both composites must pass the coverage rule and each pixel must be observed in both."
@@ -80,11 +93,33 @@ METHOD: dict[str, Any] = {
         "Periods are classified by forest-loss rate (low < 0.1 %/yr ≤ moderate < 0.4 %/yr ≤ high) within the historical Landsat era only. "
         "Change events are only detected in the modern Sentinel-2 / Dynamic World era."
     ),
+    "metrics": {
+        "gross_loss_ha": (
+            "Gross forest-loss transitions: the sum, over every consecutive pair of analysable years in the window, of the "
+            "area that was forest in the earlier year and non-forest in the later one (pixels observed in both years only). "
+            "A pixel that flips forest → non-forest → forest is counted every time it flips, so gross loss is NOT "
+            "permanent deforestation."
+        ),
+        "gross_gain_ha": (
+            "Gross forest-gain transitions: the same sum for non-forest → forest. Large gross gain together with large gross "
+            "loss usually means the forest classification is flickering between years, not real regrowth."
+        ),
+        "net_change_ha": (
+            "Net forest change: forest area in the comparison year minus forest area in the baseline year, measured directly "
+            "between those two composites over the pixels observed in BOTH years (the compared area). Unobserved pixels are "
+            "excluded, never counted as non-forest."
+        ),
+        "event_area_ha": (
+            "Event area: the total area of the detected change events (polygons ≥ the minimum mapping unit that passed the "
+            "change rule between the baseline and comparison composites). Only the largest events are kept (see event limit)."
+        ),
+    },
+    "event_limit": f"Only the largest {MAX_EVENTS} change polygons (by area) are measured and returned; events_meta reports whether more were found.",
     "mmu_ha": MMU_HA,
     "thresholds": {
         "d_ndvi": D_NDVI, "d_nbr": D_NBR, "d_tree_prob": D_TREE, "min_clear_obs": MIN_CLEAR_OBS,
         "min_pixel_clear_obs": MIN_PIXEL_CLEAR_OBS, "min_pixel_dw_obs": MIN_PIXEL_DW_OBS,
-        "min_year_coverage": MIN_YEAR_COVERAGE, "max_annual_gain_fraction": MAX_ANNUAL_GAIN_FRACTION, "area_tolerance": AREA_TOLERANCE,
+        "min_year_coverage": MIN_YEAR_COVERAGE, "min_season_coverage": MIN_YEAR_COVERAGE, "max_annual_gain_fraction": MAX_ANNUAL_GAIN_FRACTION, "area_tolerance": AREA_TOLERANCE,
     },
     "severity": "Clearing: 0.5·|ΔNDVI|/0.7 + 0.3·conversion + 0.2·log-area. Fire: USGS dNBR classes (Key & Benson).",
     "confidence": (
@@ -129,14 +164,27 @@ def imagery_status(clear_obs: int | None, passes: bool) -> str:
     return "cloud_limited" if clear_obs < 8 else "good"
 
 
-def assess_year(year: int, clear_median: float | None, dw_median: float | None, coverage: float | None) -> tuple[bool, str | None]:
-    """Does a composite year meet the analysis-quality requirements? (passes, reason-if-not)."""
+def assess_year(year: int, clear_median: float | None, dw_median: float | None, coverage: float | None,
+                seasonal: list[float | None] | None = None, forest_analysis: bool = False) -> tuple[bool, str | None]:
+    """Does a composite year meet the quality requirements? (passes, reason-if-not).
+
+    `forest_analysis` adds the seasonal rule, which exists for the leaf-on FOREST test: the analysis sets it; imagery
+    availability (imagery only, no forest measurement) does not. `seasonal` = share of the AOI with >= 1 clear
+    observation in each calendar quarter. A modern analysis year whose seasonal coverage was not measured never passes."""
     if coverage is None:
         return False, "Observation coverage could not be measured."
     if coverage < MIN_YEAR_COVERAGE:
         what = "clear Sentinel-2 + Dynamic World" if era_of(year) == "modern" else "clear Landsat"
         return False, (f"Insufficient clear observations: only {coverage:.0%} of the area has ≥ {MIN_PIXEL_CLEAR_OBS} {what} observations "
                        f"(≥ {MIN_YEAR_COVERAGE:.0%} required).")
+    if forest_analysis and era_of(year) == "modern":
+        if seasonal is None or len(seasonal) != 4 or any(q is None for q in seasonal):
+            return False, "Seasonal observation coverage could not be measured."
+        missing = [(QUARTERS[i], q) for i, q in enumerate(seasonal) if q < MIN_YEAR_COVERAGE]
+        if missing:
+            gaps = ", ".join(f"{name}: {q * 100:.1f}% of the area observed" for name, q in missing)   # 1 decimal: 79.8% must not read as 80%
+            return False, (f"Incomplete seasonal coverage ({gaps}; ≥ {MIN_YEAR_COVERAGE:.0%} required in every quarter). "
+                           "The leaf-on forest test needs observations from the whole year, so this year cannot be compared.")
     return True, None
 
 
@@ -233,20 +281,66 @@ def kpis_for(years: list[dict[str, Any]], features: list[dict[str, Any]], baseli
     window = [y for y in years if baseline_year < y["year"] <= latest_year and y.get("passes_quality") and y.get("loss_ha") is not None]
     confs = [f["properties"]["confidence"]["score"] for f in features]
     net = None if pair.get("loss") is None or pair.get("gain") is None else pair["gain"] - pair["loss"]
+    gross_loss = round(sum(y["loss_ha"] for y in window), 1)
+    gross_gain = round(sum(y["gain_ha"] for y in window), 1)
     return {
         "baseline_year": first["year"],
         "latest_year": last["year"],
         "forest_baseline_ha": first["forest_ha"],
         "forest_latest_ha": last["forest_ha"],
         "compared_ha": None if pair.get("compared") is None else round(pair["compared"], 1),
+        # Definitions: METHOD["metrics"]. Gross transitions are never permanent loss; net change is the direct
+        # baseline → comparison difference over the area observed in both years.
+        "gross_loss_ha": gross_loss,
+        "gross_gain_ha": gross_gain,
+        "gross_transition_count": len(window),
         "net_change_ha": None if net is None else round(net, 1),
         "net_change_pct": None if net is None or not pair.get("forest_b") else round(net / pair["forest_b"] * 100, 2),
-        "total_loss_ha": round(sum(y["loss_ha"] for y in window), 1),
-        "total_gain_ha": round(sum(y["gain_ha"] for y in window), 1),
+        "event_area_ha": round(sum(f["properties"]["area_ha"] for f in features), 1),
+        # Deprecated aliases of gross_loss_ha / gross_gain_ha (kept so older clients keep working).
+        "total_loss_ha": gross_loss,
+        "total_gain_ha": gross_gain,
         "event_count": len(features),
         "high_severity_count": sum(1 for f in features if f["properties"]["severity"]["class"] in ("high", "critical")),
         "mean_confidence": round(sum(confs) / len(confs), 2) if confs else None,
     }
+
+
+def events_meta(returned: int, candidates: int | None) -> dict[str, Any]:
+    """Event-cap facts. `candidates` = change polygons found before the MAX_EVENTS cut (None = not recorded)."""
+    truncated = None if candidates is None else candidates > MAX_EVENTS
+    return {
+        "event_limit": MAX_EVENTS,
+        "events_returned": returned,
+        "candidate_polygons": candidates,
+        "events_truncated": truncated,
+        "note": (f"Only the largest {MAX_EVENTS} detected events are returned; {candidates} change polygons were found."
+                 if truncated else
+                 f"All {candidates} detected change polygons are returned." if truncated is False else
+                 f"At most {MAX_EVENTS} events are kept; whether more were found was not recorded for this stored result."),
+    }
+
+
+def upgrade_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Add the explicit metric fields to a READY result stored before they existed (same measured values, renamed;
+    nothing is recomputed or estimated). Idempotent."""
+    summary, events = result.get("summary"), result.get("events")
+    if not summary or not events:
+        return result
+    k = summary.get("kpis") or {}
+    feats = events.get("features") or []
+    k.setdefault("gross_loss_ha", k.get("total_loss_ha"))
+    k.setdefault("gross_gain_ha", k.get("total_gain_ha"))
+    if "gross_transition_count" not in k:
+        b, c = k.get("baseline_year"), k.get("latest_year")
+        k["gross_transition_count"] = sum(1 for y in summary.get("years") or []
+                                         if b is not None and c is not None and b < y["year"] <= c and y.get("passes_quality") and y.get("loss_ha") is not None)
+    k.setdefault("event_area_ha", round(sum(f["properties"]["area_ha"] for f in feats), 1))
+    events.setdefault("meta", events_meta(len(feats), None))
+    summary.setdefault("events_meta", events["meta"])
+    summary.setdefault("method", {}).setdefault("metrics", METHOD["metrics"])
+    summary["method"].setdefault("event_limit", METHOD["event_limit"])
+    return result
 
 
 def history_for(years: list[dict[str, Any]], pair: dict[str, float | None] | None) -> dict[str, Any] | None:
@@ -300,13 +394,36 @@ def _row_issues(y: dict[str, Any], aoi_ha: float, first_year: int | None = None)
         issues.append(_issue("gain_exceeds_area", [prev, yr], f"{prev}→{yr}: forest gain exceeds the compared area."))
     if cmp_ha and y["gain_ha"] / cmp_ha / (yr - prev) > MAX_ANNUAL_GAIN_FRACTION:
         # Denominator = compared area: pixels validly observed in BOTH years (never the whole AOI, never unobserved pixels).
+        driver, detail = component_driver(y.get("forest_components_change_pts"))
+        evidence = {"measured_pct_per_year": round(100 * y["gain_ha"] / cmp_ha / (yr - prev), 2),
+                    "threshold_pct_per_year": round(100 * MAX_ANNUAL_GAIN_FRACTION, 2),
+                    "gain_ha": round(y["gain_ha"], 1), "compared_ha": round(cmp_ha, 1)}
+        if driver:
+            evidence.update(driver=driver, component_change_pts=y["forest_components_change_pts"])
         issues.append(_issue("unstable_forest_mask", [prev, yr],
-                             f"{prev}→{yr}: forest gain exceeds the ecologically plausible {MAX_ANNUAL_GAIN_FRACTION:.0%} of the compared area per year — "
-                             "the forest classification is unstable here, so loss figures cannot be trusted either.",
-                             {"measured_pct_per_year": round(100 * y["gain_ha"] / cmp_ha / (yr - prev), 2),
-                              "threshold_pct_per_year": round(100 * MAX_ANNUAL_GAIN_FRACTION, 2),
-                              "gain_ha": round(y["gain_ha"], 1), "compared_ha": round(cmp_ha, 1)}))
+                             f"{prev}→{yr}: forest gain of {evidence['measured_pct_per_year']:.1f}% of the compared area per year exceeds the ecologically "
+                             f"plausible {MAX_ANNUAL_GAIN_FRACTION:.0%} — the forest classification is unstable here, so loss figures cannot be trusted either."
+                             + (f" {detail}" if detail else ""),
+                             evidence))
     return issues
+
+
+COMPONENT_LABELS = {"tree_prob": "Dynamic World tree probability ≥ 0.50", "leafon_ndvi": "leaf-on NDVI ≥ 0.60"}
+
+
+def component_driver(change: dict[str, float | None] | None) -> tuple[str | None, str | None]:
+    """Which half of the forest mask moved: (driver key, sentence) from the MEASURED change of each component (percentage
+    points of the observed area). A component is named the driver only when its change is at least twice the other's;
+    otherwise both are reported. (None, None) when the components were not measured."""
+    if not change or change.get("tree_prob") is None or change.get("leafon_ndvi") is None:
+        return None, None
+    t, n = change["tree_prob"], change["leafon_ndvi"]
+    facts = f"{COMPONENT_LABELS['tree_prob']}: {t:+.1f} pts; {COMPONENT_LABELS['leafon_ndvi']}: {n:+.1f} pts of the observed area"
+    if abs(t) >= 2 * abs(n):
+        return "tree_prob", f"The change comes from the Dynamic World tree-probability classification, not from canopy greenness ({facts})."
+    if abs(n) >= 2 * abs(t):
+        return "leafon_ndvi", f"The change comes from leaf-on canopy greenness (NDVI), not from the Dynamic World classification ({facts})."
+    return "both", f"Both forest-mask components moved ({facts})."
 
 
 def in_window(issue: dict[str, Any], window: tuple[int, int] | list[int] | None) -> bool:

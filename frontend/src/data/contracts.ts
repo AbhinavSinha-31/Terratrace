@@ -145,6 +145,8 @@ export interface QualityYear {
   clear_obs_median: number | null;
   dw_obs_median: number | null;
   coverage_pct: number | null;
+  /** Modern era (method tt-ee-2.2): % of the area with >= 1 clear observation in each calendar quarter (Jan–Mar … Oct–Dec). */
+  seasonal_coverage_pct?: (number | null)[] | null;
   passes: boolean;
   reason: string | null;
 }
@@ -154,7 +156,12 @@ export interface QualityIssue {
   years: number[];
   message: string;
   /** The measured value that failed the check (unstable_forest_mask: gain % of the compared area per year). */
-  evidence?: { measured_pct_per_year: number; threshold_pct_per_year: number; gain_ha: number; compared_ha: number };
+  evidence?: {
+    measured_pct_per_year: number; threshold_pct_per_year: number; gain_ha: number; compared_ha: number;
+    /** Which half of the forest mask moved (measured), and by how many percentage points of the observed area. */
+    driver?: 'tree_prob' | 'leafon_ndvi' | 'both';
+    component_change_pts?: { tree_prob: number; leafon_ndvi: number };
+  };
 }
 
 export interface AnalysisQuality {

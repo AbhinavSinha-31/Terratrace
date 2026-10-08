@@ -74,9 +74,18 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
         <div className={`t-label flex items-center gap-2 ${tone}`} data-testid="status-title">
           <Icon size={14} className={result.status === 'PROCESSING' ? 'animate-spin' : ''} /> {title}
         </div>
+        <p className="t-data mt-2 text-[12px] text-ink-2" data-testid="analysis-window-line">
+          <span className="t-label mr-1.5 !text-[9px] text-ink-3">Analysis window</span>{result.window.baseline_year} → {result.window.comparison_year}
+          {result.quality?.analyzable_window && result.quality.analyzable_window.join('-') !== `${result.window.baseline_year}-${result.window.comparison_year}` &&
+            <span className="text-ink-3"> · analysable years {result.quality.analyzable_window.join(' → ')}</span>}
+        </p>
         {invalid ? (
           <>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-2" data-testid="status-message"><span className="t-label mr-1.5 !text-[9px] text-ink-3">Reason</span>{validationReason}</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-2" data-testid="status-message"><span className="t-label mr-1.5 !text-[9px] text-ink-3">Reason · validation diagnostic</span>{validationReason}</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3" data-testid="diagnostic-note">
+              The percentages above are <b className="text-ink-2">validation diagnostics</b> — measurements of the forest classification's stability used to
+              decide whether results can be trusted. They are not forest-change results and must not be read as loss or gain.
+            </p>
             <p className="mt-2 text-[12px] leading-relaxed text-ink-3" data-testid="invalid-explanation">
               The computation completed, but TERRATRACE withheld the result because the observations/classification did not satisfy the scientific validity checks.
             </p>
@@ -109,7 +118,8 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
 
       <section className="flex gap-3 rounded-md bg-white/[0.03] p-3.5 text-[11.5px] leading-relaxed text-ink-3 shadow-[0_0_0_1px_rgba(255,255,255,0.065)]">
         <Satellite size={15} className="mt-0.5 shrink-0 text-ink-2" />
-        <span><b className="text-ink-2">What the map shows:</b> real imagery only — Sentinel-2 cloudless annual mosaics (2016–2025). It is not a TERRATRACE analysis and carries no measurements.</span>
+        <span><b className="text-ink-2">What the map shows:</b> raw satellite imagery only — Earth Engine annual composites (Sentinel-2 from 2017, Landsat before) for the year you are viewing on the timeline.
+          It stays available for exploration, but it is not a TerraTrace result: forest, NDVI and change layers appear only for a validated analysis.</span>
       </section>
 
       {import.meta.env.DEV && result.diagnostics && (
@@ -121,13 +131,21 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
     </div>
   );
 }
+const QUARTERS = ['Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec'];
+const fmtPts = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} pts`;
+/** Lowest measured quarter (one decimal, so 79.8 % never reads as the 80 % threshold); '—' when not measured / not applicable. */
+const minSeason = (s: (number | null)[] | null | undefined) =>
+  !s || s.some((v) => v === null) ? '—' : `${Math.min(...(s as number[])).toFixed(1)}%`;
+
 /** Observation quality per composite year + failed validity checks (measured metadata, not forest metrics). */
 function QualityReport({ q }: { q: AnalysisQuality }) {
   return (
     <>
       {q.issues.length > 0 && (
         <section className="overflow-hidden rounded-md shadow-[0_0_0_1px_rgba(255,107,82,0.35)]" data-testid="validity-issues">
-          <div className="t-label border-b border-line px-3.5 py-2.5 text-bad">Failed validity checks</div>
+          <div className="t-label flex items-center justify-between border-b border-line px-3.5 py-2.5 text-bad">
+            <span>Failed validity checks</span><span className="!normal-case !tracking-normal text-ink-4">validation diagnostics · not results</span>
+          </div>
           <ul className="space-y-2 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-2">
             {q.issues.map((i) => <IssueItem key={`${i.rule}-${i.years.join('-')}`} issue={i} q={q} />)}
           </ul>
@@ -139,7 +157,7 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
         </div>
         <table className="w-full text-[11px]">
           <thead className="text-ink-4">
-            <tr><th className="px-3.5 py-1.5 text-left font-normal">Year</th><th className="py-1.5 text-left font-normal">Era</th><th className="py-1.5 text-right font-normal">Observed</th><th className="py-1.5 text-right font-normal">Clear obs</th><th className="px-3.5 py-1.5 text-right font-normal">Usable</th></tr>
+            <tr><th className="px-3.5 py-1.5 text-left font-normal">Year</th><th className="py-1.5 text-left font-normal">Era</th><th className="py-1.5 text-right font-normal">Observed</th><th className="py-1.5 text-right font-normal">Clear obs</th><th className="py-1.5 text-right font-normal" title="Lowest share of the area observed in any calendar quarter">Seasons</th><th className="px-3.5 py-1.5 text-right font-normal">Usable</th></tr>
           </thead>
           <tbody>
             {q.years.map((y) => (
@@ -148,6 +166,10 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
                 <td className="py-1.5 text-ink-3">{y.era === 'historical' ? 'Landsat' : 'S2 + DW'}</td>
                 <td className="t-data py-1.5 text-right text-ink-2">{y.coverage_pct === null ? '—' : `${y.coverage_pct.toFixed(0)}%`}</td>
                 <td className="t-data py-1.5 text-right text-ink-2" title="Median clear observations per pixel">{y.clear_obs_median ?? '—'}</td>
+                <td className="t-data py-1.5 text-right text-ink-2" data-testid="seasonal-cell"
+                  title={y.seasonal_coverage_pct ? y.seasonal_coverage_pct.map((v, i) => `${QUARTERS[i]}: ${v === null ? '—' : `${v.toFixed(1)}%`}`).join(' · ') : 'Not applicable (Landsat era)'}>
+                  {minSeason(y.seasonal_coverage_pct)}
+                </td>
                 <td className="px-3.5 py-1.5 text-right">{y.passes ? <Check size={12} className="ml-auto text-live" /> : <X size={12} className="ml-auto text-warn" />}</td>
               </tr>
             ))}
@@ -155,8 +177,14 @@ function QualityReport({ q }: { q: AnalysisQuality }) {
         </table>
         <p className="border-t border-line px-3.5 py-2.5 text-[10.5px] leading-relaxed text-ink-4">
           Observed = share of the area with ≥ {q.thresholds.min_pixel_clear_obs ?? 3} clear observations (and Dynamic World observations in the modern era) — not a scene count.
-          Clear obs = median number of clear observations per pixel. A year is usable at ≥ {Math.round((q.thresholds.min_year_coverage ?? 0.8) * 100)}%. Hover a row for the reason.
+          Clear obs = median number of clear observations per pixel. Seasons = lowest share of the area observed in any calendar quarter
+          (the leaf-on forest test needs the whole year). A year is usable at ≥ {Math.round((q.thresholds.min_year_coverage ?? 0.8) * 100)}% for both.
         </p>
+        {q.years.some((y) => !y.passes && y.reason) && (
+          <ul className="space-y-1 border-t border-line px-3.5 py-2.5 text-[10.5px] leading-relaxed text-ink-3" data-testid="excluded-years">
+            {q.years.filter((y) => !y.passes && y.reason).map((y) => <li key={y.year}><b className="t-data text-ink-2">{y.year} excluded:</b> {y.reason}</li>)}
+          </ul>
+        )}
       </section>
     </>
   );
@@ -172,9 +200,15 @@ function IssueItem({ issue, q }: { issue: QualityIssue; q: AnalysisQuality }) {
       <div className="min-w-0">
         <div className="t-data text-ink">{issue.years.join(' → ')}</div>
         <div>{issue.rule === 'unstable_forest_mask' ? 'Forest-mask gain exceeded the plausibility threshold.' : issue.message}</div>
+        {e?.driver && e.component_change_pts && (
+          <div className="mt-1 text-[11px] text-ink-2" data-testid="issue-driver">
+            Cause: {e.driver === 'tree_prob' ? 'the Dynamic World tree-probability classification' : e.driver === 'leafon_ndvi' ? 'leaf-on canopy greenness (NDVI)' : 'both forest-mask components'}
+            <span className="t-data text-ink-3"> · tree probability {fmtPts(e.component_change_pts.tree_prob)} · leaf-on NDVI {fmtPts(e.component_change_pts.leafon_ndvi)} of the observed area</span>
+          </div>
+        )}
         {e && (
           <div className="t-data mt-1 text-[11px] text-ink-3" data-testid="issue-evidence">
-            Measured {e.measured_pct_per_year.toFixed(2)}% of the compared area per year · threshold {e.threshold_pct_per_year}% · compared area {Math.round(e.compared_ha).toLocaleString('en-US')} ha
+            Diagnostic: classification gain {e.measured_pct_per_year.toFixed(2)}% of the compared area per year · allowed ≤ {e.threshold_pct_per_year}% · compared area {Math.round(e.compared_ha).toLocaleString('en-US')} ha
           </div>
         )}
         {yrs.length > 0 && (

@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { CloudOff, CloudSun, Satellite, SatelliteDish } from 'lucide-react';
 import { useCurrentAnalysis, useCurrentBundle } from '../../data/queries';
 import { useAnalysisWindow, useUi } from '../../state/store';
-import { useImageryLabel } from '../../data/imagerySync';
+import { useAnalysisState, useImageryState } from '../../data/viewState';
 import { evidenceDistribution, fmtHa, fmtKm2 } from '../../lib/format';
 import { eraOf, sourceLabel } from '../../lib/time';
 import { Metric, useAnimatedNumber } from '../../design';
@@ -84,21 +84,28 @@ export function MetricsStrip() {
 
 /** Without a READY analysis the strip carries no metrics — only what is actually shown. */
 function NoMetrics({ status }: { status: string }) {
-  const imageryLabel = useImageryLabel();
+  // Two separate indicators: the ANALYSIS of the selected window, and the IMAGERY being viewed. Neither implies the other.
+  const analysis = useAnalysisState();
+  const imagery = useImageryState();
   return (
-    <div className="flex h-full items-center gap-5 px-5" data-testid="no-metrics">
+    <div className="flex h-full items-center gap-5 px-5" data-testid="no-metrics" data-analysis-state={analysis.state} data-imagery-state={imagery.state}>
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <SatelliteDish size={16} className="shrink-0 text-warn" />
         <div className="min-w-0">
-          <div className="t-label text-warn">{status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}</div>
+          <div className="t-label text-warn" data-testid="analysis-state-label">
+            {status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}
+            <span className="ml-2 !normal-case !tracking-normal text-ink-3">· analysis window {analysis.window.start} → {analysis.window.end}</span>
+          </div>
           <div className="mt-1 truncate text-[11.5px] text-ink-3">No result means no result: forest-change measurements appear only for completed, validated analyses.</div>
         </div>
       </div>
       <Divider />
-      <div className="hidden min-w-[210px] lg:block">
-        <div className="t-label flex items-center gap-1.5 text-ink-3"><Satellite size={11} /> Real imagery</div>
-        <div className="t-data mt-1.5 truncate text-[14px] leading-none text-ink" data-testid="imagery-strip">{imageryLabel.title}</div>
-        <div className="mt-1 truncate text-[11px] text-ink-3">{imageryLabel.sub}</div>
+      <div className="hidden min-w-[210px] lg:block" data-testid="imagery-indicator">
+        <div className={`t-label flex items-center gap-1.5 ${imagery.state === 'AVAILABLE' ? 'text-live' : 'text-ink-3'}`}>
+          <Satellite size={11} /> {imagery.state === 'AVAILABLE' ? 'Imagery available' : imagery.state === 'LOADING' ? 'Imagery loading' : imagery.state === 'OFF' ? 'Imagery off' : 'Imagery unavailable'}
+        </div>
+        <div className="t-data mt-1.5 truncate text-[14px] leading-none text-ink" data-testid="imagery-strip" data-source={imagery.source ?? ''}>{imagery.label}</div>
+        <div className="mt-1 truncate text-[11px] text-ink-3">{imagery.state === 'AVAILABLE' ? `${imagery.provider} · imagery only — not a TerraTrace result` : imagery.message ?? ''}</div>
       </div>
     </div>
   );

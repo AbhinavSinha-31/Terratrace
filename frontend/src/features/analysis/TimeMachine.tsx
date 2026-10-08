@@ -8,6 +8,7 @@ import { ERAS, PENDING_YEAR, TIMELINE_START, axisPos, axisYear, eraOf, sourceLab
 import { fmtHa } from '../../lib/format';
 import { SEVERITY_COLOR } from '../../lib/palette';
 import { Button, IconButton, Menu, Tooltip } from '../../design';
+import { compareBlockedReason, useAnalysisState, useImageryState } from '../../data/viewState';
 
 const LEVEL: Record<ChangeLevel, { fill: string; line: string; label: string }> = {
   low: { fill: 'rgba(76,183,130,0.10)', line: 'rgba(76,183,130,0.55)', label: 'Low change' },
@@ -56,6 +57,10 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
 
   const studyId = useUi((s) => s.investigation.study?.id ?? null);
+  // What is being VIEWED (imagery, any year) — independent of the analysis window selected above.
+  const imagery = useImageryState();
+  // Before / After = a validated forest-change comparison: available only when the analysis is READY.
+  const compareBlocked = compareBlockedReason(useAnalysisState());
   const availability = useImageryAvailability(studyId);
   const stats = analysis?.summary.years ?? [];
   const periods = analysis?.summary.periods ?? [];
@@ -109,6 +114,7 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
           </Button>
           <Tooltip content="Next composite"><IconButton label="Next composite" size="sm" onClick={() => ui().stepYear(1)} disabled={year >= years[years.length - 1]}><SkipForward size={14} /></IconButton></Tooltip>
         </div>
+        {!compact && <div className="t-label !text-[9px] text-ink-3" data-testid="analysis-window-label">Analysis window</div>}
         {!compact && (
           <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
             <Menu label="Start year" value={sel.start} options={yearOpts.filter((o) => o.value < sel.end)} onChange={(v) => ui().setWindow(Number(v), sel.end)} className="!h-7" />
@@ -116,6 +122,11 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
             <Menu label="End year" value={sel.end} options={yearOpts.filter((o) => o.value > sel.start)} onChange={(v) => ui().setWindow(sel.start, Number(v))} className="!h-7" />
           </div>
         )}
+        <div className="text-[10.5px] text-ink-3" data-testid="viewing-imagery">
+          <span className="t-label !text-[9px] text-ink-3">Viewing imagery</span>{' '}
+          <span className="t-data text-ink-2" data-source={imagery.source ?? ''}>{imagery.label}</span>
+          {imagery.state === 'AVAILABLE' && <span className="text-ink-4"> · imagery only</span>}
+        </div>
         {idle && (
           <div className="flex items-center gap-2" data-testid="pending-window">
             <Button size="sm" variant="brand" className="!h-7" onClick={() => ui().requestAnalysis()}>Run live analysis {win.start} → {win.end}</Button>
@@ -270,10 +281,13 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
 
       {!compact && (
         <div className="flex shrink-0 flex-col justify-center gap-2 border-l border-line pl-4">
-          <Button size="sm" variant={compare ? 'accent' : 'secondary'} icon={<SplitSquareHorizontal size={13} />} onClick={() => ui().setCompare(!compare)} aria-pressed={compare}>
+          <Button size="sm" variant={compare ? 'accent' : 'secondary'} icon={<SplitSquareHorizontal size={13} />} onClick={() => ui().setCompare(!compare)} aria-pressed={compare}
+            disabled={!!compareBlocked && !compare} title={compareBlocked ?? undefined} data-testid="before-after">
             {compare ? 'Exit compare' : 'Before / After'}
           </Button>
-          <div className="t-data text-center text-[10px] text-ink-4">{win.start} → {compare ? year : win.end}</div>
+          {compareBlocked
+            ? <div className="max-w-[120px] text-center text-[10px] leading-tight text-warn" data-testid="before-after-blocked">{compareBlocked}</div>
+            : <div className="t-data text-center text-[10px] text-ink-4">{win.start} → {compare ? year : win.end}</div>}
         </div>
       )}
     </div>

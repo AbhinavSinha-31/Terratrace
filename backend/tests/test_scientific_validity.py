@@ -282,6 +282,29 @@ def test_no_global_2016_or_2018_minimum_in_the_backend():
     assert window == (2016, 2020) and hist == (1984, 1990)
 
 
+def test_event_request_returns_the_measured_polygons_and_candidate_count(monkeypatch):
+    """Regression: the event request once nested the FeatureCollection in an ee.Dictionary, which Earth Engine
+    serialises WITHOUT features — every measured polygon was dropped (0 events for 382 candidates). The polygons and
+    the candidate count must come back from the one collection request."""
+    from unittest.mock import MagicMock
+    fake = MagicMock()
+    fc = fake.Image.cat.return_value.reduceRegions.return_value.sort.return_value
+    props = {"area_ha": 42.0, "ndvi_b_mean": 0.8, "ndvi_a_mean": 0.3, "nbr_b_mean": 0.5, "nbr_a_mean": 0.1,
+             "tree_b_mean": 0.9, "tree_a_mean": 0.1, "label_a_mode": 2, "clear_a_min": 6, "persist_mean": 1.0, "ref_mean": 0.8}
+    ring = [[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]]
+    fc.set.return_value.getInfo.return_value = {
+        "type": "FeatureCollection", "properties": {"tt_candidates": 382},
+        "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring]}, "properties": props}],
+    }
+    monkeypatch.setattr(p, "_ee", lambda: fake)
+    pr = p.EarthEngineProvider()
+    comps = {2018: MagicMock(), 2025: MagicMock()}
+    features, candidates = pr._events(None, comps, 2018, 2025, None, "aoi-test0001")
+    assert candidates == 382
+    assert len(features) == 1 and features[0]["properties"]["area_ha"] == 42.0
+    fake.Dictionary.assert_not_called()
+
+
 class _Px:
     """Tiny masked-pixel stand-in for ee.Image algebra (Earth Engine semantics: an operation is masked wherever any
     input is masked; And/Not/gte keep the mask). Used to test the REAL transition expression offline."""
@@ -334,4 +357,78 @@ def test_forest_mask_uses_leaf_on_ndvi_with_unchanged_thresholds():
     assert 'trees.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid)' in src
     assert (sc.FOREST_TREE_PROB, sc.FOREST_NDVI, sc.FOREST_NDVI_PERCENTILE) == (0.50, 0.60, 90)
     assert (sc.MAX_ANNUAL_GAIN_FRACTION, sc.MIN_PIXEL_CLEAR_OBS, sc.MIN_PIXEL_DW_OBS, sc.MIN_YEAR_COVERAGE) == (0.05, 3, 3, 0.80)
-    assert sc.METHOD_VERSION == "tt-ee-2.1"
+    assert sc.METHOD_VERSION == "tt-ee-2.2"   # 2.2 added the seasonal-coverage rule; every threshold above is unchanged
+
+
+# ----------------------------------------------------------------------------- tt-ee-2.2 seasonal-coverage rule
+# Fixture values below are the MEASURED Hasdeo Arand figures (Earth Engine, 2026-10-07) that exposed the gap.
+
+def test_a_year_missing_a_season_is_not_analysable():
+    """Hasdeo 2018: 100 % annual coverage and median 21 clear observations, but NO July–September scene in the
+    Sentinel-2 SR archive. Leaf-on NDVI cannot be measured without the leaf-on season -> the year must not pass."""
+    passes, reason = sc.assess_year(2018, 21, 39, 1.0, [1.0, 1.0, 0.0, 1.0], forest_analysis=True)
+    assert not passes and "Jul–Sep: 0.0% of the area observed" in reason and "every quarter" in reason
+
+
+def test_complete_years_pass_and_the_threshold_is_the_coverage_threshold():
+    assert sc.assess_year(2019, 46, 33, 1.0, [1.0, 1.0, 0.92, 1.0], forest_analysis=True) == (True, None)
+    assert sc.assess_year(2024, 45, 30, 1.0, [1.0, 1.0, 0.80, 1.0], forest_analysis=True) == (True, None)
+    assert not sc.assess_year(2024, 45, 30, 1.0, [1.0, 1.0, 0.79, 1.0], forest_analysis=True)[0]
+    assert sc.METHOD["thresholds"]["min_season_coverage"] == sc.MIN_YEAR_COVERAGE   # no new tuning constant
+
+
+def test_unmeasured_seasonal_coverage_never_passes_an_analysis_year():
+    for seasonal in (None, [1.0, None, 1.0, 1.0], [1.0, 1.0, 1.0]):
+        passes, reason = sc.assess_year(2020, 40, 30, 1.0, seasonal, forest_analysis=True)
+        assert not passes and "could not be measured" in reason
+
+
+def test_seasonal_rule_is_for_the_forest_analysis_only():
+    """Imagery availability is imagery, not a forest measurement: the seasonal rule never hides real imagery."""
+    assert sc.assess_year(2025, None, None, 0.95) == (True, None)
+    assert sc.assess_year(1990, 12, None, 0.95, None, forest_analysis=True) == (True, None)   # Landsat era: no leaf-on test
+
+
+def test_an_unstable_mask_names_the_component_that_moved():
+    """Hasdeo 2019→2020: imagery complete, leaf-on NDVI stable (+2.3 pts) while the Dynamic World tree probability
+    jumped (+9.7 pts). The issue stays (VALIDATION REQUIRED) and its reason states the measured cause."""
+    rows = [row(2019, previous_year=None, forest_ha=55340.0, forest_components={"tree_prob": 47.3, "leafon_ndvi": 63.6}),
+            row(2020, previous_year=2019, forest_ha=64420.0, loss_ha=2000.0, gain_ha=9893.0, compared_ha=120945.1,
+                forest_components={"tree_prob": 57.0, "leafon_ndvi": 65.9}, forest_components_change_pts={"tree_prob": 9.7, "leafon_ndvi": 2.3})]
+    status, code, reason, issues = sc.evaluate(rows, 120945.1, (2019, 2020))
+    assert status == "INVALID_ANALYSIS" and code == "unstable_forest_mask"
+    assert issues[0]["evidence"]["driver"] == "tree_prob"
+    assert "Dynamic World tree-probability classification" in reason and "+9.7 pts" in reason and "+2.3 pts" in reason
+
+
+def test_component_driver_reports_both_or_nothing_when_unclear_or_unmeasured():
+    assert sc.component_driver({"tree_prob": 3.0, "leafon_ndvi": 2.0})[0] == "both"
+    assert sc.component_driver({"tree_prob": 0.5, "leafon_ndvi": 6.0})[0] == "leafon_ndvi"
+    assert sc.component_driver(None) == (None, None)
+    assert sc.component_driver({"tree_prob": None, "leafon_ndvi": 1.0}) == (None, None)
+
+
+def test_component_change_is_measured_between_analysable_years_only():
+    rows = [row(2018, passes=False), row(2019), row(2020)]
+    p.link_transitions(rows)
+    for r in rows:
+        r["valid_ha"] = 1000.0
+    sums = {"forest_2019": 500.0, "ctree_2019": 400.0, "cndvi_2019": 600.0,
+            "forest_2020": 520.0, "ctree_2020": 500.0, "cndvi_2020": 610.0, "loss_2020": 1.0, "gain_2020": 21.0, "cmp_2020": 1000.0}
+    p.apply_statistics(rows, sums, {})
+    assert rows[0].get("forest_components") is None              # a failing year is never measured
+    assert rows[1]["forest_components_change_pts"] is None        # no analysable previous year
+    assert rows[2]["forest_components_change_pts"] == {"tree_prob": 10.0, "leafon_ndvi": 1.0}
+
+
+def test_an_empty_quarter_is_counted_as_zero_observations_not_composited():
+    """A quarter without scenes must yield 'not observed', never an error and never a filled value."""
+    import inspect
+    src = inspect.getsource(type(p.provider)._quarter_obs)
+    assert 'updateMask(ee.Image.constant(0))' in src and "none.merge(seen).count()" in src
+
+
+def test_a_failing_seasonal_share_never_reads_as_the_threshold():
+    """Measured Hasdeo 2024: 79.8 % in Jul–Sep fails the 80 % rule; the reason must not print it as '80%'."""
+    passes, reason = sc.assess_year(2024, 45, 30, 1.0, [1.0, 1.0, 0.798, 1.0], forest_analysis=True)
+    assert not passes and "79.8%" in reason

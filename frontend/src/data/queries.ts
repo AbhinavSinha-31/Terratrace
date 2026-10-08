@@ -33,7 +33,7 @@ export function useCandidateAoi(): StudyArea | null {
   return geometry ? q.data ?? null : null;
 }
 
-export type CardStatus = 'Not run' | 'Processing' | 'Analysis ready' | 'Scientific validation required' | 'Area exceeds limit' | 'Unavailable' | '…';
+export type CardStatus = 'Not run' | 'Processing' | 'Analysis ready' | 'Scientific validation required' | 'Analysis failed' | 'Area exceeds limit' | 'Unavailable' | '…';
 
 /**
  * Featured card status, derived from REAL state — never a static label:
@@ -59,7 +59,9 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
   // result, never a scientific one; a failed validity check is never shown as "unavailable".
   const fromResult = (s: string | undefined | null, code?: string | null): CardStatus | null =>
     code === 'analysis_too_large' ? 'Area exceeds limit'
-      : s === 'READY' ? 'Analysis ready' : s === 'INVALID_ANALYSIS' ? 'Scientific validation required' : s === 'UNAVAILABLE' || s === 'ERROR' ? 'Unavailable' : s === 'RUNNING' || s === 'PROCESSING' ? 'Processing' : null;
+      // ERROR = the computation failed (e.g. timed out); UNAVAILABLE = a required service/data is missing. Never merged.
+      : s === 'READY' ? 'Analysis ready' : s === 'INVALID_ANALYSIS' ? 'Scientific validation required' : s === 'ERROR' ? 'Analysis failed'
+      : s === 'UNAVAILABLE' ? 'Unavailable' : s === 'RUNNING' || s === 'PROCESSING' ? 'Processing' : null;
   // The status already says the area is too large; the detail adds the limit itself — the backend's interactive
   // analysis limit (the value the check uses), never the larger selection limit (max_aoi_km2).
   const limitDetail = (max?: number | null) => {
@@ -73,9 +75,14 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
     if (inv.analysisStatus === 'running') return card('Processing', 'live Earth Engine computation');
     if (inv.analysisStatus === 'complete') {
       const s = fromResult(r?.status, r?.reasonCode) ?? 'Unavailable';
-      return card(s, s === 'Scientific validation required' ? pairs(r?.quality?.issues.map((i) => i.years)) : s === 'Area exceeds limit' ? limitDetail() : s === 'Unavailable' ? r?.reason ?? null : null, r?.reason ?? null);
+      return card(s, s === 'Scientific validation required' ? pairs(r?.quality?.issues.map((i) => i.years)) : s === 'Area exceeds limit' ? limitDetail() : s === 'Unavailable' || s === 'Analysis failed' ? r?.reason ?? null : null, r?.reason ?? null);
     }
-    if (inv.analysisStatus === 'error') return card('Unavailable', inv.analysisError?.message ?? null, inv.analysisError?.message ?? null);
+    if (inv.analysisStatus === 'error') {
+      // No envelope came back: a service that could not be reached is Unavailable; anything else is a failed analysis.
+      const code = inv.analysisError?.code;
+      const unreachable = !code || ['earth_engine_unreachable', 'service_unavailable'].includes(code);
+      return card(unreachable ? 'Unavailable' : 'Analysis failed', inv.analysisError?.message ?? null, inv.analysisError?.message ?? null);
+    }
   }
   if (!health) return card('…');
   if (health.backend === false) return card('Unavailable', 'backend offline');

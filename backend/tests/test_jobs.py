@@ -72,10 +72,10 @@ def test_job_returns_immediately_and_reports_real_stages(monkeypatch):
     assert [s["stage"] for s in final["stages"]] == real and all(s["duration_s"] is not None for s in final["stages"])
 
 
-def test_validating_does_no_earth_engine_work(monkeypatch):
+def test_validating_does_no_earth_engine_work(monkeypatch, oversized_aoi):
     calls = []
     monkeypatch.setattr(analysis.ee_provider, "analyze", lambda *a, on_stage=None, **k: calls.append(1) or READY)
-    job = client.post("/api/analysis-jobs", json={"aoi_id": "rondonia-frontier"}).json()   # over the interactive limit
+    job = client.post("/api/analysis-jobs", json={"aoi_id": oversized_aoi[0]}).json()   # over the interactive limit
     final, _ = poll(job["job_id"])
     assert final["status"] == "UNAVAILABLE" and final["result"]["reasonCode"] == "analysis_too_large" and calls == []
 
@@ -363,11 +363,12 @@ STALE_INVALID = {**READY, "status": "INVALID_ANALYSIS", "reasonCode": "unstable_
                  "quality": {"method_version": "x", "issues": [{"rule": "unstable_forest_mask", "years": [2019, 2020], "message": "x"}]}}
 
 
-@pytest.mark.parametrize("aid", ["similipal", "rondonia-frontier"])
-def test_oversized_featured_area_is_too_large_even_with_a_stored_result(monkeypatch, aid):
-    """A result stored before the limit applied must never be served for an area over the limit (no site exceptions)."""
+@pytest.mark.parametrize("stored", ["invalid", "ready"])
+def test_oversized_area_is_too_large_even_with_a_stored_result(monkeypatch, oversized_aoi, stored):
+    """A result stored before the limit applied must never be served for an area over the limit (no exceptions)."""
+    aid = oversized_aoi[0]
     monkeypatch.setattr(analysis.ee_provider, "analyze", lambda *a, **k: pytest.fail("an oversized area is never analysed"))
-    analysis._results[analysis._key(aid, 2018, 2025)] = STALE_INVALID if aid == "similipal" else READY
+    analysis._results[analysis._key(aid, 2018, 2025)] = STALE_INVALID if stored == "invalid" else READY
     final, seen = poll(client.post("/api/analysis-jobs", json={"aoi_id": aid, "baseline": 2018, "comparison": 2025}).json()["job_id"])
     env = final["result"]
     assert final["status"] == "UNAVAILABLE" and env["reasonCode"] == "analysis_too_large" and env["error"]["retryable"] is False
@@ -386,3 +387,70 @@ def test_areas_within_the_limit_proceed_to_the_scientific_analysis(monkeypatch, 
     final, _ = poll(client.post("/api/analysis-jobs", json={"aoi_id": aid, "baseline": 2018, "comparison": 2025}).json()["job_id"])
     assert calls == [1] and final["status"] == "INVALID_ANALYSIS" and final["result"]["reasonCode"] == "unstable_forest_mask"
     assert not final["result"].get("summary"), "no measurement outside READY"
+
+
+def test_a_timed_out_job_still_caches_the_result_its_last_request_returned(monkeypatch):
+    """Regression (Rondônia, 2026-10-07): the budget expired at 301 s while the LAST Earth Engine request was in flight;
+    it returned 9 s later and the finished result was discarded at the pure-Python 'validating_result' stage, so a Retry
+    recomputed everything. The job must stay an honest timeout (never READY), and the Retry must get the stored result."""
+    gate, calls = threading.Event(), []
+
+    def slow_last_request(*a, on_stage=None, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            on_stage("detecting_change")
+            gate.wait(3)                      # the in-flight request outlives the job budget
+            on_stage("validating_result")     # no Earth Engine work left
+        return READY
+
+    monkeypatch.setattr(analysis.ee_provider, "analyze", slow_last_request)
+    monkeypatch.setattr(analysis, "settings", SimpleNamespace(**{**vars(analysis.settings), "ee_timeout_s": 0.2, "ee_request_deadline_s": 0.2}))
+    body = {"aoi_id": "silent-valley", "baseline": 2019, "comparison": 2024}
+    job = client.post("/api/analysis-jobs", json=body).json()
+    final, _ = poll(job["job_id"], timeout=5)
+    assert final["status"] == "ERROR" and final["result"]["reasonCode"] == "analysis_timeout"
+    gate.set()
+    for _ in range(100):                      # the worker finishes in the background and caches the result
+        if analysis._results.get(analysis._key("silent-valley", 2019, 2024)):
+            break
+        time.sleep(0.02)
+    assert client.get(f"/api/analysis-jobs/{job['job_id']}").json()["status"] == "ERROR"   # first terminal state kept
+    again = client.post("/api/analysis-jobs", json=body).json()
+    assert poll(again["job_id"])[0]["status"] == "READY" and len(calls) == 1               # served, not recomputed
+
+
+@pytest.mark.parametrize("terminal", ["ERROR", "CANCELLED", "INVALID_ANALYSIS", "UNAVAILABLE"])
+def test_a_terminal_job_state_never_changes(terminal):
+    """Strict state machine: no stage or later outcome can move a job out of a terminal state (never ERROR -> READY)."""
+    job = analysis.Job("silent-valley", {"name": "x", "area_km2": 1}, 2019, 2024, "k")
+    job.enter("measuring_coverage")
+    job.finish({"analysisStatus": terminal} if terminal != "CANCELLED" else None, status=terminal if terminal == "CANCELLED" else None)
+    job.enter("validating_result")
+    job.finish({"analysisStatus": "READY"})
+    assert job.status == terminal and job.public()["status"] == terminal and job.done
+
+
+def test_processing_reaches_ready_only_with_a_ready_envelope():
+    job = analysis.Job("silent-valley", {"name": "x", "area_km2": 1}, 2019, 2024, "k")
+    job.enter("measuring_coverage")
+    assert job.public()["status"] == "PROCESSING" and job.public()["result"] is None
+    job.finish({"analysisStatus": "INVALID_ANALYSIS"})
+    assert job.public()["status"] == "INVALID_ANALYSIS"
+    job2 = analysis.Job("silent-valley", {"name": "x", "area_km2": 1}, 2019, 2024, "k")
+    job2.finish(None)                                   # no envelope at all -> ERROR, never READY
+    assert job2.status == "ERROR"
+
+
+def test_every_finished_job_logs_one_structured_summary_without_secrets(monkeypatch, caplog):
+    import json as _json
+    import logging
+    monkeypatch.setattr(analysis.ee_provider, "analyze", lambda *a, on_stage=None, **k: READY)
+    with caplog.at_level(logging.INFO, logger="terratrace.analysis"):
+        job = client.post("/api/analysis-jobs", json={"aoi_id": "silent-valley", "baseline": 2019, "comparison": 2022}).json()
+        poll(job["job_id"])
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("ANALYSIS_SUMMARY ")]
+    assert len(lines) == 1
+    rec = _json.loads(lines[0][len("ANALYSIS_SUMMARY "):])
+    assert rec["job_id"] == job["job_id"] and rec["analysis_id"] == "silent-valley" and rec["state"] == "READY"
+    assert rec["requested_window"] == [2019, 2022] and rec["geometry_bbox"] and rec["investigation"]
+    assert not any(s in lines[0].lower() for s in ("token", "credential", "private_key", "password"))

@@ -56,7 +56,45 @@
    "area_km2": 1772.6,
    "area_ha": 177261.0,
    "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/540/331.jpg",
-   "featured": true
+   "featured": true,
+   "analysis_area": {
+    "geometry": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        -63.565,
+        -10.009
+       ],
+       [
+        -63.235,
+        -10.009
+       ],
+       [
+        -63.235,
+        -9.761
+       ],
+       [
+        -63.565,
+        -9.761
+       ],
+       [
+        -63.565,
+        -10.009
+       ]
+      ]
+     ]
+    },
+    "bbox": [
+     -63.565,
+     -10.009,
+     -63.235,
+     -9.761
+    ],
+    "area_km2": 999.1,
+    "area_ha": 99910.7,
+    "basis": "Central rectangle of the region with the same proportions, about 1,000 km² — inside the 1,500 km² interactive analysis limit. Only this rectangle is analysed; the full region is shown for context."
+   }
   },
   {
    "id": "hasdeo-arand",
@@ -168,7 +206,45 @@
    "area_km2": 1822.5,
    "area_ha": 182252.0,
    "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/448/757.jpg",
-   "featured": true
+   "featured": true,
+   "analysis_area": {
+    "geometry": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        86.177,
+        21.667
+       ],
+       [
+        86.503,
+        21.667
+       ],
+       [
+        86.503,
+        21.933
+       ],
+       [
+        86.177,
+        21.933
+       ],
+       [
+        86.177,
+        21.667
+       ]
+      ]
+     ]
+    },
+    "bbox": [
+     86.177,
+     21.667,
+     86.503,
+     21.933
+    ],
+    "area_km2": 997.7,
+    "area_ha": 99773.8,
+    "basis": "Central rectangle of the region with the same proportions, about 1,000 km² — inside the 1,500 km² interactive analysis limit. Only this rectangle is analysed; the full region is shown for context."
+   }
   },
   {
    "id": "silent-valley",

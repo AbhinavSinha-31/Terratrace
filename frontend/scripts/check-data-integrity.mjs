@@ -292,6 +292,9 @@ async function run(label, { offline }) {
     await page.route(`**/api/imagery/tiles/${AOI}/**`, (r) => r.fulfill({ status: 404, body: '' }));
     const nA = analysisRequests.length;
     await page.goto(`${BASE}#/analysis/${AOI}?year=2020`, { waitUntil: 'domcontentloaded' });
+    // A hash change keeps the document: earlier sections may have cached this AOI's REAL availability (10 min
+    // staleTime). Reload so the timeline is fed by the fixture routes above, not by a cached live response.
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => !!window.__ttUi?.getState().investigation.study && window.__tt?.loaded, null, { timeout: 45000 }).catch(() => {});
     // Generous wait: under heavy load (build + live Earth Engine) the analysis view can take > 30 s to mount.
     await page.waitForFunction(() => document.querySelector('button[data-imagery-status="UNAVAILABLE"]'), null, { timeout: 90000 }).catch(() => {});

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from ...config import settings
+from ...lru import LRUDict
 from ...services import science as sc
 from ...services.geometry import Aoi
 
@@ -65,7 +66,7 @@ BANDS = ["blue", "green", "red", "nir", "swir1", "swir2"]
 DW_LABELS = ["water", "trees", "grass", "flooded_vegetation", "crops", "shrub_and_scrub", "built", "bare", "snow_and_ice"]
 ANALYSIS_SCALE = 30
 EVENT_SCALE = 20
-MAX_EVENTS = 60
+MAX_EVENTS = sc.MAX_EVENTS
 
 
 class EarthEngineError(RuntimeError):
@@ -225,12 +226,53 @@ def apply_statistics(rows: list[dict[str, Any]], sums: dict[str, Any], means: di
         f_ha = sc._num(sums.get(f"forest_{y}"))
         r["forest_ha"] = rnd(f_ha)
         r["forest_pct"] = None if f_ha is None or not r.get("valid_ha") else round(f_ha / r["valid_ha"] * 100, 2)
+        tc, nc = sc._num(sums.get(f"ctree_{y}")), sc._num(sums.get(f"cndvi_{y}"))
+        valid = r.get("valid_ha")
+        r["forest_components"] = None if tc is None or nc is None or not valid else {
+            "tree_prob": round(tc / valid * 100, 2), "leafon_ndvi": round(nc / valid * 100, 2)}   # % of the observed area
         r["mean_ndvi"] = rnd(sc._num(means.get(f"ndvi_{y}")), 3)
         r["mean_nbr"] = rnd(sc._num(means.get(f"nbr_{y}")), 3)
         if r["previous_year"] is not None:
             loss, gain, cmp_ = (sc._num(sums.get(f"{k}_{y}")) for k in ("loss", "gain", "cmp"))
             r["loss_ha"], r["gain_ha"], r["compared_ha"] = rnd(loss), rnd(gain), rnd(cmp_)
             r["net_change_ha"] = None if loss is None or gain is None else round(gain - loss, 1)
+    by_year = {r["year"]: r for r in rows}
+    for r in rows:   # measured change of each forest-mask component since the previous analysable year
+        prev = by_year.get(r.get("previous_year")) if r.get("passes_quality") else None
+        a, b = (prev or {}).get("forest_components"), r.get("forest_components")
+        r["forest_components_change_pts"] = None if not a or not b else {k: round(b[k] - a[k], 2) for k in b}
+
+
+# Map-layer styling (single source for the analysis and the post-restart tile rebuild).
+IMAGERY_VIS_PARAMS = {"min": 0, "max": 0.3, "gamma": 1.2}
+FOREST_PALETTE = ["16a36d"]
+CHANGE_PALETTE = ["d4452f"]
+LAYER_KINDS = ("imagery", "forest", "change")
+
+
+def change_mask(b, a):
+    """Change rule between two composites (baseline `b`, comparison `a`), with the minimum mapping unit applied.
+
+    forest bands are masked where unobserved, so change exists only on pixels observed in both years.
+    """
+    d_ndvi = a.select("ndvi").subtract(b.select("ndvi"))
+    d_nbr = a.select("nbr").subtract(b.select("nbr"))
+    d_tree = a.select("trees").subtract(b.select("trees"))
+    change = (
+        b.select("forest").And(a.select("forest").Not())
+        .And(d_ndvi.lte(sc.D_NDVI).Or(d_nbr.lte(sc.D_NBR)))
+        .And(d_tree.lte(sc.D_TREE))
+    ).selfMask()
+    mmu_px = math.ceil(sc.MMU_HA * 1e4 / EVENT_SCALE**2)
+    # Minimum mapping unit: keep patches of >= mmu_px connected pixels. connectedPixelCount(maxSize) counts only up
+    # to maxSize, so maxSize = mmu_px gives exactly the same ">= mmu_px" test as any larger cap (a patch reaching
+    # the MMU is counted as mmu_px either way) while exploring a far smaller neighbourhood. Identical mask; far less work.
+    return change.updateMask(change.connectedPixelCount(mmu_px, True).gte(mmu_px))
+
+
+def layer_key(analysis_id: str, kind: str, year: int, baseline: int | None = None) -> tuple[str, str, int]:
+    """Cache key of a rendered layer. A change layer depends on BOTH years, so its key carries the baseline."""
+    return (analysis_id, f"change:{baseline}" if kind == "change" else kind, year)
 
 
 def evaluate_concurrently(groups: dict[str, Any], workers: int) -> dict[str, Any]:
@@ -254,10 +296,12 @@ class EarthEngineProvider:
         self._error_at = 0.0
         self._project: str | None = None
         self._auth: str | None = None
-        self._images: dict[tuple[str, str, int], Any] = {}
-        self._mapids: dict[tuple[str, str, int], str] = {}
-        self._mapid_at: dict[tuple[str, str, int], float] = {}
-        self._requests: dict[str, dict[str, Any]] = {}
+        # Bounded: rendered layers and analysed geometries are rebuilt from the registered AOI after eviction (tile_url),
+        # and a map id is only a cached tile template (3 h TTL) that is regenerated on demand.
+        n = settings.memory_cache_entries
+        self._images: LRUDict = LRUDict(n * 4)       # (aoi, kind, year) -> styled ee.Image (client-side graph)
+        self._mapids: LRUDict = LRUDict(n * 8)       # (aoi, kind, year) -> (tile URL template, created monotonic s)
+        self._requests: LRUDict = LRUDict(n)         # aoi -> {"geometry": analysed geometry}
 
     # ----------------------------------------------------------------- credentials
     @staticmethod
@@ -389,7 +433,27 @@ class EarthEngineProvider:
         valid = clear.gte(sc.MIN_PIXEL_CLEAR_OBS).And(dw_obs.gte(sc.MIN_PIXEL_DW_OBS)).rename("valid")
         # Forest only where observed; unobserved pixels stay MASKED (never "non-forest").
         forest = trees.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid).rename("forest")
-        return comp.addBands([ndvi, nbr, ndvi_leafon, trees, label, clear, dw_obs, valid, forest]), col.size()
+        # The two halves of the forest mask, over observed pixels — measured separately so an unstable mask can be
+        # attributed to the component that moved (never used to decide forest).
+        tree_c = trees.gte(sc.FOREST_TREE_PROB).updateMask(valid).rename("forest_c_tree")
+        ndvi_c = ndvi_leafon.gte(sc.FOREST_NDVI).updateMask(valid).rename("forest_c_ndvi")
+        return comp.addBands([ndvi, nbr, ndvi_leafon, trees, label, clear, dw_obs, valid, forest, tree_c, ndvi_c]
+                             + self._quarter_obs(geom, year)), col.size()
+
+    def _quarter_obs(self, geom, year: int) -> list[Any]:
+        """obs_q1..obs_q4: 1 where the pixel has >= 1 clear (Cloud Score+) Sentinel-2 observation in that calendar quarter,
+        else 0 (a measured count of zero). A quarter WITHOUT scenes is a real case (e.g. 2018 July–September over parts of
+        India): a count over an empty collection has no bands, so one fully MASKED image is merged in — it contributes
+        no observation, it only keeps the band defined. Nothing is filled in."""
+        ee = _ee()
+        raw = self._s2_collection(geom, year)
+        none = ee.ImageCollection([ee.Image.constant(1).toByte().rename("obs").updateMask(ee.Image.constant(0))])
+        out = []
+        for q in range(4):
+            seen = raw.filter(ee.Filter.calendarRange(3 * q + 1, 3 * q + 3, "month")).map(
+                lambda img: img.select("B8").updateMask(img.select("cs_cdf").gte(0.6)).multiply(0).add(1).toByte().rename("obs"))
+            out.append(none.merge(seen).count().unmask(0).gte(1).rename(f"obs_q{q + 1}"))
+        return out
 
     def _landsat(self, geom, year: int):
         merged = self._landsat_collection(geom, year)
@@ -474,15 +538,21 @@ class EarthEngineProvider:
     MAPID_TTL_S = 3 * 3600
 
     def cached_mapid(self, key: tuple[str, str, int]) -> str | None:
-        url = self._mapids.get(key)
-        return url if url and time.monotonic() - self._mapid_at.get(key, 0) < self.MAPID_TTL_S else None
+        entry = self._mapids.get(key)
+        if entry is None:
+            return None
+        url, created = entry
+        if time.monotonic() - created >= self.MAPID_TTL_S:   # expired: never served again
+            self._mapids.pop(key, None)
+            return None
+        return url
 
     def store_mapid(self, key: tuple[str, str, int], url: str) -> None:
         now = time.monotonic()
-        for k in [k for k, t in self._mapid_at.items() if now - t >= self.MAPID_TTL_S]:   # expired: never served again
-            self._mapids.pop(k, None)
-            self._mapid_at.pop(k, None)
-        self._mapids[key], self._mapid_at[key] = url, now
+        for k, (_, created) in self._mapids.items():   # drop every expired template, not only the one requested
+            if now - created >= self.MAPID_TTL_S:
+                self._mapids.pop(k, None)
+        self._mapids[key] = (url, now)
 
     def cached_imagery_url(self, aoi_id: str, year: int) -> str | None:
         return self.cached_mapid((aoi_id, "aoi-imagery", year))
@@ -539,7 +609,19 @@ class EarthEngineProvider:
         area = ee.Image.pixelArea().divide(1e4)
 
         # Stage 1 — observation coverage (valid pixels = enough clear observations; NOT scene counts).
-        cov_img = ee.Image.cat([area.rename("aoi")] + [comps[y].select("valid").multiply(area).rename(f"valid_{y}") for y in years])
+        def cov_bands(y: int) -> list[Any]:
+            out = [comps[y].select("valid").multiply(area).rename(f"valid_{y}")]
+            if sc.era_of(y) == "modern":   # seasonal coverage: observed area per calendar quarter
+                out += [comps[y].select(f"obs_q{q}").multiply(area).rename(f"season{q}_{y}") for q in range(1, 5)]
+            return out
+
+        def component_bands(y: int) -> list[Any]:
+            if sc.era_of(y) != "modern":
+                return []
+            return [comps[y].select("forest_c_tree").multiply(area).rename(f"ctree_{y}"),
+                    comps[y].select("forest_c_ndvi").multiply(area).rename(f"cndvi_{y}")]
+
+        cov_img = ee.Image.cat([area.rename("aoi")] + [b for y in years for b in cov_bands(y)])
         med_bands = [comps[y].select("clear").rename(f"clear_{y}") for y in years]
         med_bands += [comps[y].select("dw_obs").rename(f"dw_{y}") for y in years if sc.era_of(y) == "modern"]
         check_deadline("coverage")
@@ -562,6 +644,7 @@ class EarthEngineProvider:
             spec_bands = []
             for r in spec_rows:
                 spec_bands.append(comps[r["year"]].select("forest").multiply(area).rename(f"forest_{r['year']}"))
+                spec_bands += component_bands(r["year"])
                 if r["previous_year"] is not None:
                     spec_bands += pair_bands(r["previous_year"], r["year"], f"{r['previous_year']}_{r['year']}")
             spec_pairs = {(r["previous_year"], r["year"]) for r in spec_rows if r["previous_year"] is not None}
@@ -593,7 +676,7 @@ class EarthEngineProvider:
             for y in years:
                 med_y = [comps[y].select("clear").rename(f"clear_{y}")] + ([comps[y].select("dw_obs").rename(f"dw_{y}")] if sc.era_of(y) == "modern" else [])
                 groups[str(y)] = ee.Dictionary({
-                    "cov": comps[y].select("valid").multiply(area).rename(f"valid_{y}").reduceRegion(ee.Reducer.sum(), geom, ANALYSIS_SCALE, maxPixels=1e10, tileScale=TILE_SCALE),
+                    "cov": ee.Image.cat(cov_bands(y)).reduceRegion(ee.Reducer.sum(), geom, ANALYSIS_SCALE, maxPixels=1e10, tileScale=TILE_SCALE),
                     "med": ee.Image.cat(med_y).reduceRegion(ee.Reducer.median(), geom, ANALYSIS_SCALE, maxPixels=1e10, tileScale=TILE_SCALE),
                 })
             out = evaluate_concurrently(groups, workers)
@@ -609,7 +692,11 @@ class EarthEngineProvider:
             coverage = valid_ha / aoi_px_ha if valid_ha is not None and aoi_px_ha else None
             clear_med = sc._num(stage1["med"].get(f"clear_{y}"))
             dw_med = sc._num(stage1["med"].get(f"dw_{y}")) if sc.era_of(y) == "modern" else None
-            passes, reason = (True, None) if "no_coverage" in diag else sc.assess_year(y, clear_med, dw_med, coverage)
+            seasonal = None
+            if sc.era_of(y) == "modern":
+                q_ha = [sc._num(stage1["cov"].get(f"season{q}_{y}")) for q in range(1, 5)]
+                seasonal = [None if v is None or not aoi_px_ha else v / aoi_px_ha for v in q_ha]
+            passes, reason = (True, None) if "no_coverage" in diag else sc.assess_year(y, clear_med, dw_med, coverage, seasonal, forest_analysis=True)
             s = sc.sensor_for(y)
             rows.append({
                 "year": y, "era": sc.era_of(y), "previous_year": None,
@@ -619,6 +706,7 @@ class EarthEngineProvider:
                 "dw_obs_median": None if dw_med is None else int(round(dw_med)),
                 "valid_ha": None if valid_ha is None else round(valid_ha, 1),
                 "coverage_pct": None if coverage is None else round(coverage * 100, 1),
+                "seasonal_coverage_pct": None if seasonal is None else [None if v is None else round(v * 100, 1) for v in seasonal],
                 "forest_ha": None, "forest_pct": None, "loss_ha": None, "gain_ha": None, "compared_ha": None, "net_change_ha": None,
                 "mean_ndvi": None, "mean_nbr": None,
                 "sensor": s["label"], "source": s["source"], "resolution_m": s["resolution_m"], "forest_method": s["forest_method"],
@@ -639,6 +727,7 @@ class EarthEngineProvider:
                     "year": y, "era": sc.era_of(y), "sensor": sc.sensor_for(y)["label"], "scenes": source_counts.get(str(y), {}),
                     "clear_obs_median": r["clear_obs_median"] if r else None, "dw_obs_median": r["dw_obs_median"] if r else None,
                     "coverage_pct": r["coverage_pct"] if r else None,
+                    "seasonal_coverage_pct": r["seasonal_coverage_pct"] if r else None,
                     "passes": bool(r and r["passes_quality"]),
                     "reason": (r["quality_reason"] if r else u["reason"] if u else None),
                 })
@@ -658,6 +747,7 @@ class EarthEngineProvider:
                 continue
             y = r["year"]
             bands.append(comps[y].select("forest").multiply(area).rename(f"forest_{y}"))
+            bands += component_bands(y)
             if r["previous_year"] is not None:
                 bands += pair_bands(r["previous_year"], y, str(y))
         if window:
@@ -680,7 +770,8 @@ class EarthEngineProvider:
                     missing.append((a, b, tag))
             for r in rows:
                 if r["passes_quality"]:
-                    S0[f"forest_{r['year']}"] = got.get(f"forest_{r['year']}")
+                    for k in ("forest", "ctree", "cndvi"):
+                        S0[f"{k}_{r['year']}"] = got.get(f"{k}_{r['year']}")
                     if r["previous_year"] is not None:
                         take(r["previous_year"], r["year"], str(r["year"]))
             for tag, pr in (("win", window), ("hist", hist_pair)):
@@ -708,7 +799,7 @@ class EarthEngineProvider:
                 if not r["passes_quality"]:
                     continue
                 y = r["year"]
-                sb = [comps[y].select("forest").multiply(area).rename(f"forest_{y}")]
+                sb = [comps[y].select("forest").multiply(area).rename(f"forest_{y}")] + component_bands(y)
                 if r["previous_year"] is not None:
                     sb += pair_bands(r["previous_year"], y, str(y))
                 groups[str(y)] = ee.Dictionary({
@@ -752,13 +843,14 @@ class EarthEngineProvider:
             tm.total("DIAGNOSTIC(no_change)")
             return {"status": "DIAGNOSTIC", "diagnostic": sorted(diag), "reasonCode": None, "reason": None, "quality": quality(status, issues)}
         for y in years:
-            self._images[(analysis_id, "imagery", y)] = comps[y].select(["red", "green", "blue"]).visualize(min=0, max=0.3, gamma=1.2)
+            self._images[layer_key(analysis_id, "imagery", y)] = self._render("imagery", comps[y])
         for y in ok:
-            self._images[(analysis_id, "forest", y)] = comps[y].select("forest").selfMask().visualize(palette=["16a36d"], opacity=0.85)
+            self._images[layer_key(analysis_id, "forest", y)] = self._render("forest", comps[y])
         next_ok = next((y for y in ok if y > c_year and sc.era_of(y) == "modern"), None)
         check_deadline("events")
         stage("detecting_change")
-        features = self._events(geom, comps, b_year, c_year, next_ok, analysis_id, tm, diag)
+        features, candidates = self._events(geom, comps, b_year, c_year, next_ok, analysis_id, tm, diag)
+        ev_meta = sc.events_meta(len(features), candidates)
         c_row = next(r for r in rows if r["year"] == c_year)
         for f in features:
             c_row["event_count"] += 1
@@ -782,7 +874,7 @@ class EarthEngineProvider:
                 "tags": [], "bbox": list(aoi.bbox), "center": list(aoi.centroid), "geometry": aoi.geometry,
                 "area_ha": round(aoi.area_ha, 1), "area_km2": round(aoi.area_km2, 2), "thumbnail_url": "",
             },
-            "kpis": kpis, "history": sc.history_for(rows, pair("hist") if hist_pair else None), "years": rows,
+            "kpis": kpis, "events_meta": ev_meta, "history": sc.history_for(rows, pair("hist") if hist_pair else None), "years": rows,
             "periods": sc.classify_periods(rows, latest), "method": sc.METHOD,
             "analysis_window": {"baseline_year": b_year, "comparison_year": c_year, "event_window": [b_year, c_year],
                                 "requested": [baseline_year, comparison_year]},
@@ -819,38 +911,32 @@ class EarthEngineProvider:
                            "note": "DW ≥ 0.5 ∧ leaf-on NDVI (p90) ≥ 0.6 (modern); Landsat NDVI proxy (historical)"},
             }],
             "severity_colors": {"low": "#f5a25a", "moderate": "#ec7a3c", "high": "#d4452f", "critical": "#a3281f"},
+            # Raster of the change mask between the window's composites (API consumers; the UI draws the event
+            # polygons). The baseline is part of the URL: a change layer depends on both years.
+            "change": {
+                "baseline_year": b_year, "comparison_year": c_year,
+                "tiles": [f"/api/tiles/{analysis_id}/change/{c_year}/{{z}}/{{x}}/{{y}}?baseline={b_year}"],
+                "palette": CHANGE_PALETTE,
+            },
         }
-        events = {"type": "FeatureCollection", "schema_version": "2.0", "aoi_id": analysis_id, "features": features}
+        events = {"type": "FeatureCollection", "schema_version": "2.0", "aoi_id": analysis_id, "features": features, "meta": ev_meta}
         tm.log("result_serialization (python)", time.monotonic() - t_ser)
         tm.total("READY")
         return {"status": "READY", "reasonCode": None, "reason": None, "quality": summary["quality"],
                 "summary": summary, "events": events, "layers": layers}
 
     def _events(self, geom, comps, b_year: int, c_year: int, next_year: int | None, analysis_id: str, tm: "EETimer | None" = None,
-                diag: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+                diag: frozenset[str] = frozenset()) -> tuple[list[dict[str, Any]], int | None]:
+        """(features, candidate polygon count before the MAX_EVENTS cut)."""
         ee = _ee()
         tm = tm or EETimer(analysis_id)
         b, a = comps[b_year], comps[c_year]
-        d_ndvi = a.select("ndvi").subtract(b.select("ndvi"))
-        d_nbr = a.select("nbr").subtract(b.select("nbr"))
-        d_tree = a.select("trees").subtract(b.select("trees"))
-        # forest bands are masked where unobserved → change exists only on pixels observed in both years.
-        change = (
-            b.select("forest").And(a.select("forest").Not())
-            .And(d_ndvi.lte(sc.D_NDVI).Or(d_nbr.lte(sc.D_NBR)))
-            .And(d_tree.lte(sc.D_TREE))
-        ).selfMask()
-        mmu_px = math.ceil(sc.MMU_HA * 1e4 / EVENT_SCALE**2)
-        # Minimum mapping unit: keep patches of >= mmu_px connected pixels. connectedPixelCount(maxSize) counts only up
-        # to maxSize, so maxSize = mmu_px gives exactly the same ">= mmu_px" test as any larger cap (a patch reaching
-        # the MMU is counted as mmu_px either way) while exploring a far smaller neighbourhood (measured: 40 s → see
-        # performance notes). Identical mask; far less Earth Engine work.
-        change = change.updateMask(change.connectedPixelCount(mmu_px, True).gte(mmu_px))
-        self._images[(analysis_id, "change", c_year)] = change.visualize(palette=["d4452f"])
+        change = change_mask(b, a)
+        self._images[layer_key(analysis_id, "change", c_year, b_year)] = self._render("change", change)
         if "no_vectorize" in diag:   # DIAGNOSTIC: evaluate the change raster only (candidate area), no polygons
             with tm("change_raster_only (reduceRegion sum, 20 m) [diagnostic getInfo]"):
                 change.multiply(ee.Image.pixelArea()).reduceRegion(ee.Reducer.sum(), geom, EVENT_SCALE, maxPixels=1e10, tileScale=EVENT_TILE_SCALE).getInfo()
-            return []
+            return [], None
         vectors = change.reduceToVectors(geometry=geom, scale=EVENT_SCALE, geometryType="polygon", eightConnected=True, maxPixels=1e10, tileScale=EVENT_TILE_SCALE)
         stack = [
             b.select(["ndvi", "nbr", "trees"], ["ndvi_b", "nbr_b", "tree_b"]),
@@ -869,8 +955,12 @@ class EarthEngineProvider:
         fc = ee.Image.cat(stack).reduceRegions(collection=ranked, reducer=reducer, scale=EVENT_SCALE, tileScale=EVENT_TILE_SCALE).sort("area_ha", False)
         # ONE request evaluates: change mask → reduceToVectors → per-polygon reduceRegions (indices, DW label,
         # clear obs, persistence, Hansen overlap). Their costs cannot be separated inside a single request.
+        # The candidate count rides in the same request (the polygons are computed for the ranking anyway), so the
+        # result can state whether the MAX_EVENTS cut removed anything — never a guess. It is a collection property:
+        # a FeatureCollection nested in an ee.Dictionary serialises WITHOUT its features (columns only).
         with tm("change_detection+vectorize+event_stats+persistence+hansen [getInfo #4]"):
-            data = fc.getInfo()
+            data = fc.set("tt_candidates", vectors.size()).getInfo()
+        candidates = int(data["properties"]["tt_candidates"])
         t_ser = time.monotonic()
 
         features = []
@@ -925,13 +1015,33 @@ class EarthEngineProvider:
                 },
             })
         tm.log("event_serialization (python)", time.monotonic() - t_ser)
-        return features
+        return features, candidates
 
     # ----------------------------------------------------------------- tiles
-    def tile_url(self, analysis_id: str, kind: str, year: int, geometry: dict[str, Any] | None = None) -> str:
+    @staticmethod
+    def _render(kind: str, img):
+        """Styled image of one layer kind (`img` = a composite, or the change mask for kind 'change')."""
+        if kind == "imagery":
+            return img.select(["red", "green", "blue"]).visualize(**IMAGERY_VIS_PARAMS)
+        if kind == "forest":
+            return img.select("forest").selfMask().visualize(palette=FOREST_PALETTE, opacity=0.85)
+        if kind == "change":
+            return img.visualize(palette=CHANGE_PALETTE)
+        raise EarthEngineError("unknown_layer", f"Unknown layer kind {kind!r}.")
+
+    def tile_url(self, analysis_id: str, kind: str, year: int, geometry: dict[str, Any] | None = None,
+                 baseline: int | None = None) -> str:
         """EE tile URL template for a rendered layer (map IDs are cached per layer and refreshed when old).
-        `geometry` (the registered AOI) lets layers be rebuilt after a backend restart, when nothing is in memory."""
-        key = (analysis_id, kind, year)
+
+        `geometry` (the analysed AOI) lets layers be rebuilt after a backend restart, when nothing is in memory. The
+        rebuild uses the SAME builders as the analysis (`_render`, `change_mask`), so a change layer is rebuilt as the
+        change mask between `baseline` and `year` — never as another layer.
+        """
+        if kind not in LAYER_KINDS:
+            raise EarthEngineError("unknown_layer", f"Unknown layer kind {kind!r}.")
+        if kind == "change" and (baseline is None or not baseline < year):
+            raise EarthEngineError("unknown_layer", "A change layer needs a baseline year before its comparison year.")
+        key = layer_key(analysis_id, kind, year, baseline)
         cached = self.cached_mapid(key)
         if cached:
             return cached
@@ -941,10 +1051,12 @@ class EarthEngineProvider:
             req = self._requests.get(analysis_id) or ({"geometry": geometry} if geometry else None)
             if not req:
                 raise EarthEngineError("unknown_layer", "This live analysis is no longer in memory; run the analysis again.")
-            ee = _ee()
-            comp, _ = self._composite(ee.Geometry(req["geometry"]), year)
-            img = (comp.select(["red", "green", "blue"]).visualize(min=0, max=0.3, gamma=1.2) if kind == "imagery"
-                   else comp.select("forest").selfMask().visualize(palette=["16a36d"], opacity=0.85))
+            g = _ee().Geometry(req["geometry"])
+            if kind == "change":
+                img = self._render("change", change_mask(self._composite(g, baseline)[0], self._composite(g, year)[0]))
+            else:
+                img = self._render(kind, self._composite(g, year)[0])
+            self._images[key] = img
         mapid = _ee().data.getMapId({"image": img})
         url = mapid["tile_fetcher"].url_format
         self.store_mapid(key, url)

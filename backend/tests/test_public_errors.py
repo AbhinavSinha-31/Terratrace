@@ -64,15 +64,17 @@ def test_timeout_returns_the_public_timeout_state(ee_ready, monkeypatch):
     assert env["error"]["retryable"] is True and not env.get("summary") and not no_leaks(env["error"])
 
 
-def test_large_aoi_is_refused_before_any_computation(ee_ready, monkeypatch):
+def test_large_aoi_is_refused_before_any_computation(ee_ready, monkeypatch, oversized_aoi):
+    aid, km2 = oversized_aoi
     called = []
     monkeypatch.setattr(analysis.ee_provider, "analyze", lambda *a, **k: called.append(1))
-    env = client.get("/api/analysis/rondonia-frontier", params={"baseline": 1984, "comparison": 2025}).json()   # 1,773 km²
+    env = client.get(f"/api/analysis/{aid}", params={"baseline": 1984, "comparison": 2025}).json()   # ≈ 1,983 km²
     assert called == [], "no Earth Engine work may start for an over-limit AOI"
     assert env["analysisStatus"] == "UNAVAILABLE" and env["reasonCode"] == "analysis_too_large"
-    assert env["reason"].startswith("Analysis area exceeds TerraTrace's 1,500 km² limit (selected area: 1,773 km²)")
-    assert env["limits"] == {"selected_area_km2": pytest.approx(1772.6, abs=0.1), "maximum_area_km2": 1500}
-    assert env["aoi"]["area_km2"] == pytest.approx(1772.6, abs=1), "the AOI is never silently reduced"
+    assert env["reason"].startswith(f"Analysis area exceeds TerraTrace's 1,500 km² limit (selected area: {int(km2 + 0.5):,} km²)")
+    assert env["limits"] == {"selected_area_km2": pytest.approx(km2, abs=0.1), "maximum_area_km2": 1500}
+    assert env["aoi"]["area_km2"] == pytest.approx(km2, abs=1), "the AOI is never silently reduced"
+    assert env["analysis_area"]["subset"] is False, "a drawn AOI is analysed as drawn, never cut to fit"
     assert env["window"] == {"baseline_year": 1984, "comparison_year": 2025}, "the window is never silently reduced"
 
 

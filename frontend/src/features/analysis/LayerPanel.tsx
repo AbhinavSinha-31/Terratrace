@@ -1,7 +1,7 @@
 import { ChevronsLeft, Flame, Layers, Map as MapIcon, Satellite, Scan, SquareDashed, TreePine, Type } from 'lucide-react';
 import { useCurrentBundle } from '../../data/queries';
 import { useUi } from '../../state/store';
-import { useImageryLabel } from '../../data/imagerySync';
+import { useImageryState } from '../../data/viewState';
 import { SEVERITIES, type GradientLegend } from '../../data/contracts';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
 import { severityLabel } from '../../lib/format';
@@ -33,7 +33,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
   const ndviLegend = analysis?.layers.overlays.find((o) => o.kind === 'ndvi')?.legend;
   const hasNdvi = !!ndviLegend;
   const img = analysis?.layers.imagery.find((i) => i.year === year);
-  const imageryLabel = useImageryLabel();
+  const imageryState = useImageryState();
 
   return (
     <div>
@@ -42,8 +42,14 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
         {onCollapse && <IconButton label="Collapse layers" size="sm" onClick={onCollapse}><ChevronsLeft size={15} /></IconButton>}
       </div>
       <div className="space-y-0.5">
-        <LayerToggle icon={<Satellite size={14} />} label="Satellite" hint={img ? `${img.label}${img.reference ? ' — stand-in reference, desaturated' : ''}` : `${imageryLabel.title} — ${imageryLabel.sub}`} on={layers.satellite} onChange={(v) => set('satellite', v)}>
-          <Segmented label="Imagery source" value={imagery} onChange={setImagery} options={[{ value: 'sentinel', label: 'Annual composite' }, { value: 'hires', label: 'High-res (current)' }]} />
+        <LayerToggle icon={<Satellite size={14} />} label="Satellite imagery" hint={imageryState.label} on={layers.satellite} onChange={(v) => set('satellite', v)}>
+          {/* The selected segment is the source actually rendered; a year appears only in the line below, and only
+              when the displayed imagery represents that year. */}
+          <Segmented label="Imagery source" value={imagery} onChange={setImagery} options={[{ value: 'sentinel', label: 'Annual composite' }, { value: 'hires', label: 'Current' }]} />
+          <div className="mt-1.5 text-[10.5px] leading-snug text-ink-3" data-testid="current-imagery" data-source={imageryState.source ?? ''}>
+            Viewing: <span className="text-ink-2">{imageryState.label}</span>
+            {imageryState.state === 'AVAILABLE' ? ' · imagery only' : imageryState.message ? ` — ${imageryState.message}` : ''}
+          </div>
         </LayerToggle>
         {analysis && <>
         <LayerToggle icon={<TreePine size={14} />} label="Forest cover" hint={`Operational forest mask for ${year}`} on={layers.forest} onChange={(v) => set('forest', v)}>

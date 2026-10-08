@@ -65,7 +65,10 @@ def test_featured_analysis_unavailable_without_earth_engine(aid):
     assert r.status_code == 200
     env = r.json()
     assert env["dataMode"] == "LIVE" and env["analysisStatus"] == "UNAVAILABLE"
-    if env["aoi"]["area_km2"] > 1500:   # deterministic AOI validation comes first, whatever the service state
+    # Deterministic AOI validation comes first, whatever the service state — on what is ANALYSED (a featured region's
+    # declared subset, else the AOI itself).
+    assert env["analysis_area"]["area_km2"] <= env["aoi"]["area_km2"]
+    if env["analysis_area"]["area_km2"] > 1500:
         assert env["reasonCode"] == "analysis_too_large" and env["error"]["retryable"] is False
         assert "exceeds TerraTrace's 1,500 km² limit" in env["reason"]
     else:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,19 @@ from . import __version__
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
+
+
+def _bounded_int(name: str, default: int, lo: int, hi: int) -> int:
+    """Integer setting clamped to [lo, hi]; an out-of-range or invalid value is logged and clamped, never trusted."""
+    raw = os.environ.get(name)
+    try:
+        v = int(float(raw)) if raw not in (None, "") else default
+    except ValueError:
+        logging.getLogger("terratrace.config").warning("%s=%r is not a number; using %d", name, raw, default)
+        return default
+    if not lo <= v <= hi:
+        logging.getLogger("terratrace.config").warning("%s=%d is outside %d..%d; using %d", name, v, lo, hi, min(hi, max(lo, v)))
+    return min(hi, max(lo, v))
 
 
 def _float(name: str, default: float) -> float:
@@ -42,14 +56,16 @@ class Settings:
     ee_request_deadline_s: float = _float("EE_REQUEST_DEADLINE_S", 180.0)
     # Dedicated worker threads for analysis jobs (separate from tile/imagery work, so analyses never queue behind
     # map tiles). Earth Engine Restricted Mode throttles concurrency, so a small number is deliberate.
-    analysis_workers: int = int(_float("TT_ANALYSIS_WORKERS", 3))
+    analysis_workers: int = _bounded_int("TT_ANALYSIS_WORKERS", 3, 1, 8)
     # Largest AOI accepted for an INTERACTIVE (synchronous) analysis. Measured 2026-09-27 (tt-ee-2.0): AOIs up to
     # 1,215 km² completed within the 120 s window; 1,773 km² and 1,822 km² exceeded it on cold runs.
     # Every composite year is always computed, so the requested window does not change the cost.
     interactive_max_km2: float = _float("TT_INTERACTIVE_MAX_KM2", 1500.0)
     # Concurrent Earth Engine requests per analysis stage. 1 = one combined request per stage (default).
     # >1 is an UNVERIFIED optimisation (A/B interrupted 2026-09-27: project entered EE restricted mode).
-    ee_parallel_requests: int = int(_float("EE_PARALLEL_REQUESTS", 1))
+    # Bounded to 1..4: each concurrent request is a separate Earth Engine computation, and the noncommercial quota
+    # (restricted mode) throttles concurrency, so more is not faster beyond a few.
+    ee_parallel_requests: int = _bounded_int("EE_PARALLEL_REQUESTS", 1, 1, 4)
 
     # Developer diagnostics in API responses (stage / error type / timing; never secrets). Local only.
     dev_diagnostics: bool = os.environ.get("DEV_DIAGNOSTICS", "false").strip().lower() in ("1", "true", "yes")
@@ -63,6 +79,17 @@ class Settings:
     user_agent: str = field(default_factory=lambda: os.environ.get("TT_USER_AGENT", f"TERRATRACE-prototype/{__version__} (university innovation expo)"))
 
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+    # In-memory cache entries per cache (results, history, imagery availability, ...). Evicted entries are re-read from
+    # the method-versioned files in cache_dir or rebuilt from the same inputs; nothing measured is lost.
+    memory_cache_entries: int = _bounded_int("TT_MEMORY_CACHE_ENTRIES", 256, 16, 100_000)
+
+    # Per-client request limits (requests per minute; 0 disables a limit). Generous defaults: they stop runaway
+    # clients from exhausting the Earth Engine quota without getting in the way of normal use.
+    rate_analysis_per_min: int = _bounded_int("TT_RATE_ANALYSIS_PER_MIN", 30, 0, 10_000)
+    rate_compute_per_min: int = _bounded_int("TT_RATE_COMPUTE_PER_MIN", 120, 0, 10_000)
+    rate_search_per_min: int = _bounded_int("TT_RATE_SEARCH_PER_MIN", 60, 0, 10_000)
+    rate_explain_per_min: int = _bounded_int("TT_RATE_EXPLAIN_PER_MIN", 20, 0, 10_000)
 
 
 settings = Settings()

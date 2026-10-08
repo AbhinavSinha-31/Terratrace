@@ -170,8 +170,8 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
   // Static thumbnail from the backend's study metadata (imagery only; URLs are never built here).
   const img = area.thumbnail_url;
   const { status, detail, reason } = useStudyCard(area.id);
-  const tone = status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' ? 'text-bad' : 'text-warn';
-  const dot = status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' ? 'bg-bad' : 'bg-warn';
+  const tone = status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'text-bad' : 'text-warn';
+  const dot = status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'bg-bad' : 'bg-warn';
   return (
     <motion.button
       initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + index * 0.07, duration: 0.5, ease: EASE }}

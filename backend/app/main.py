@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import ratelimit
 from .api.routes import router
 from .config import settings
 from .errors import diagnostics, public_error
@@ -44,6 +45,19 @@ log = logging.getLogger("terratrace")
 app = FastAPI(title="TERRATRACE API", version=settings.version, description="Explainable satellite forest-change intelligence", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 app.include_router(router)
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Refuse requests over the per-client limit with an explicit 429 public error (app/ratelimit.py)."""
+    group = ratelimit.group_of(request.method, request.url.path)
+    if group:
+        retry_after = ratelimit.limiter.check(request.client.host if request.client else "unknown", group)
+        if retry_after is not None:
+            log.warning("Rate limit (%s) reached for %s on %s %s", group, request.client.host if request.client else "?", request.method, request.url.path)
+            body = {**public_error("rate_limited"), "message": public_error("rate_limited")["user_message"]}
+            return JSONResponse(status_code=429, content={"detail": body}, headers={"Retry-After": str(int(retry_after + 0.999))})
+    return await call_next(request)
 
 
 @app.exception_handler(RequestValidationError)

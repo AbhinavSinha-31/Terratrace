@@ -108,8 +108,8 @@ def test_availability_without_earth_engine_is_an_error_not_a_status():
     assert d["code"] == "service_unavailable" and d["retryable"] is True and "years" not in r.json()
 
 
-def test_availability_refuses_oversized_area_before_any_computation(fake_ee):
-    r = client.get("/api/imagery/availability", params={"aoi": "rondonia-frontier"})   # 1,773 km² > 1,500 km²
+def test_availability_refuses_oversized_area_before_any_computation(fake_ee, oversized_aoi):
+    r = client.get("/api/imagery/availability", params={"aoi": oversized_aoi[0]})   # ≈ 1,983 km² > 1,500 km²
     assert r.status_code == 422 and r.json()["detail"]["code"] == "analysis_too_large"
     assert fake_ee == []
 

@@ -30,12 +30,13 @@ from ..config import settings
 from ..errors import public_error
 from ..providers.earth_engine.provider import EarthEngineError, provider as ee_provider, split_available
 from . import science as sc
-from .analysis import _service_unavailable, aoi_doc
+from ..lru import LRUDict
+from .analysis import _service_unavailable, analysis_target, aoi_doc
 from .geometry import AoiError, validate_aoi
 
 log = logging.getLogger("terratrace.imagery")
 CACHE = settings.cache_dir / "imagery"
-_availability: dict[str, dict[str, Any]] = {}
+_availability: LRUDict = LRUDict(settings.memory_cache_entries)
 _inflight: dict[str, asyncio.Future] = {}
 
 # ----------------------------------------------------------------------------- reference sources (imagery only)
@@ -174,8 +175,10 @@ async def availability(aid: str) -> dict[str, Any]:
         return cached
     if await asyncio.to_thread(_service_unavailable):
         raise ImageryError(503, "service_unavailable", "Imagery availability cannot be checked right now: live Earth observation is temporarily unavailable.")
-    # Workload guard BEFORE any computation (same interactive limit as the analysis).
-    if aoi.get("area_km2", 0) > settings.interactive_max_km2:
+    # Availability is measured over what is analysed (a featured region's declared subset, else the AOI), with the
+    # same interactive limit as the analysis — checked BEFORE any computation.
+    target = analysis_target(aoi)
+    if (target.get("area_km2") or 0) > settings.interactive_max_km2:
         raise ImageryError(422, "analysis_too_large", "This area is too large to check imagery availability interactively. Try a smaller area.", False)
     if key in _inflight:
         return await asyncio.shield(_inflight[key])
@@ -197,11 +200,12 @@ async def availability(aid: str) -> dict[str, Any]:
 async def _measure(aid: str, aoi: dict[str, Any], years: list[int], key: str) -> dict[str, Any]:
     deadline = time.monotonic() + settings.ee_timeout_s
     loop = asyncio.get_running_loop()
-    work = loop.run_in_executor(None, lambda: ee_provider.measure_imagery(aoi["geometry"], years, deadline=deadline))
+    work = loop.run_in_executor(None, lambda: ee_provider.measure_imagery(analysis_target(aoi)["geometry"], years, deadline=deadline))
 
     def build(raw: dict[str, Any]) -> dict[str, Any]:
         return {
             "aoi_id": aid, "method_version": sc.METHOD_VERSION, "provider": "Google Earth Engine",
+            "measured_area": {"area_km2": analysis_target(aoi).get("area_km2"), "subset": analysis_target(aoi)["subset"]},
             "thresholds": {"min_pixel_clear_obs": sc.MIN_PIXEL_CLEAR_OBS, "min_pixel_dw_obs": sc.MIN_PIXEL_DW_OBS, "min_year_coverage": sc.MIN_YEAR_COVERAGE},
             "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "years": classify(years, raw["counts"], raw["coverage"]),
@@ -243,7 +247,8 @@ IMAGERY_MESSAGES = {
     "EARTH_ENGINE_COMPUTATION_ERROR": "Live satellite imagery could not be prepared for this area and year.",
     "NETWORK_ERROR": "Live satellite imagery is unavailable: the imagery service could not be reached.",
 }
-_decisions: dict[tuple[str, int], dict[str, Any]] = {}
+# Imagery decisions per (AOI, year): small, and real scene counts of a completed year do not change (bounded anyway).
+_decisions: LRUDict = LRUDict(settings.memory_cache_entries * 8)
 # Imagery failures caused by Earth Engine itself (not by the data): a tile request may be retried.
 TRANSIENT_CODES = {"EARTH_ENGINE_AUTH_ERROR", "EARTH_ENGINE_PERMISSION_ERROR", "EARTH_ENGINE_COMPUTATION_ERROR", "NETWORK_ERROR"}
 # One in-flight decision per (AOI, year): a map requests a dozen tiles at once; they share one Earth Engine call.

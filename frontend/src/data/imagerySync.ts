@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useUi, type InvestigationImageryStatus } from '../state/store';
 import { ApiError } from './client';
-import { useBasemaps, useImageryDecision } from './queries';
+import { useImageryDecision } from './queries';
 
 /**
  * Mirrors the backend imagery decision for the investigation's study + imagery year into
@@ -38,20 +38,4 @@ export function imageryErrorMessage(e: unknown): string {
   if (err.status === 404) return err.code === 'not_found' ? 'Imagery request failed: area not found.' : 'Imagery request failed: endpoint not found.';
   if (err.status === 500) return 'Imagery service returned an internal error.';
   return 'Imagery request failed.';
-}
-
-/** Public label for the map imagery of the current study + year (from the backend decision only). */
-export function useImageryLabel(): { title: string; sub: string; live: boolean } {
-  const studyId = useUi((s) => s.investigation.study?.id ?? null);
-  const year = useUi((s) => s.investigation.imageryYear);
-  const hires = useUi((s) => s.imagery === 'hires');
-  const q = useImageryDecision(studyId, year);
-  const base = useBasemaps().data;
-  if (hires) return { title: base?.hires.label ?? 'High-resolution imagery', sub: 'current, not dated · imagery only', live: false };
-  if (!studyId) return { title: 'Base imagery', sub: base?.globe.label ?? 'imagery only', live: false };
-  const d = q.data;
-  if (d?.status === 'READY') return { title: d.label ?? `Live imagery ${year}`, sub: `${d.sceneCount} scenes · Earth Engine · imagery only`, live: true };
-  if (d) return { title: `${year} · imagery unavailable`, sub: d.message ?? 'No imagery for this year', live: false };
-  if (q.isError) return { title: 'Imagery unavailable', sub: imageryErrorMessage(q.error), live: false };
-  return { title: `Loading imagery · ${year}`, sub: 'Earth Engine', live: false };
 }

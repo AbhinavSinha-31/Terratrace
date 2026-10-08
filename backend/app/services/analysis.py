@@ -30,10 +30,12 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from ..config import settings
 from ..errors import diagnostics, public_error
+from ..lru import LRUDict
 from ..providers import registry
 from ..providers.earth_engine.provider import RESTRICTED_MODE, EarthEngineError, provider as ee_provider
 from . import science as sc
@@ -42,7 +44,8 @@ from .geometry import Aoi, AoiError, validate_aoi
 log = logging.getLogger("terratrace.analysis")
 AOIS = settings.cache_dir / "aois"
 RESULTS = settings.cache_dir / "results"
-_results: dict[str, dict[str, Any]] = {}
+# In-memory copies of the method-versioned result files (bounded; evicted entries are re-read from disk).
+_results: LRUDict = LRUDict(settings.memory_cache_entries)
 
 NO_SOURCES = {"landsat": False, "sentinel2": False, "dynamicWorld": False, "hansen": False}
 
@@ -91,6 +94,30 @@ def aoi_doc(aid: str) -> dict[str, Any]:
     raise AnalysisNotFound(aid)
 
 
+def analysis_target(aoi: dict[str, Any]) -> dict[str, Any]:
+    """What is actually analysed for an AOI.
+
+    A featured region larger than the interactive limit may declare an `analysis_area` (a defined subset, e.g. its
+    central ~1,000 km²): then only that subset is analysed and the full region is shown for context. Every other AOI
+    is analysed as drawn. Nothing about the region outside the subset is ever reported.
+    """
+    sub = aoi.get("analysis_area")
+    if sub:
+        return {"geometry": sub["geometry"], "area_km2": sub["area_km2"], "area_ha": sub.get("area_ha"), "subset": True,
+                "region_area_km2": aoi.get("area_km2"), "basis": sub.get("basis"), "bbox": sub.get("bbox")}
+    return {"geometry": aoi["geometry"], "area_km2": aoi.get("area_km2"), "area_ha": aoi.get("area_ha"), "subset": False,
+            "region_area_km2": aoi.get("area_km2"), "basis": None, "bbox": aoi.get("bbox")}
+
+
+def analysis_area_info(aoi: dict[str, Any]) -> dict[str, Any]:
+    """Public description of the analysed area (included in every envelope, whatever the status)."""
+    t = analysis_target(aoi)
+    info = {k: t[k] for k in ("area_km2", "area_ha", "subset", "region_area_km2", "basis", "bbox")}
+    if t["subset"]:
+        info["geometry"] = t["geometry"]
+    return info
+
+
 # ----------------------------------------------------------------------------- envelopes
 def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, code: str | None = None,
               user_message: str | None = None, retryable: bool | None = None, result: dict[str, Any] | None = None,
@@ -106,6 +133,8 @@ def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, cod
         "reasonCode": error["code"] if error else None,
         "error": error,
         "aoi": aoi,
+        # What was (or would be) analysed: the AOI itself, or a featured region's declared subset.
+        "analysis_area": analysis_area_info(aoi),
         "window": {"baseline_year": b, "comparison_year": c},
         "source": dict(NO_SOURCES),
         # Observation quality (scene counts, coverage, pass/fail reasons) — never forest/change metrics.
@@ -124,7 +153,7 @@ def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, cod
 def _area_limit(aoi: dict[str, Any]) -> dict[str, Any] | None:
     """Deterministic AOI validation: the interactive area limit applies to EVERY area (featured or drawn), before any
     stored result is read or any Earth Engine work starts. Returns the limit facts when the area exceeds it."""
-    area = aoi.get("area_km2")
+    area = analysis_target(aoi).get("area_km2")
     if area is None or area <= settings.interactive_max_km2:
         return None
     return {"selected_area_km2": round(float(area), 1), "maximum_area_km2": round(float(settings.interactive_max_km2), 1)}
@@ -180,6 +209,7 @@ def _service_unavailable() -> bool:
 def _from_result(aid: str, aoi: dict[str, Any], b: int, c: int, result: dict[str, Any]) -> dict[str, Any]:
     status = result["status"]
     if status == "READY":
+        sc.upgrade_result(result)   # explicit metric fields for results stored before they existed (same values)
         return _envelope(aid, aoi, b, c, "READY", result=result, quality=result.get("quality"))
     # Scientific outcomes: the reason is TERRATRACE's own rule text (coverage / validity), safe to show.
     return _envelope(aid, aoi, b, c, status, code=result.get("reasonCode"), user_message=result.get("reason"),
@@ -198,6 +228,10 @@ JOB_STAGES = {  # provider stage -> public job stage
     "measuring_forest": "MEASURING_FOREST_COVER", "detecting_change": "DETECTING_CHANGE", "validating_result": "VALIDATING_RESULT",
 }
 TERMINAL = {"READY", "INVALID_ANALYSIS", "UNAVAILABLE", "ERROR", "CANCELLED"}
+# Stages after the LAST Earth Engine request. Cancellation exists to avoid starting more Earth Engine work; past this
+# point there is none left, so a job that timed out / was cancelled meanwhile still validates and caches its result
+# (its reported terminal state is unchanged) and a Retry returns it instead of recomputing everything.
+NO_EE_WORK_LEFT = {"validating_result"}
 
 
 class AnalysisCancelled(Exception):
@@ -221,10 +255,14 @@ class Job:
 
     # -- state transitions (thread-safe) ---------------------------------------------------------
     def enter(self, provider_stage: str) -> None:
-        if self.cancel.is_set():
+        if self.cancel.is_set() and provider_stage not in NO_EE_WORK_LEFT:
             raise AnalysisCancelled()
         now = time.monotonic()
         with self._lock:
+            # A terminal state is final (ERROR / CANCELLED never turn into RUNNING and then READY): a worker that keeps
+            # going after a timeout or cancel only finishes its computation, for the result cache.
+            if self.status in TERMINAL:
+                return
             if self.stages:
                 self.stages[-1]["duration_s"] = round(now - self.stages[-1]["t"], 2)
                 log.info("[%s] %s %.1fs", self.id, self.stages[-1]["stage"], self.stages[-1]["duration_s"])
@@ -247,6 +285,28 @@ class Job:
             self.finished = now
         log.info("[%s] %s total=%.1fs area_km2=%s aoi=%s window=%s-%s", self.id, self.status, now - self.created,
                  self.aoi.get("area_km2"), self.aid, self.b, self.c)
+        log.info("ANALYSIS_SUMMARY %s", json.dumps(self.summary_record(), ensure_ascii=False, default=str))
+
+    def summary_record(self) -> dict[str, Any]:
+        """One structured record per finished job: what was analysed, what Earth Engine measured about the observations,
+        the validation outcome and the final state. Facts only — never credentials, tokens or raw error text."""
+        env = self.envelope or {}
+        q = env.get("quality") or {}
+        years = [{"year": y.get("year"), "scenes": y.get("scenes"), "clear_obs_median": y.get("clear_obs_median"),
+                  "coverage_pct": y.get("coverage_pct"), "seasonal_coverage_pct": y.get("seasonal_coverage_pct"),
+                  "passes": y.get("passes")} for y in q.get("years") or []]
+        return {
+            "job_id": self.id, "analysis_id": self.aid, "investigation": self.aoi.get("name"),
+            "geometry_bbox": analysis_target(self.aoi).get("bbox") if self.aoi.get("geometry") else None,
+            "area_km2": analysis_target(self.aoi).get("area_km2") if self.aoi.get("geometry") else self.aoi.get("area_km2"),
+            "requested_window": [self.b, self.c], "analysable_window": q.get("analyzable_window"),
+            "datasets": "Sentinel-2 SR Harmonized + Cloud Score+ + Dynamic World V1 (modern); Landsat C2 L2 (historical)",
+            "method_version": sc.METHOD_VERSION, "years": years,
+            "stages": [{"stage": s["stage"], "duration_s": s["duration_s"]} for s in self.stages],
+            "validation": {"issues": [{"rule": i.get("rule"), "years": i.get("years"), "evidence": i.get("evidence")} for i in q.get("issues") or []]},
+            "state": self.status, "reason_code": env.get("reasonCode"),
+            "elapsed_s": round((self.finished or time.monotonic()) - self.created, 1),
+        }
 
     @property
     def done(self) -> bool:
@@ -288,7 +348,7 @@ def create_job(aid: str, b: int, c: int, rid: str | None = None) -> Job:
         if len(_rid_key) > 500:   # bounded
             _rid_key.pop(next(iter(_rid_key)))
     with _jobs_lock:
-        running = _active.get(key)
+        running = _expire_if_overdue(_active.get(key))
         # Identical requests share ONE job (no duplicate Earth Engine work) — unless that job has exceeded its whole
         # budget without finishing (a hung request): then it is abandoned and a fresh job starts.
         if running is not None and not running.done and time.monotonic() - running.created < _job_budget():
@@ -307,13 +367,19 @@ def create_job(aid: str, b: int, c: int, rid: str | None = None) -> Job:
     return job
 
 
-def get_job(job_id: str) -> Job | None:
-    job = _jobs.get(job_id)
+def _expire_if_overdue(job: Job | None) -> Job | None:
+    """A job past its whole budget is finished as an honest timeout (ERROR, retryable), whoever looks at it first —
+    the poll, the stored-status read, the progress read or a new request for the same analysis. So no job can stay
+    QUEUED / RUNNING indefinitely, even if its worker is blocked in an Earth Engine call or nobody polls it."""
     if job is not None and not job.done and time.monotonic() - job.created > _job_budget():
-        # Honest timeout: the Earth Engine request did not answer within the whole budget.
+        job.cancel.set()   # the worker stops at its next stage boundary
         job.finish(_envelope(job.aid, job.aoi, job.b, job.c, "ERROR", code="analysis_timeout",
                              user_message="Earth Engine did not complete the analysis in time (request timed out). No forest-change measurements were generated."))
     return job
+
+
+def get_job(job_id: str) -> Job | None:
+    return _expire_if_overdue(_jobs.get(job_id))
 
 
 def cancel_job(job_id: str) -> Job | None:
@@ -332,7 +398,7 @@ def _execute(job: Job) -> None:
     try:
         # VALIDATING — geometry, coordinates and limits only (no Earth Engine call).
         job.enter("validating_aoi")
-        geom = validate_aoi(aoi["geometry"], enforce_limits=False)
+        geom = validate_aoi(analysis_target(aoi)["geometry"], enforce_limits=False)
         # Workload guard FIRST: an area over the limit is never analysed, and a result stored before the limit
         # existed is never served for it (same rule for featured and drawn areas).
         limit = _area_limit(aoi)
@@ -356,7 +422,7 @@ def _execute(job: Job) -> None:
         # also when the job was already reported as timed out or cancelled, so a Retry returns it without recomputing.
         if result.get("status") in ("READY", "UNAVAILABLE", "INVALID_ANALYSIS") and not result.get("diagnostic"):
             _results[key] = result
-            _save_result(key, result, aoi["geometry"])
+            _save_result(key, result, analysis_target(aoi)["geometry"])
         job.finish(_from_result(aid, aoi, b, c, result))
     except AnalysisCancelled:
         log.info("[%s] stopped after cancellation", job.id)
@@ -389,27 +455,30 @@ def stored_status(aid: str, b: int, c: int) -> dict[str, Any]:
     """The REAL stored outcome of an analysis (never computes, never calls Earth Engine):
     RUNNING while a job for this key is computing, else the cached method-versioned result's status
     (READY / INVALID_ANALYSIS / UNAVAILABLE with its reason), else NOT_RUN."""
-    aoi_doc(aid)   # AnalysisNotFound -> 404
+    aoi = aoi_doc(aid)   # AnalysisNotFound -> 404
     key = _key(aid, b, c)
-    limit = _area_limit(aoi_doc(aid))
+    base = {"aoi_id": aid, "window": [b, c], "method_version": sc.METHOD_VERSION, "analysis_area": analysis_area_info(aoi)}
+    limit = _area_limit(aoi)
     if limit:
-        env = _too_large_envelope(aid, aoi_doc(aid), b, c, limit)
-        return {"aoi_id": aid, "window": [b, c], "status": "UNAVAILABLE", "reasonCode": "analysis_too_large", "reason": env["reason"], **limit}
-    job = _active.get(key)
+        env = _too_large_envelope(aid, aoi, b, c, limit)
+        return {**base, "status": "UNAVAILABLE", "reasonCode": "analysis_too_large", "reason": env["reason"], **limit}
+    job = _expire_if_overdue(_active.get(key))
     if job is not None and not job.done:
-        return {"aoi_id": aid, "window": [b, c], "status": "RUNNING", "reasonCode": None, "reason": None, "job_id": job.id, "stage": job.stage}
+        return {**base, "status": "RUNNING", "reasonCode": None, "reason": None, "job_id": job.id, "stage": job.stage}
     cached = _results.get(key) or _load_result(key)
     if not cached:
-        return {"aoi_id": aid, "window": [b, c], "status": "NOT_RUN", "reasonCode": None, "reason": None}
+        return {**base, "status": "NOT_RUN", "reasonCode": None, "reason": None}
     issues = [i["years"] for i in ((cached.get("quality") or {}).get("issues") or [])]
-    return {"aoi_id": aid, "window": [b, c], "status": cached["status"], "reasonCode": cached.get("reasonCode"), "reason": cached.get("reason"),
-            "issueYears": issues}
+    f = RESULTS / f"{key}.json"
+    stored_at = datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).isoformat(timespec="seconds") if f.exists() else None
+    return {**base, "status": cached["status"], "reasonCode": cached.get("reasonCode"), "reason": cached.get("reason"),
+            "issueYears": issues, "stored_at": stored_at}
 
 
 def progress(rid: str) -> dict[str, Any]:
     """Current REAL provider stage of the job a request id belongs to (None when unknown/finished)."""
     key = _rid_key.get(rid)
-    job = _active.get(key) if key else None
+    job = _expire_if_overdue(_active.get(key)) if key else None
     if job is None or job.done or job.provider_stage is None:
         return {"stage": None, "elapsed_s": None}
     return {"stage": job.provider_stage, "elapsed_s": round(time.monotonic() - job.created, 1)}
@@ -422,7 +491,7 @@ class HistoryUnavailable(Exception):
         self.status, self.code, self.message = status, code, message
 
 
-_history: dict[str, dict[str, Any]] = {}
+_history: LRUDict = LRUDict(settings.memory_cache_entries)
 _history_jobs: dict[str, concurrent.futures.Future] = {}
 
 
@@ -449,7 +518,7 @@ def _load_history(key: str) -> dict[str, Any] | None:
 
 def _compute_history(aid: str, aoi: dict[str, Any], b: int, c: int, key: str) -> dict[str, Any]:
     t0 = time.monotonic()
-    geom = validate_aoi(aoi["geometry"], enforce_limits=False)
+    geom = validate_aoi(analysis_target(aoi)["geometry"], enforce_limits=False)
     raw = ee_provider.analyze(geom, aid, aoi["name"], b, c, deadline=t0 + _job_budget(), scope="history")
     doc = {k: raw.get(k) for k in ("years", "periods", "history", "quality_years")}
     doc.update(method_version=sc.METHOD_VERSION, aoi_id=aid, window=[b, c])
@@ -458,6 +527,35 @@ def _compute_history(aid: str, aoi: dict[str, Any], b: int, c: int, key: str) ->
     (RESULTS / f"{key}.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     log.info("History %s (outside %s-%s): %d years in %.1fs", aid, b, c, len(doc["years"] or []), time.monotonic() - t0)
     return doc
+
+
+HISTORY_SCOPE_NOTE = (
+    "Historical context, not change detection. 1984–2015 are seven multi-year Landsat snapshots with an NDVI-only forest "
+    "proxy (no Dynamic World); 2016 onward are annual Sentinel-2 / Dynamic World composites. The two eras use different "
+    "forest definitions and are never subtracted from each other. Years outside the analysed window never change its result."
+)
+
+
+def _describe_history(doc: dict[str, Any], aoi: dict[str, Any]) -> dict[str, Any]:
+    """The history response with its scope stated and its stability checked (never alters the measured values).
+
+    Each transition gets the same physical-validity and gain-stability checks as the analysis; failures are reported
+    as `stability_issues` (informational — history never decides an analysis status). A long-term period containing an
+    unstable transition is flagged, and its level is labelled as a GROSS loss rate (gain is reported next to it).
+    """
+    out = dict(doc)
+    area_ha = analysis_target(aoi).get("area_ha") or (analysis_target(aoi).get("area_km2") or 0) * 100
+    issues = sc.context_issues(doc.get("years") or [], area_ha, None)
+    out["scope"] = "historical_context"
+    out["scope_note"] = HISTORY_SCOPE_NOTE
+    out["stability_issues"] = issues
+    periods = []
+    for p in doc.get("periods") or []:
+        unstable = [i for i in issues if p["from_year"] <= min(i["years"]) and max(i["years"]) <= p["to_year"]]
+        periods.append({**p, "level_basis": "gross loss rate (loss transitions per year / forest at period start)",
+                        "unstable": bool(unstable), "unstable_transitions": [i["years"] for i in unstable]})
+    out["periods"] = periods
+    return out
 
 
 async def history(aid: str, b: int, c: int) -> dict[str, Any]:
@@ -469,7 +567,7 @@ async def history(aid: str, b: int, c: int) -> dict[str, Any]:
         raise HistoryUnavailable(422, "analysis_too_large")
     cached = _load_history(key)
     if cached:
-        return cached
+        return _describe_history(cached, aoi)
     if await asyncio.to_thread(_service_unavailable):
         raise HistoryUnavailable(503, "service_unavailable")
     if not await asyncio.to_thread(_ee_reachable):
@@ -482,7 +580,7 @@ async def history(aid: str, b: int, c: int) -> dict[str, Any]:
         # traceback it would otherwise hold for the life of the process.
         fut.add_done_callback(lambda f, k=key: _history_jobs.pop(k, None) if _history_jobs.get(k) is f else None)
     try:
-        return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(fut)), timeout=settings.ee_timeout_s)
+        return _describe_history(await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(fut)), timeout=settings.ee_timeout_s), aoi)
     except (asyncio.TimeoutError, TimeoutError):
         raise HistoryUnavailable(504, "analysis_timeout", "The historical record is still being computed. Try again shortly.") from None
     except Exception as e:  # noqa: BLE001 — Earth Engine / transport errors; detail stays in the log
@@ -502,6 +600,46 @@ async def run(aid: str, b: int, c: int, rid: str | None = None) -> dict[str, Any
                          diag=diagnostics(stage=job.provider_stage, elapsed_s=round(time.monotonic() - job.created, 1), limit_s=settings.ee_timeout_s,
                                           ee_restricted_mode=RESTRICTED_MODE["seen_at"] is not None))
     return job.envelope or _envelope(aid, job.aoi, b, c, "ERROR", code="analysis_failed")
+
+
+def change_baselines(aid: str, comparison_year: int) -> list[int]:
+    """Baseline years of the stored READY results (current method) of `aid` whose event window ends at
+    `comparison_year` — read-only, used to resolve a change-layer tile request without an explicit baseline."""
+    aoi_doc(aid)   # validates the id (AnalysisNotFound) before it is used in a file pattern
+    out = set()
+    for f in RESULTS.glob(f"{aid}-*-{sc.METHOD_VERSION}.json") if RESULTS.exists() else []:
+        if "-history-" in f.name:
+            continue
+        doc = _load_result(f.name[: -len(".json")])
+        win = ((doc or {}).get("summary") or {}).get("analysis_window", {}).get("event_window")
+        if doc and doc.get("status") == "READY" and win and win[1] == comparison_year:
+            out.add(win[0])
+    return sorted(out)
+
+
+def find_ready_event(event_id: str) -> dict[str, Any] | None:
+    """The stored properties of a change event of a READY result (current method version), or None.
+
+    Used to decide whether facts sent for an AI briefing belong to a real, validated analysis. Reads only the
+    method-versioned result files; never computes anything.
+    """
+    if not isinstance(event_id, str) or not re.fullmatch(r"TT-[A-Z0-9-]{4,}-\d{4}-\d{2}", event_id):
+        return None
+    docs = list(_results.values())
+    for f in RESULTS.glob(f"*-{sc.METHOD_VERSION}.json") if RESULTS.exists() else []:
+        if "-history-" in f.name:
+            continue
+        try:
+            docs.append(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    for doc in docs:
+        if doc.get("status") != "READY" or doc.get("method_version", sc.METHOD_VERSION) != sc.METHOD_VERSION:
+            continue
+        for feat in (doc.get("events") or {}).get("features") or []:
+            if feat.get("id") == event_id:
+                return feat.get("properties")
+    return None
 
 
 # ----------------------------------------------------------------------------- result cache (method-versioned)

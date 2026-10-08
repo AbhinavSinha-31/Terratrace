@@ -4,7 +4,7 @@ import { Bell, ChevronDown, RotateCcw, Info, Menu as MenuIcon, Search, Settings,
 import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
-import { useImageryLabel } from '../../data/imagerySync';
+import { useImageryState } from '../../data/viewState';
 import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
@@ -44,18 +44,21 @@ export function dataStatus(h?: SystemHealth): { short: string; long: string; det
 /** Imagery is independent of analysis: live imagery may be READY while the analysis is unavailable. */
 function ImageryStatusRow() {
   const status = useUi((s) => (s.investigation.study ? s.investigation.imageryStatus : null));
-  const label = useImageryLabel();
-  const dot = status === 'available' ? 'bg-live' : status === 'loading' || status === null ? 'bg-ink-4' : 'bg-warn';
-  const title = status === null ? 'Open a study to load live imagery'
-    : status === 'available' ? 'Live satellite imagery'
-    : status === 'insufficient' ? 'Live imagery · limited coverage'
-    : status === 'loading' ? 'Loading imagery…'
+  // What the map actually renders (imageryState) — the same object every other imagery label uses.
+  const im = useImageryState();
+  const dot = im.state === 'AVAILABLE' ? 'bg-live' : im.state === 'LOADING' || im.state === 'NONE' || im.state === 'OFF' ? 'bg-ink-4' : 'bg-warn';
+  const title = im.state === 'OFF' ? 'Satellite imagery off'
+    : im.source === 'esri-current' ? 'Current basemap imagery'
+    : im.source === 'ee-analysis-composite' ? 'Analysis composite imagery'
+    : im.source === 'ee-live' ? (status === 'insufficient' ? 'Live imagery · limited coverage' : 'Live satellite imagery')
+    : im.state === 'NONE' ? 'Open a study to load live imagery'
+    : im.state === 'LOADING' ? 'Loading imagery…'
     : 'Imagery unavailable';
   return (
     <div data-testid="imagery-status-row" data-status={status ?? 'none'}>
       <div className="t-label mt-2 !text-[9px] text-ink-4">Imagery</div>
       <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink"><span className={`h-2 w-2 rounded-full ${dot}`} />{title}</div>
-      {status !== null && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">{label.title} · {label.sub}</p>}
+      {im.state !== 'NONE' && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3" data-testid="header-imagery-line">{im.label} · {im.state === 'AVAILABLE' ? 'imagery only' : im.message ?? ''}</p>}
     </div>
   );
 }

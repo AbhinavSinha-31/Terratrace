@@ -38,6 +38,8 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "invalid_request": ("The request could not be processed. Check the selected area and years.", False),
     "tiles_unavailable": ("Analysis imagery is temporarily unavailable.", True),
     "imagery_check_failed": ("Imagery availability could not be checked right now.", True),
+    # Per-client request limit reached (app/ratelimit.py). Explicit, retryable — the request was not processed.
+    "rate_limited": ("Too many requests in a short time. Wait a moment and try again.", True),
 }
 
 

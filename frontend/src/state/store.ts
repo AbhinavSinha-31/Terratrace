@@ -313,7 +313,7 @@ export const useUi = create<UiState>((set, get) => ({
   requestAnalysis: () => {
     const inv = get().investigation;
     if (!inv.study && !inv.aoi) return;
-    set({ investigation: { ...inv, ...IDLE_ANALYSIS, analysisStatus: 'running', analysisRequestId: newRid() }, selectedEventId: null });
+    set({ investigation: { ...inv, ...IDLE_ANALYSIS, analysisStatus: 'running', analysisRequestId: newRid() }, selectedEventId: null, compare: false });
   },
   acceptAnalysis: (meta, result) => {
     const s = get();
@@ -330,6 +330,8 @@ export const useUi = create<UiState>((set, get) => ({
         analysisError: null,
         analysisJob: null,
       },
+      // Before / After exists only for a validated (READY) analysis.
+      ...(result.status === 'READY' ? {} : { compare: false }),
       ...(wasCustom ? { view: 'analysis' as View, tab: 'overview' as PanelTab, drawerOpen: true, drawTool: null, sheet: 'peek' as SheetSnap, camera: { kind: 'aoi' as const, id: result.id, nonce: ++nonce } } : {}),
     });
     return true;
@@ -337,7 +339,7 @@ export const useUi = create<UiState>((set, get) => ({
   failAnalysis: (meta, error) => {
     const s = get();
     if (!requestMatches(s.investigation, meta)) return false;   // stale response - discarded
-    set({ investigation: { ...s.investigation, analysisStatus: 'error', analysisResult: null, analysisError: error, analysisJob: null } });
+    set({ investigation: { ...s.investigation, analysisStatus: 'error', analysisResult: null, analysisError: error, analysisJob: null }, compare: false });
     return true;
   },
   setAnalysisJob: (meta, job) => {
@@ -367,8 +369,11 @@ export const useUi = create<UiState>((set, get) => ({
   setCompare: (on) =>
     set((s) => {
       if (!on) return { compare: false };
-      // Compare the baseline (before) with the displayed imagery year (after).
       const inv = s.investigation;
+      // Before / After presents a validated forest-change comparison: only for a READY analysis (never raw imagery of a
+      // failed, missing or running analysis). Every entry point (button, 'c' key, event inspector) goes through here.
+      if (inv.analysisStatus !== 'complete' || inv.analysisResult?.status !== 'READY') return {};
+      // Compare the baseline (before) with the displayed imagery year (after).
       const after = inv.imageryYear > inv.baselineYear ? inv.imageryYear : inv.comparisonYear;
       return { compare: true, playing: false, investigation: { ...inv, imageryYear: after } };
     }),

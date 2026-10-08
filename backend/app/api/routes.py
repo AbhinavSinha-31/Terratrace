@@ -13,7 +13,7 @@ from ..config import settings
 from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
-from ..providers.earth_engine.provider import provider as ee_provider
+from ..providers.earth_engine.provider import EarthEngineError, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
 from ..services import analysis, imagery, search
 from ..services.explanation import service as explanation
@@ -196,17 +196,34 @@ async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> di
 
 
 @router.get("/tiles/{aid}/{kind}/{year}/{z}/{x}/{y}")
-async def tiles(aid: str, kind: str, year: int, z: int, x: int, y: int) -> RedirectResponse:
-    """Earth Engine map tiles for a READY live analysis (proxied so no credentials reach the browser)."""
+async def tiles(aid: str, kind: str, year: int, z: int, x: int, y: int,
+                baseline: int | None = Query(None, ge=1984, le=2100)) -> RedirectResponse:
+    """Earth Engine map tiles for a READY live analysis (proxied so no credentials reach the browser).
+
+    A change layer depends on two years: `baseline` (query) is required unless exactly one stored READY result of this
+    AOI ends at `year`, whose baseline is then used."""
     if kind not in ("imagery", "forest", "change"):
         raise _err(404, "not_found")
     try:
         try:
-            geometry = analysis.aoi_doc(aid)["geometry"]   # registered AOI on disk: layers survive a backend restart
+            # Registered AOI on disk (layers survive a backend restart), rendered over what was actually analysed.
+            geometry = analysis.analysis_target(analysis.aoi_doc(aid))["geometry"]
         except analysis.AnalysisNotFound:
             raise _err(404, "not_found") from None
-        url = await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry)
-    except Exception as e:  # noqa: BLE001 — EarthEngineError or ee transport errors; details stay in the log
+        if kind == "change" and baseline is None:
+            candidates = analysis.change_baselines(aid, year)
+            if len(candidates) != 1:
+                raise _err(404, "not_found", "This change layer needs its baseline year (?baseline=YYYY).", False)
+            baseline = candidates[0]
+        url = await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry, baseline)
+    except HTTPException:
+        raise
+    except EarthEngineError as e:
+        if e.code == "unknown_layer":   # a layer that cannot exist (bad kind / baseline): not retryable
+            raise _err(404, "not_found", "This map layer does not exist for this analysis.", False) from None
+        log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
+        raise _err(503, "tiles_unavailable") from None
+    except Exception as e:  # noqa: BLE001 — ee transport errors; details stay in the log
         log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
         raise _err(503, "tiles_unavailable") from None
     return _tile_redirect(url.format(z=z, x=x, y=y))

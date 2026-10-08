@@ -1,4 +1,4 @@
-# TERRATRACE scientific method — `tt-ee-2.0`
+# TERRATRACE scientific method — `tt-ee-2.2`
 
 Every number TERRATRACE shows comes from a completed **Google Earth Engine** analysis that
 passed the validity rules below. Nothing is simulated, estimated, interpolated or clamped.
@@ -12,7 +12,7 @@ never reused (they are deleted at startup and rejected on load).
 | Era | Years | Imagery | Forest definition |
 |---|---|---|---|
 | Historical | 1984, 1990, 1995, 2000, 2005, 2010, 2015 | Landsat 5/7/8/9 Collection 2 Level-2 surface reflectance, multi-year median (e.g. 2005 = 2004–2006; 1984 = 1984–1985) | NDVI ≥ 0.60 (30 m proxy) |
-| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 annual mean | Dynamic World mean `trees` ≥ 0.50 **and** NDVI ≥ 0.60 |
+| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 annual mean | Dynamic World mean `trees` ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
 
 * Dynamic World starts mid-2015; it is never back-filled into historical years.
 * Sentinel-2 SR Harmonized is sparse before late 2018 outside Europe; such years are reported as
@@ -48,6 +48,19 @@ A year is **analysable** only if coverage ≥ 80 % (`MIN_YEAR_COVERAGE`) — bel
 would describe a fragment of the area. Non-analysable years carry no forest/loss/gain values; the UI
 says *"Insufficient clear observations"*, never *"no change"*.
 
+**Seasonal coverage (`tt-ee-2.2`, modern era).** The forest test uses *leaf-on* NDVI, an upper percentile
+over the whole year, so a year must sample the whole phenological cycle. A modern year is analysable only
+if, in **every calendar quarter**, ≥ 80 % of the AOI (the same `MIN_YEAR_COVERAGE`; no new constant) has at
+least one clear Sentinel-2 observation. Reported per year as `seasonal_coverage_pct` (Jan–Mar … Oct–Dec).
+A quarter without any scene is a measured zero (an empty collection is never composited; one fully masked
+image keeps the band defined and contributes no observation).
+
+*Why:* the Sentinel-2 SR archive has no July–September 2018 scenes over Hasdeo Arand or Silent Valley and
+no usable January–March 2018 scenes over Rondônia (measured 2026-10-07). With only dry-season scenes,
+deciduous forest fails the leaf-on test, so 2018 under-counted forest and 2018→2019 showed spurious
+"gain" (Hasdeo: 7.0 % of the area). Every 2019–2025 year passes at all four featured sites. This rule does
+not apply to imagery availability (imagery is not a forest measurement).
+
 ## 5. Statistics (what each number means)
 
 | Field | Calculation |
@@ -77,7 +90,13 @@ score are unchanged (see `METHOD` in `science.py`).
 | `UNAVAILABLE` | Earth Engine not configured, no imagery, or fewer than two analysable modern years in the window |
 | `INVALID_ANALYSIS` | The computation finished but failed a validity rule — results are withheld, not shown as findings |
 | `ERROR` | Earth Engine failed or timed out |
-| `PROCESSING` | Reserved for asynchronous runs |
+| `PROCESSING` | An analysis job is running (real stages: VALIDATING → PREPARING_IMAGERY → MEASURING_OBSERVATION_COVERAGE → [MEASURING_FOREST_COVER] → DETECTING_CHANGE → VALIDATING_RESULT) |
+| `NOT_RUN` | (`/api/analysis-status`) no analysis stored for this window and none running |
+
+The UI labels these *Analysis ready*, *Live analysis unavailable*, *Scientific validation required*
+(`INVALID_ANALYSIS`), *Analysis failed* (`ERROR`), *Processing* and *Not run*. A job's terminal state is
+final: it never changes afterwards (e.g. a timed-out job never becomes READY). Its computation may still
+finish and is then cached, so a retry returns it without recomputing.
 
 `INVALID_ANALYSIS` when, for any analysable year or transition (tolerance 1 % for 30 m rasterisation along
 the AOI boundary; values are **never clamped**):
@@ -89,6 +108,11 @@ the AOI boundary; values are **never clamped**):
 * forest **gain** exceeds 5 % of the compared area per year (`MAX_ANNUAL_GAIN_FRACTION`). Tree canopy
   cannot establish over large areas within a year; such gain signals an unstable forest classification
   (cloud, phenology or sensor artefacts), which makes the same classifier's loss figures untrustworthy.
+  The two halves of the forest mask are measured separately (% of the observed area with Dynamic World
+  tree probability ≥ 0.50, and with leaf-on NDVI ≥ 0.60); the issue names the component that moved
+  (`evidence.driver`, `evidence.component_change_pts`). Example: Hasdeo Arand 2019→2020 — tree probability
+  +9.7 pts, leaf-on NDVI +2.3 pts, imagery complete: an instability of the Dynamic World classification, so
+  the result stays withheld.
 
 Observation quality (coverage table, reasons, failed checks) is returned for every status, because it
 is measured metadata — not a forest or change measurement.
