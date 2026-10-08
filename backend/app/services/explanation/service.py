@@ -146,14 +146,32 @@ def _is_measured(facts: dict[str, Any]) -> bool:
     return facts.get("data_mode") == "LIVE" and facts.get("analysis_status") == "READY"
 
 
+def withheld() -> dict[str, Any]:
+    """The refusal returned when the facts are not those of a completed live analysis."""
+    return {
+        "text": NO_ANALYSIS, "source": "none", "model": None, "fact_check": None,
+        "facts_used": 0, "generated_at": datetime.now(timezone.utc).isoformat(), "cached": False,
+        "notice": "Explanation withheld: no completed live analysis.", "prompt_version": PROMPT_VERSION,
+    }
+
+
+def matches_event(facts: dict[str, Any], props: dict[str, Any]) -> bool:
+    """Do the client-sent facts carry the STORED event's identity and core measurements? The facts arrive from the
+    browser, so `data_mode`/`analysis_status` alone prove nothing: the event must exist in a READY result and its
+    period, type and area must be the stored ones (facts.ts builds them from exactly these properties)."""
+    period, area = facts.get("period"), facts.get("area")
+    if not isinstance(period, dict) or not isinstance(area, dict):
+        return False
+    return (period.get("from_year") == props.get("year_from") and period.get("to_year") == props.get("year_to")
+            and facts.get("change_type") == props.get("change_type")
+            and area.get("hectares") == props.get("area_ha") and area.get("square_km") == props.get("area_km2"))
+
+
 async def explain(facts: dict[str, Any], prefer: str = "auto") -> dict[str, Any]:
-    """Return an explanation; never raises for provider problems (falls back to offline)."""
+    """Return an explanation; never raises for provider problems (falls back to offline).
+    The caller must already have verified the facts against the stored event (matches_event)."""
     if not _is_measured(facts):
-        return {
-            "text": NO_ANALYSIS, "source": "none", "model": None, "fact_check": None,
-            "facts_used": 0, "generated_at": datetime.now(timezone.utc).isoformat(), "cached": False,
-            "notice": "Explanation withheld: no completed live analysis.", "prompt_version": PROMPT_VERSION,
-        }
+        return withheld()
     if prefer == "offline" or not claude.configured():
         note = None if prefer == "offline" else "Showing the deterministic TERRATRACE briefing, generated from the measured facts."
         return _offline(facts, note)

@@ -174,10 +174,35 @@ def test_ai_refuses_to_interpret_unavailable_analysis():
         assert "don't have a completed satellite analysis" in d["text"]
 
 
-def test_ai_explains_measured_facts_with_grounded_briefing():
+# The stored properties of MEASURED_FACTS' event in a READY result (what find_ready_event returns).
+STORED_EVENT = {"id": "TT-X-2021-01", "year_from": 2020, "year_to": 2021, "change_type": "clearing", "area_ha": 12.7, "area_km2": 0.127}
+
+
+def test_ai_explains_measured_facts_with_grounded_briefing(monkeypatch):
+    monkeypatch.setattr(analysis, "find_ready_event", lambda eid: STORED_EVENT if eid == STORED_EVENT["id"] else None)
     d = client.post("/api/explain", json={"facts": MEASURED_FACTS}).json()
     assert d["source"] == "template" and d["text"].startswith("What changed:")
     assert fact_check(d["text"], MEASURED_FACTS) == []
+
+
+def test_ai_withholds_facts_not_backed_by_a_stored_ready_event(monkeypatch):
+    """The facts come from the browser: claiming LIVE/READY is not enough. An event that no stored READY result
+    contains, or a real event with altered measurements, is never explained."""
+    monkeypatch.setattr(analysis, "find_ready_event", lambda eid: STORED_EVENT if eid == STORED_EVENT["id"] else None)
+    forged = [
+        {**MEASURED_FACTS, "event_id": "TT-FAKE-2021-01"},                       # no such stored event
+        {**MEASURED_FACTS, "area": {"hectares": 9999.0, "square_km": 99.99}},   # real event, inflated area
+        {**MEASURED_FACTS, "period": {"from_year": 2001, "to_year": 2021, "composite_window": "x"}},
+        {**MEASURED_FACTS, "change_type": "fire"},
+    ]
+    for facts in forged:
+        d = client.post("/api/explain", json={"facts": facts}).json()
+        assert d["source"] == "none" and d["facts_used"] == 0, facts
+
+
+def test_ai_rejects_oversized_facts():
+    r = client.post("/api/explain", json={"facts": {**MEASURED_FACTS, "notes": "x" * 50_000}})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_request"
 
 
 def test_fact_check_flags_invented_numbers():

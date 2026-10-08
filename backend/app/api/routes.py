@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -31,6 +32,8 @@ def _err(status: int, code: str, message: str | None = None, retryable: bool | N
 
 
 RID = r"^[A-Za-z0-9-]{8,64}$"
+# Facts of one event serialise to ~2 KB (frontend/src/explain/facts.ts); anything far larger is not a real request.
+MAX_FACTS_CHARS = 16_000
 
 
 def _tile_redirect(url: str) -> RedirectResponse:
@@ -182,6 +185,14 @@ async def aoi_preview(req: AoiPreviewRequest) -> AoiPreview:
 async def explain(req: ExplainRequest, provider: str = Query("auto", pattern="^(auto|offline)$")) -> Explanation:
     if "event_id" not in req.facts:
         raise _err(422, "invalid_request", "This explanation request is incomplete.")
+    if len(json.dumps(req.facts, ensure_ascii=False)) > MAX_FACTS_CHARS:
+        raise _err(422, "invalid_request", "This explanation request is too large.")
+    # The facts come from the browser: only an event of a stored READY analysis, with its stored measurements, is
+    # explained (never client-asserted numbers sent to the language model on this server's key).
+    props = await asyncio.to_thread(analysis.find_ready_event, req.facts["event_id"])
+    if props is None or not explanation.matches_event(req.facts, props):
+        log.info("Explain withheld: facts do not match a stored READY event")
+        return Explanation(**explanation.withheld())
     try:
         return Explanation(**await explanation.explain(req.facts, provider))
     except (KeyError, TypeError) as e:
