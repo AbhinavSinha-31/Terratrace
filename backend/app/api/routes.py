@@ -8,15 +8,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import Response
 
 from ..config import settings
 from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
-from ..providers.earth_engine.provider import EarthEngineError, provider as ee_provider
+from ..providers.earth_engine.provider import EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
-from ..services import analysis, imagery, search
+from ..services import analysis, imagery, search, tiles as tile_cache
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -37,10 +37,28 @@ YEAR_MIN, YEAR_MAX = 1984, 2100
 MAX_FACTS_CHARS = 16_000
 
 
-def _tile_redirect(url: str) -> RedirectResponse:
-    """Redirect to an Earth Engine tile. Cacheable briefly (the map id is stable while this process runs), so
-    the browser does not re-ask the backend — and Earth Engine — for a tile it already has."""
-    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=600"})
+def _tile_response(data: bytes) -> Response:
+    """A tile image. The browser may keep it for an hour (a method-version change can alter a layer at the same URL)."""
+    return Response(data, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+
+async def _serve_tile(key: str, z: int, x: int, y: int, template, forget_template) -> Response:
+    """Cache-first tile: a cached tile needs no Earth Engine call at all. Otherwise the template (map ID) is resolved
+    and the tile fetched through the bounded, single-flight, backoff fetcher (services/tiles.py). An expired map ID
+    is rebuilt once. `template` is an async callable returning the EE URL template."""
+    data = tile_cache.cached(key)
+    if data is not None:
+        return _tile_response(data)
+    for attempt in (1, 2):
+        url = (await template()).format(z=z, x=x, y=y)
+        try:
+            # shield: a browser that gives up (pan / zoom) must not cancel a fetch other requests share
+            return _tile_response(await asyncio.shield(asyncio.wrap_future(tile_cache.fetch(key, url))))
+        except tile_cache.TileExpired:
+            forget_template()
+            if attempt == 2:
+                raise tile_cache.TileUnavailable("map ID rejected twice") from None
+    raise AssertionError("unreachable")
 
 
 def _year() -> Any:
@@ -234,7 +252,7 @@ async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> di
 @router.get("/tiles/{aid}/{kind}/{year}/{z}/{x}/{y}")
 async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
                 z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0),
-                baseline: int | None = _year()) -> RedirectResponse:
+                baseline: int | None = _year()) -> Response:
     """Earth Engine map tiles for a READY live analysis (proxied so no credentials reach the browser).
 
     A change layer depends on two years: `baseline` (query) is required unless exactly one stored READY result of this
@@ -257,7 +275,13 @@ async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: i
             if len(candidates) != 1:
                 raise _err(404, "not_found", "This change layer needs its baseline year (?baseline=YYYY).", False)
             baseline = candidates[0]
-        url = await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry, baseline)
+        layer = f"change:{baseline}" if kind == "change" else kind
+
+        async def template() -> str:
+            return await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry, baseline)
+
+        return await _serve_tile(tile_cache.cache_key(layer, aid, year, z, x, y), z, x, y, template,
+                                 lambda: ee_provider.drop_mapid(layer_key(aid, kind, year, baseline)))
     except HTTPException:
         raise
     except EarthEngineError as e:
@@ -265,10 +289,9 @@ async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: i
             raise _err(404, "not_found", "This map layer does not exist for this analysis.", False) from None
         log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
         raise _err(503, "tiles_unavailable") from None
-    except Exception as e:  # noqa: BLE001 — ee transport errors; details stay in the log
+    except Exception as e:  # noqa: BLE001 — ee transport errors / TileUnavailable; details stay in the log
         log.warning("Tiles %s/%s/%s unavailable: %s", aid, kind, year, e)
         raise _err(503, "tiles_unavailable") from None
-    return _tile_redirect(url.format(z=z, x=x, y=y))
 
 
 # ----------------------------------------------------------------------------- imagery (never an analysis)
@@ -306,11 +329,13 @@ def imagery_basemaps() -> dict[str, Any]:
 
 @router.get("/imagery/tiles/{aid}/{year}/{z}/{x}/{y}")
 async def imagery_tiles(aid: str = _aid(), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
-                        z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> RedirectResponse:
-    """Earth Engine composite tiles for a year MEASURED as AVAILABLE (proxied; no credentials reach the browser)."""
+                        z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
+    """Earth Engine composite tiles for a year MEASURED as AVAILABLE (fetched and cached by the backend; no credentials
+    reach the browser)."""
     _tile_xyz(z, x, y)
     try:
-        url = await imagery.tile_url(aid, year)
+        return await _serve_tile(tile_cache.cache_key("aoi-imagery", aid, year, z, x, y), z, x, y,
+                                 lambda: imagery.tile_url(aid, year), lambda: ee_provider.drop_mapid((aid, "aoi-imagery", year)))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
     except imagery.ImageryError as e:
@@ -318,4 +343,3 @@ async def imagery_tiles(aid: str = _aid(), year: int = Path(..., ge=YEAR_MIN, le
     except Exception as e:  # noqa: BLE001 — details stay in the log
         log.warning("Imagery tiles %s/%s unavailable: %s", aid, year, e)
         raise _err(503, "tiles_unavailable") from None
-    return _tile_redirect(url.format(z=z, x=x, y=y))

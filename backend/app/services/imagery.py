@@ -349,9 +349,8 @@ async def tile_url(aid: str, year: int) -> str:
     if not d or d["status"] != "READY":
         raise ImageryError(404, "tiles_unavailable", "No satellite imagery for this year.", False)
     url = ee_provider.cached_imagery_url(aid, year)
-    if url is None:   # map IDs expire with the process; rebuild from the same real inputs
-        raw = await asyncio.to_thread(ee_provider.imagery_layer, aid, aoi_doc(aid)["geometry"], year)
-        url = raw["tileUrl"]
+    if url is None:   # map IDs expire with the process; rebuilt once from the same real inputs (single-flight)
+        url = await asyncio.to_thread(ee_provider.imagery_tile_url, aid, aoi_doc(aid)["geometry"], year)
     if not url:
         raise ImageryError(404, "tiles_unavailable", "No satellite imagery for this year.", False)
     return url

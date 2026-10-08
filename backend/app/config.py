@@ -104,6 +104,11 @@ class Settings:
     # the method-versioned files in cache_dir or rebuilt from the same inputs; nothing measured is lost.
     memory_cache_entries: int = _bounded_int("TT_MEMORY_CACHE_ENTRIES", 256, 16, 100_000)
 
+    # Earth Engine map tiles: concurrent fetches for the WHOLE backend (Restricted Mode measured 2026-09-27: 3 in
+    # flight never throttled, 4 did), and the disk-cache budget for fetched tiles.
+    ee_tile_concurrency: int = _bounded_int("TT_EE_TILE_CONCURRENCY", 3, 1, 16)
+    tile_cache_mb: int = _bounded_int("TT_TILE_CACHE_MB", 1024, 50, 100_000)
+
     # Largest accepted request body. Real bodies are a drawn AOI polygon or one event's facts (a few KB).
     max_request_bytes: int = _bounded_int("TT_MAX_REQUEST_BYTES", 1_000_000, 10_000, 20_000_000)
 

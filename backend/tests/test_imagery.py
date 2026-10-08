@@ -160,17 +160,19 @@ def fake_imagery(monkeypatch):
     imagery.ee_provider._mapids.clear()
 
 
-def test_imagery_ready_with_real_scenes(fake_imagery):
+def test_imagery_ready_with_real_scenes(fake_imagery, fake_ee_tiles):
     d = client.get("/api/imagery", params={"aoi": AID, "year": 2020}).json()
     assert d["status"] == "READY" and d["source"] == "Earth Engine" and d["dataset"] == "COPERNICUS/S2_SR_HARMONIZED"
     assert d["sceneCount"] == 118 and d["dateRange"] == {"start": "2020-01-01", "end": "2021-01-01"}
     assert d["visualization"]["bands"] == ["B4", "B3", "B2"] and d["visualization"]["max"] == 0.3
     assert d["tileUrl"] == f"/api/imagery/tiles/{AID}/2020/{{z}}/{{x}}/{{y}}"
     assert d["is_analysis"] is False and not (FORBIDDEN_KEYS & set(d))
-    # The tile route redirects to the real Earth Engine template (no credentials in the URL we serve).
+    # The backend fetches the tile from the real Earth Engine template and serves Earth Engine's bytes unchanged.
     r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == f"https://earthengine.example/v1/maps/{AID}-2020/tiles/10/1/2"
-    assert r.headers["cache-control"] == "private, max-age=600", "tile redirects are cacheable (fewer Earth Engine requests)"
+    ee_url = f"https://earthengine.example/v1/maps/{AID}-2020/tiles/10/1/2"
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content.endswith(ee_url.encode())
+    assert fake_ee_tiles.urls == [ee_url] and "location" not in r.headers, "the Earth Engine URL never reaches the browser"
+    assert r.headers["cache-control"] == "public, max-age=3600"
 
 
 def test_zero_scenes_is_unavailable_without_a_tile_url(fake_imagery):
@@ -275,9 +277,9 @@ def test_tiles_work_after_a_backend_restart(fake_imagery):
     imagery._decisions.clear()
     imagery.ee_provider._mapids.clear()          # nothing in memory, exactly like a fresh process
     r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"].endswith("/tiles/10/1/2")
+    assert r.status_code == 200 and r.content.endswith(b"/tiles/10/1/2")
     for x in range(3, 8):                         # the rest of the map's tiles reuse it
-        assert client.get(f"/api/imagery/tiles/{AID}/2020/10/{x}/2", follow_redirects=False).status_code == 307
+        assert client.get(f"/api/imagery/tiles/{AID}/2020/10/{x}/2", follow_redirects=False).status_code == 200
     assert fake_imagery == [2020], "one Earth Engine decision for all tiles"
     # a year without scenes is still refused — never another year's imagery
     assert client.get(f"/api/imagery/tiles/{AID}/2016/10/1/2", follow_redirects=False).status_code == 404
@@ -288,7 +290,7 @@ def test_expired_map_ids_are_rebuilt(fake_imagery, monkeypatch):
     monkeypatch.setattr(imagery.ee_provider, "MAPID_TTL_S", -1)       # every cached map id counts as expired
     assert imagery.ee_provider.cached_imagery_url(AID, 2020) is None
     r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
-    assert r.status_code == 307 and fake_imagery == [2020, 2020], "rebuilt from the same real inputs"
+    assert r.status_code == 200 and fake_imagery == [2020, 2020], "rebuilt from the same real inputs"
 
 
 def test_tile_failure_caused_by_earth_engine_is_transient(monkeypatch):

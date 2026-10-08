@@ -98,6 +98,7 @@ function baseStyle(): StyleSpecification {
       'global-hotspots': { type: 'geojson', data: EMPTY },
       'aoi-all': { type: 'geojson', data: EMPTY, promoteId: 'id' },
       'aoi-mask': { type: 'geojson', data: EMPTY },
+      'tile-pending': { type: 'geojson', data: EMPTY },
       events: { type: 'geojson', data: EMPTY, promoteId: 'id' },
       'event-points': { type: 'geojson', data: EMPTY, promoteId: 'id' },
       draft: { type: 'geojson', data: EMPTY },
@@ -107,6 +108,9 @@ function baseStyle(): StyleSpecification {
       { id: 'bg', type: 'background', paint: { 'background-color': '#03060a', 'background-opacity': 0 } },
       // Base layers (backend-owned URLs) are inserted below these anchors once /api/imagery/basemaps arrives.
       { id: 'anchor-base', type: 'background', paint: { 'background-opacity': 0 } },
+      // Study area tiles still loading: a hatch directly BELOW the imagery (loaded tiles cover it), shown only while the
+      // imagery source has pending tiles — never once loading is complete, so it never stands in for missing data.
+      { id: 'tile-pending', type: 'fill', source: 'tile-pending', layout: { visibility: 'none' }, paint: { 'fill-pattern': 'tt-hatch', 'fill-opacity': 0.6 } },
       { id: 'anchor-imagery', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'anchor-reference', type: 'background', paint: { 'background-opacity': 0 } },
       { id: 'night', type: 'fill', source: 'night', paint: { 'fill-color': '#01040a', 'fill-opacity': 0.2, 'fill-antialias': false } },
@@ -182,6 +186,16 @@ function baseStyle(): StyleSpecification {
  * Imperative wrapper around a MapLibre map. All state changes go through
  * `update()`, which is idempotent and safe to call before the style loads.
  */
+/** 16 px diagonal hatch (pending tiles): thin light stripes on a dark slate, drawn once. */
+function hatchImage(): { width: number; height: number; data: Uint8Array } {
+  const n = 16, data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const stripe = (x + y) % 8 < 2;
+    data.set(stripe ? [120, 140, 160, 150] : [12, 18, 26, 210], (y * n + x) * 4);
+  }
+  return { width: n, height: n, data };
+}
+
 export class TerraMap {
   readonly map: MlMap;
   private state: MapState;
@@ -193,6 +207,7 @@ export class TerraMap {
   private raf = 0;
   private interacting = false;
   private tileErrors = 0;
+  private tilesPending = false;
   private hoverId: string | null = null;
   private resizeObs: ResizeObserver;
   private nightTimer = 0;
@@ -340,6 +355,7 @@ export class TerraMap {
     if (this.changed('aoi', s.aoi?.id ?? null)) {
       for (const a of areas) m.setFeatureState({ source: 'aoi-all', id: a.id }, { active: a.id === s.aoi?.id });
       (m.getSource('aoi-mask') as GeoJSONSource).setData(s.aoi ? maskFor(s.aoi.geometry) : EMPTY);
+      (m.getSource('tile-pending') as GeoJSONSource).setData(s.aoi ? { type: 'Feature', properties: {}, geometry: s.aoi.geometry } : EMPTY);
       this.markers.forEach((mk) => mk.marker.getElement().classList.toggle('is-hidden', !!s.aoi));
       this.popup.remove();
       const globe = s.aoi ? 'none' : 'visible';
@@ -375,7 +391,7 @@ export class TerraMap {
 
     const live = this.liveImagery();
     const imageryKey = `${s.layers.satellite}:${s.imagery}:${s.year}:${s.catalog?.aoi_id ?? ''}:${s.aoi?.id ?? ''}:${s.imageryAoi?.id ?? ''}:${live?.tileUrl ?? ''}:${this.basemapsAdded}`;
-    if (this.changed('imagery', imageryKey)) this.showImagery();
+    if (this.changed('imagery', imageryKey)) { this.showImagery(); this.updateTilesPending(); }
 
     const ovKey = `${s.year}|${s.layers.forest}|${s.layers.ndvi}|${s.layers.forestOpacity}|${s.catalog?.aoi_id}`;
     if (this.changed('overlays', ovKey)) this.updateOverlays();
@@ -664,9 +680,28 @@ export class TerraMap {
     if (!id) this.popup.remove();
   }
 
+  /** Show the hatch under the study area while the visible imagery layer has tiles still loading. */
+  private updateTilesPending() {
+    const m = this.map;
+    if (!m.getLayer('tile-pending')) return;
+    const src = this.imageryLayer && this.imageryLayer !== 'img-hires' ? this.imageryLayer : null;
+    const next = !!(this.state.aoi && src && m.getSource(src) && !m.isSourceLoaded(src));
+    if (next === this.tilesPending) return;
+    this.tilesPending = next;
+    m.setLayoutProperty('tile-pending', 'visibility', next ? 'visible' : 'none');
+    if (!next || this.state.reducedMotion) m.setPaintProperty('tile-pending', 'fill-opacity', 0.6);
+  }
+
   // ------------------------------------------------------------ interactions
   private bindInteractions() {
     const m = this.map;
+    // Pending-tile hatch: visible while the shown imagery source still has tiles in flight.
+    const pending = () => this.updateTilesPending();
+    m.on('styleimagemissing', (e: { id: string }) => { if (e.id === 'tt-hatch' && !m.hasImage('tt-hatch')) m.addImage('tt-hatch', hatchImage()); });
+    m.on('sourcedataloading', pending);
+    m.on('sourcedata', pending);
+    m.on('idle', pending);
+    m.on('error', pending);
     m.on('mousemove', 'events-fill', (e) => {
       if (this.state.drawing) return;
       const f = e.features?.[0];
@@ -734,6 +769,7 @@ export class TerraMap {
         this.map.setPaintProperty('events-pulse', 'circle-radius', 5 + 14 * t);
         this.map.setPaintProperty('events-pulse', 'circle-stroke-opacity', 0.55 * (1 - t) ** 1.5);
       }
+      if (this.tilesPending) this.map.setPaintProperty('tile-pending', 'fill-opacity', 0.45 + 0.3 * Math.sin(now / 420) ** 2);
       if (s.draft && now - this.lastDash > 70) {
         this.lastDash = now;
         this.dashStep = (this.dashStep + 1) % DASHES.length;

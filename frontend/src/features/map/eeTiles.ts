@@ -3,7 +3,8 @@
  * which a project in Restricted Mode hits quickly). This never bypasses the quota; it only avoids
  * over-asking and fails individual tiles cleanly:
  *
- *   - at most MAX_IN_FLIGHT Earth Engine tile requests at once (the rest wait in a FIFO queue);
+ *   - at most MAX_IN_FLIGHT tile requests to the backend at once (the rest wait in a FIFO queue); the backend caches
+ *     tiles and caps Earth Engine concurrency project-wide, retrying 429s with backoff before answering 503;
  *   - MapLibre's abort signal is honoured, so tiles the map no longer needs (pan / zoom / fly-to)
  *     leave the queue without ever being requested;
  *   - a 429 is retried ONCE after RETRY_DELAY_MS (+ jitter);
@@ -21,9 +22,10 @@ import { create } from 'zustand';
 import { apiUrl } from '../../data/client';
 
 const SCHEME = 'ttee';
-// Measured 2026-09-27 (Restricted Mode, fresh 256 px tiles, ~4–5 s each): 8 tiles took 26.9 s at 2 in flight and
-// 10.1 s at 3 with no 429; at 4, 3 of 8 were throttled. 3 is the fastest setting that stays under the limit.
-const MAX_IN_FLIGHT = 3;
+// The backend now fetches and caches Earth Engine tiles and caps Earth Engine concurrency for the whole project
+// (TT_EE_TILE_CONCURRENCY, measured 2026-09-27: 3 never throttled, 4 did). This limit only bounds requests from this
+// tab to the backend, so cached tiles are not held back behind ones the backend is still fetching.
+const MAX_IN_FLIGHT = 6;
 const RETRY_DELAY_MS = 1500;
 const THROTTLE_NOTICE_MS = 6000;
 const RECOVERY_QUIET_MS = 6000;
@@ -44,7 +46,7 @@ let inFlight = 0;
 /** Analysis-overlay tiles (/api/tiles/…: forest masks, analysis composites) in flight. They are far slower for
  * Earth Engine than imagery tiles, so they may hold at most OVERLAY_MAX_IN_FLIGHT of the slots: real imagery
  * (/api/imagery/tiles/…) always keeps at least one slot and is served first. The total stays MAX_IN_FLIGHT. */
-const OVERLAY_MAX_IN_FLIGHT = 2;
+const OVERLAY_MAX_IN_FLIGHT = 4;
 let overlayInFlight = 0;
 const queue: Array<{ start(): void; signal: AbortSignal; overlay: boolean }> = [];
 let noticeTimer: number | undefined;

@@ -23,6 +23,8 @@ from .config import settings
 from .errors import diagnostics, public_error
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+# httpx logs every request URL at INFO; Earth Engine tile URLs carry map IDs (short-lived capability tokens).
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

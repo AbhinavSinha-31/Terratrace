@@ -85,12 +85,12 @@ def test_aoi_input_errors_are_not_retryable(no_earth_engine):
     assert r.status_code == 422 and public(r)["retryable"] is False
 
 
-def test_valid_tile_year_still_reaches_the_tile_service(monkeypatch):
+def test_valid_tile_year_still_reaches_the_tile_service(monkeypatch, fake_ee_tiles):
     """The bounds must not block real layers: a composite year passes through to the tile service."""
     year = imagery.candidate_years()[-1]
     monkeypatch.setattr(analysis.ee_provider, "tile_url", lambda *a, **k: "https://ee.example/{z}/{x}/{y}")
     r = client.get(f"/api/tiles/silent-valley/forest/{year}/3/7/7", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == "https://ee.example/3/7/7"
+    assert r.status_code == 200 and fake_ee_tiles.urls == ["https://ee.example/3/7/7"]
 
 
 def test_oversized_request_bodies_are_refused_before_parsing():

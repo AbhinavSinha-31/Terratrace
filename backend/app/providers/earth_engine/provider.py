@@ -302,6 +302,21 @@ class EarthEngineProvider:
         self._images: LRUDict = LRUDict(n * 4)       # (aoi, kind, year) -> styled ee.Image (client-side graph)
         self._mapids: LRUDict = LRUDict(n * 8)       # (aoi, kind, year) -> (tile URL template, created monotonic s)
         self._requests: LRUDict = LRUDict(n)         # aoi -> {"geometry": analysed geometry}
+        # One map-ID build per layer at a time: concurrent tile requests for a cold layer wait for the first build
+        # instead of each compositing and calling getMapId (a burst Restricted Mode answers with 429).
+        self._mapid_locks: dict[tuple, threading.Lock] = {}
+        self._mapid_locks_guard = threading.Lock()
+
+    def mapid_lock(self, key: tuple) -> threading.Lock:
+        with self._mapid_locks_guard:
+            if len(self._mapid_locks) > 4096:   # bounded: drop locks nobody holds
+                for k in [k for k, v in self._mapid_locks.items() if not v.locked()]:
+                    self._mapid_locks.pop(k, None)
+            return self._mapid_locks.setdefault(key, threading.Lock())
+
+    def drop_mapid(self, key: tuple) -> None:
+        """Forget a map ID Earth Engine no longer accepts (expired), so the next request rebuilds it."""
+        self._mapids.pop(key, None)
 
     # ----------------------------------------------------------------- credentials
     @staticmethod
@@ -556,6 +571,12 @@ class EarthEngineProvider:
 
     def cached_imagery_url(self, aoi_id: str, year: int) -> str | None:
         return self.cached_mapid((aoi_id, "aoi-imagery", year))
+
+    def imagery_tile_url(self, aoi_id: str, geometry: dict[str, Any], year: int) -> str | None:
+        """The AOI imagery tile template: cached, else rebuilt ONCE however many tiles ask at the same time."""
+        key = (aoi_id, "aoi-imagery", year)
+        with self.mapid_lock(key):
+            return self.cached_mapid(key) or self.imagery_layer(aoi_id, geometry, year)["tileUrl"]
 
     # ----------------------------------------------------------------- analysis
     def analyze(self, aoi: Aoi, analysis_id: str, name: str, baseline_year: int, comparison_year: int,
@@ -1045,6 +1066,12 @@ class EarthEngineProvider:
         cached = self.cached_mapid(key)
         if cached:
             return cached
+        with self.mapid_lock(key):
+            cached = self.cached_mapid(key)   # built by the request we waited for
+            return cached or self._build_tile_url(key, analysis_id, kind, year, geometry, baseline)
+
+    def _build_tile_url(self, key: tuple, analysis_id: str, kind: str, year: int, geometry: dict[str, Any] | None,
+                        baseline: int | None) -> str:
         self.initialize()
         img = self._images.get(key)
         if img is None:
