@@ -83,6 +83,30 @@ def fake_ee_tiles(monkeypatch):
     tiles._memory.clear()
 
 
+class FakeTreeCover:
+    """Hansen reference tree cover (% of the area) for the AOI preview / pre-flight; None = not measured."""
+
+    def __init__(self):
+        self.pct: float | None = None
+        self.calls = 0
+
+    def __call__(self, bbox, inside):
+        self.calls += 1
+        return self.pct
+
+
+@pytest.fixture(autouse=True)
+def tree_cover(monkeypatch):
+    """No test downloads Hansen tiles; the reference tree cover is whatever a test sets (default: not measured)."""
+    from app.providers.reference import hansen
+    from app.services import analysis
+    fake = FakeTreeCover()
+    monkeypatch.setattr(hansen, "tree_cover_fraction", fake)
+    analysis._preflight_cache.clear()
+    yield fake
+    analysis._preflight_cache.clear()
+
+
 @pytest.fixture(autouse=True)
 def _fresh_rate_limits():
     """Each test starts with empty per-client request counters (the suite itself sends many requests)."""

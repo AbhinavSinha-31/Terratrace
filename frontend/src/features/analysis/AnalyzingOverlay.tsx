@@ -6,6 +6,7 @@ import type { AnalysisJobStage } from '../../data/contracts';
 import { useSelectedAoi } from '../../data/queries';
 import { useUi } from '../../state/store';
 import { Button, Panel, StateView } from '../../design';
+import { AREA_REFUSALS } from './Unavailable';
 
 /**
  * REAL analysis stages of the backend job (GET /api/analysis-jobs/{id}, polled by the analysis runner).
@@ -97,13 +98,16 @@ export function AnalysisProgressOverlay() {
 
   if (status === 'error' && !study && error) {
     const code = error.code;
+    const refused = !!code && (AREA_REFUSALS.has(code) || code === 'invalid_request');
+    // Retry is offered only when it can succeed (never for an area refused as drawn).
+    const canRetry = error.retryable !== false && !refused;
     return (
       <Overlay>
         <StateView
-          kind={code === 'aoi_too_large' || code === 'aoi_too_small' ? 'error' : 'service-unavailable'}
-          title={code === 'aoi_too_large' || code === 'aoi_too_small' || code === 'invalid_request' ? 'Area cannot be analysed'
+          kind={refused ? 'error' : 'service-unavailable'}
+          title={refused ? 'Area cannot be analysed'
             : code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'}
-          onRetry={() => useUi.getState().requestAnalysis()}
+          onRetry={canRetry ? () => useUi.getState().requestAnalysis() : undefined}
           action={<Button size="sm" variant="ghost" onClick={() => useUi.getState().resetAnalysis()}>Close</Button>}
         >
           {/* ApiError messages are public product language (data/client.ts) */}

@@ -336,12 +336,64 @@ def _job_budget() -> float:
     return settings.ee_timeout_s + settings.ee_request_deadline_s
 
 
+# ----------------------------------------------------------------------------- pre-flight (custom areas)
+# Sentinel-2 MSI systematically acquires land between 56° S and 84° N (ESA mission specification); Dynamic World is
+# derived from it. Outside that band there is nothing to composite, so the area is refused before any work.
+S2_LAT_MIN, S2_LAT_MAX = -56.0, 84.0
+# Below this share of reference tree cover (Hansen 2000, >= 30 % canopy) an area has no forest to analyse. A gate on
+# WHETHER to run, never a result: an unmeasured tree cover does not block (the analysis then decides honestly).
+MIN_FOREST_PCT = 1.0
+_preflight_cache: LRUDict = LRUDict(settings.memory_cache_entries)
+
+
+def coverage_refusal(bbox: Any) -> tuple[str, str] | None:
+    """Refusal if any part of the area lies outside Sentinel-2's systematic acquisition band."""
+    _, s, _, n = bbox
+    if s >= S2_LAT_MIN and n <= S2_LAT_MAX:
+        return None
+    lat = (s + n) / 2
+    return "outside_sentinel2_coverage", (
+        f"This area is at {abs(lat):.2f}° {'S' if lat < 0 else 'N'}, outside Sentinel-2 coverage (land between 56° S and 84° N), "
+        "so there is no imagery to analyse. Choose an area within that range.")
+
+
+def forest_refusal(tree_cover_pct: float | None) -> tuple[str, str] | None:
+    """Refusal if the MEASURED reference tree cover is below MIN_FOREST_PCT (None = not measured: never refused)."""
+    if tree_cover_pct is None or tree_cover_pct >= MIN_FOREST_PCT:
+        return None
+    return "no_forest", (
+        f"Reference tree cover is {tree_cover_pct:.1f} % of this area (Hansen et al., year 2000, ≥ 30 % canopy), so there is "
+        "essentially no forest to analyse. Choose a forested area.")
+
+
+def preflight(aoi: dict[str, Any]) -> tuple[str, str] | None:
+    """(code, message) if a custom area cannot yield a forest-change analysis, else None. Featured investigations are
+    curated and skip it. Coverage is checked first (no network); tree cover is the Hansen reference preview."""
+    if not aoi.get("custom"):
+        return None
+    refused = coverage_refusal(aoi["bbox"])
+    if refused:
+        return refused
+    key = aoi["id"]
+    if key not in _preflight_cache:
+        from ..providers.reference import hansen
+        from .geometry import in_aoi
+        geom = aoi["geometry"]
+        _preflight_cache[key] = hansen.tree_cover_fraction(tuple(aoi["bbox"]), lambda lon, lat: in_aoi(lon, lat, geom))
+    return forest_refusal(_preflight_cache[key])
+
+
 def create_job(aid: str, b: int, c: int, rid: str | None = None) -> Job:
     """Create (or join) the analysis job for an AOI and window. Returns immediately.
-    Raises AoiError for an invalid window and AnalysisNotFound for an unknown AOI (both before any job exists)."""
+    Raises AoiError for an invalid window or an area that cannot be analysed (pre-flight), and AnalysisNotFound for an
+    unknown AOI — all before any job exists."""
     if not (1984 <= b < c <= 2100):
         raise AoiError("invalid_window", "The comparison year must be after the baseline year.")
     aoi = aoi_doc(aid)
+    refused = preflight(aoi)
+    if refused:
+        log.info("Pre-flight refused %s: %s", aid, refused[0])
+        raise AoiError(*refused)
     key = _key(aid, b, c)
     if rid:
         _rid_key[rid] = key
@@ -726,6 +778,9 @@ def preview(geometry: dict[str, Any]) -> dict[str, Any]:
     forest = None
     if aoi.area_km2 <= 50000:
         forest = hansen.tree_cover_fraction(aoi.bbox, lambda lon, lat: in_aoi(lon, lat, aoi.geometry))
+    refused = valid and (coverage_refusal(aoi.bbox) or forest_refusal(forest))   # the analysis' own pre-flight, shown up front
+    if refused:
+        valid, (code, message) = False, refused
     return {
         "valid": valid, "code": code, "message": message,
         "area_km2": round(aoi.area_km2, 2), "area_ha": round(aoi.area_ha, 1),

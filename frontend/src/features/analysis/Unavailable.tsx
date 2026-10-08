@@ -29,14 +29,20 @@ export function statusCopy(r: AnalysisResult) {
  * A request that produced NO analysis result (backend unreachable, timeout, failure). Built only from the
  * error and study metadata — the frontend never constructs a result or any measurement.
  */
-export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string; message: string }; onRetry(): void }) {
+/** Codes for an area that can never be analysed as drawn (pre-flight / limits): retrying cannot succeed. */
+export const AREA_REFUSALS = new Set(['outside_sentinel2_coverage', 'no_forest', 'aoi_too_large', 'aoi_too_small', 'invalid_geometry', 'invalid_coordinates', 'unsupported_geometry', 'antimeridian']);
+
+export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string; message: string; retryable?: boolean }; onRetry(): void }) {
   const ui = useUi.getState;
   const b = useUi((s) => s.investigation.baselineYear);
   const c = useUi((s) => s.investigation.comparisonYear);
   const title = error.code === 'earth_engine_unreachable' ? 'Earth Engine could not be reached'
     : error.code === 'earth_engine_throttled' ? 'Earth Engine is throttling requests'
     : error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
-    : error.code === 'analysis_too_large' ? 'Analysis area exceeds the interactive limit' : 'Live analysis unavailable';
+    : error.code === 'analysis_too_large' ? 'Analysis area exceeds the interactive limit'
+    : error.code && AREA_REFUSALS.has(error.code) ? 'Area cannot be analysed' : 'Live analysis unavailable';
+  // Retry only when it can succeed: the backend says so (retryable), or a refusal code says it cannot.
+  const canRetry = error.retryable !== false && !(error.code && AREA_REFUSALS.has(error.code));
   return (
     <div className="space-y-5" data-testid="analysis-unavailable" data-status="ERROR" data-code={error.code ?? ''}>
       <section>
@@ -44,7 +50,7 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{error.message}</p>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-3">No analysis result exists for {b} → {c}; no measurements are shown.</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry}>Retry</Button>
+          {canRetry && <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry} data-testid="retry">Retry</Button>}
           <Button size="sm" variant="ghost" icon={<Satellite size={13} />} onClick={() => ui().setDrawerOpen(false)}>Continue exploring imagery</Button>
         </div>
       </section>
@@ -55,7 +61,7 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
 export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResult; onRetry(): void }) {
   const { title, Icon, tone } = statusCopy(result);
   const code = result.error?.code ?? result.reasonCode;
-  const retryable = result.error?.retryable ?? true;
+  const retryable = (result.error?.retryable ?? true) && !(code && AREA_REFUSALS.has(code));
   const aoi = result.aoi;
   const ui = useUi.getState;
   const smaller = code === 'analysis_timeout' || code === 'analysis_too_large';

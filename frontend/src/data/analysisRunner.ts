@@ -95,7 +95,7 @@ export function useAnalysisRunner(): void {
       })
       .catch((e: ApiError) => {
         dev('error', { study: meta.studyId, rid, code: e.code, status: e.status, message: e.message });
-        useUi.getState().failAnalysis(meta, { code: e.code, message: e.message });
+        useUi.getState().failAnalysis(meta, { code: e.code, message: e.message, retryable: e.retryable });
       });
   }, [status, rid, qc]);
 }

@@ -29,7 +29,8 @@ export const PUBLIC = {
 } as const;
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status?: number, readonly code?: string) {
+  /** The backend's own verdict: false = retrying cannot succeed (e.g. an area outside coverage). */
+  constructor(message: string, readonly status?: number, readonly code?: string, readonly retryable?: boolean) {
     super(message);
     this.name = 'ApiError';
   }
@@ -48,15 +49,16 @@ async function request<T>(url: string, init?: RequestInit & { timeoutMs?: number
     const type = res.headers.get('content-type') ?? '';
     if (!res.ok) {
       let code: string | undefined;
+      let retryable: boolean | undefined;
       let message: string = PUBLIC.failed;
       if (type.includes('json')) {
         const body = await res.json().catch(() => null);
         const d = body?.detail;
         // Only the backend's public user_message is ever shown (never raw server text).
-        if (d && typeof d === 'object') { code = d.code; message = d.user_message ?? d.message ?? PUBLIC.failed; }
+        if (d && typeof d === 'object') { code = d.code; message = d.user_message ?? d.message ?? PUBLIC.failed; retryable = typeof d.retryable === 'boolean' ? d.retryable : undefined; }
         else message = PUBLIC.failed;
       }
-      throw new ApiError(message, res.status, code);
+      throw new ApiError(message, res.status, code, retryable);
     }
     // Vite answers unknown paths with index.html — treat as "backend not running".
     if (type.includes('text/html')) throw new ApiError(PUBLIC.unavailable, undefined, 'service_unavailable');

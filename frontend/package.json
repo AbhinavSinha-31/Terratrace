@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:markers": "node scripts/check-map-markers.mjs",
-    "test:integrity": "node scripts/check-data-integrity.mjs"
+    "test:integrity": "node scripts/check-data-integrity.mjs",
+    "test:coordinates": "node scripts/check-coordinates.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

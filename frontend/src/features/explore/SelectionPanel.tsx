@@ -35,7 +35,9 @@ export function SelectionPanel() {
   // Largest area the backend can analyse interactively (public limit from /api/health; never silently reduced).
   const interactiveMax = health?.limits.interactive_max_km2;
   const tooHeavy = !tooLarge && interactiveMax !== undefined && area > interactiveMax;
-  const blocked = tooLarge || tooSmall || tooHeavy || !!backendDown;
+  // The backend's pre-flight verdict (outside Sentinel-2 coverage / no forest), shown before anything is run.
+  const refusal = !tooLarge && !tooSmall && !tooHeavy && preview.data && !preview.data.valid && preview.data.message ? preview.data : null;
+  const blocked = tooLarge || tooSmall || tooHeavy || !!refusal || !!backendDown;
   const yearOpt = (y: number) => ({ value: y, label: String(y), meta: sourceLabel(y).title === 'LANDSAT' ? 'Landsat' : 'S2 · DW' });
 
   return (
@@ -64,6 +66,7 @@ export function SelectionPanel() {
             <span className="text-[11px] text-ink-3">km²</span>
           </div>
           <div className="t-data mt-1 text-[10.5px] text-ink-3">{(area * 100).toLocaleString('en-US', { maximumFractionDigits: 0 })} ha</div>
+          <div className="mt-1 text-[10px] text-ink-4" data-testid="area-limits">Analysable: {min}–{(interactiveMax ?? max).toLocaleString()} km²</div>
         </div>
         <div className="bg-surface px-3.5 py-3">
           {/* REFERENCE DATA (Hansen 2000), deliberately styled unlike a TERRATRACE measurement. */}
@@ -92,6 +95,7 @@ export function SelectionPanel() {
       <div className="mt-5 space-y-3">
         {tooLarge && <StateView compact kind="error" title="Area too large">Please select a smaller area for analysis — up to {max.toLocaleString()} km² (this selection is {area.toLocaleString('en-US', { maximumFractionDigits: 0 })} km²).</StateView>}
         {tooSmall && <StateView compact kind="error" title="Area too small">Select at least {min} km² so change regions can exceed the minimum mapping unit.</StateView>}
+        {refusal && <StateView compact kind="error" title="Area cannot be analysed"><span data-testid="area-refusal" data-code={refusal.code ?? ''}>{refusal.message}</span></StateView>}
         {tooHeavy && <StateView compact kind="error" title="Analysis area exceeds the interactive limit">Analysis area exceeds TerraTrace's {interactiveMax?.toLocaleString()} km² limit. Select a smaller area — no forest-change analysis is run for this one.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && backendDown && <StateView compact kind="service-unavailable" title="Live analysis unavailable">Live Earth observation is temporarily unavailable. TERRATRACE does not display estimated, simulated, or placeholder measurements.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && !backendDown && health && !eeReady && (

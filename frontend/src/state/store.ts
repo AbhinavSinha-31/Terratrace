@@ -72,7 +72,7 @@ export interface InvestigationState {
   analysisStatus: InvestigationAnalysisStatus;
   analysisRequestId: string | null;
   analysisResult: AnalysisResult | null;
-  analysisError: { code?: string; message: string } | null;
+  analysisError: { code?: string; message: string; retryable?: boolean } | null;
   /** REAL progress of the running analysis job (backend stage + elapsed time); null when no job is running. */
   analysisJob: AnalysisJobProgress | null;
 }
@@ -142,7 +142,7 @@ interface UiState {
    */
   requestAnalysis(): void;
   acceptAnalysis(meta: AnalysisRequestMeta, result: AnalysisResult): boolean;
-  failAnalysis(meta: AnalysisRequestMeta, error: { code?: string; message: string }): boolean;
+  failAnalysis(meta: AnalysisRequestMeta, error: { code?: string; message: string; retryable?: boolean }): boolean;
   /** Real job progress for the current request (ignored for a stale request). */
   setAnalysisJob(meta: AnalysisRequestMeta, job: AnalysisJobProgress): boolean;
   /** Merge measured out-of-window years (history) into the current READY result (ignored when stale). */
