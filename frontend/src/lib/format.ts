@@ -3,6 +3,8 @@ import type { ChangeEvent, ChangeType, ConfidenceClass, LandCover, Severity } fr
 const nf0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
 
+/** Escape text for interpolation into an HTML string (map popups, chart tooltips). */
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 export const fmtHa = (v: number) => (Math.abs(v) >= 100 ? nf0.format(v) : nf1.format(v));
 export const fmtKm2 = (v: number) => (Math.abs(v) >= 100 ? nf0.format(v) : v.toFixed(2));
 export const haToKm2 = (ha: number) => ha / 100;

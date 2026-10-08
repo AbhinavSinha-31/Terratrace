@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { YearStat } from '../../data/contracts';
 import { FOREST, INK } from '../../lib/palette';
-import { fmtHa, fmtKm2 } from '../../lib/format';
+import { escapeHtml, fmtHa, fmtKm2 } from '../../lib/format';
 import { EChart, chartBase } from './EChart';
 
 /**
@@ -28,9 +28,9 @@ export function ForestCoverChart({ years, selectedYear, window, onSelectYear }: 
         axisPointer: { type: 'line', lineStyle: { color: 'rgba(255,255,255,0.25)' } },
         formatter: (ps: { dataIndex: number }[]) => {
           const y = years[ps[0].dataIndex];
-          const head = `<div style="font-weight:600;margin-bottom:4px">${y.year} <span style="color:${INK.muted};font-weight:400">· ${y.sensor}</span></div>`;
+          const head = `<div style="font-weight:600;margin-bottom:4px">${y.year} <span style="color:${INK.muted};font-weight:400">· ${escapeHtml(y.sensor)}</span></div>`;
           const line = (k: string, v: string) => `<div style="display:flex;justify-content:space-between;gap:16px"><span style="color:${INK.secondary}">${k}</span><span style="font-family:JetBrains Mono">${v}</span></div>`;
-          if (!y.passes_quality || y.forest_ha === null) return head + `<div style="color:${INK.muted};max-width:240px;white-space:normal">${y.quality_reason ?? 'Not analysable'}</div>`;
+          if (!y.passes_quality || y.forest_ha === null) return head + `<div style="color:${INK.muted};max-width:240px;white-space:normal">${escapeHtml(y.quality_reason ?? 'Not analysable')}</div>`;
           return head + line('Forest', `${fmtKm2(y.forest_ha / 100)} km²`) +
             (y.forest_pct !== null ? line('Share of observed area', `${y.forest_pct.toFixed(1)}%`) : '') +
             (y.coverage_pct !== null ? line('Observed', `${y.coverage_pct.toFixed(0)}% of area`) : '') +

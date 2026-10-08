@@ -11,7 +11,7 @@ import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, Imagery
 import type { ImageryMode, LayerToggles } from '../../state/store';
 import type { ExploreRegion } from '../../lib/regions';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
-import { changeTypeLabel, fmtHa, severityLabel } from '../../lib/format';
+import { changeTypeLabel, escapeHtml, fmtHa, severityLabel } from '../../lib/format';
 import { nightPolygons } from '../../lib/solar';
 import { THROTTLED, eeTiles, registerEeTiles } from './eeTiles';
 
@@ -74,7 +74,6 @@ const sevMatch = (colors: Record<Severity, string>): ExpressionSpecification => 
   'low', colors.low, 'moderate', colors.moderate, 'high', colors.high, 'critical', colors.critical,
   '#9aa5ad',
 ];
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 // Marching-ants sequence for the draft AOI boundary.
 const DASHES: number[][] = [
   [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
