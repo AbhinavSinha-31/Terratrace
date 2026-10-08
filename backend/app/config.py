@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +28,25 @@ def _bounded_int(name: str, default: int, lo: int, hi: int) -> int:
     if not lo <= v <= hi:
         logging.getLogger("terratrace.config").warning("%s=%d is outside %d..%d; using %d", name, v, lo, hi, min(hi, max(lo, v)))
     return min(hi, max(lo, v))
+
+
+DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+_ORIGIN = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d{1,5})?$")
+
+
+def _cors_origins() -> tuple[str, ...]:
+    """Browser origins allowed to call the API: the local dev server plus TT_CORS_ORIGINS (comma-separated exact
+    origins, e.g. https://terratrace.vercel.app). A wildcard or anything that is not a bare origin is ignored."""
+    extra = []
+    for o in os.environ.get("TT_CORS_ORIGINS", "").split(","):
+        o = o.strip().rstrip("/")
+        if not o:
+            continue
+        if _ORIGIN.fullmatch(o):
+            extra.append(o)
+        else:
+            logging.getLogger("terratrace.config").warning("TT_CORS_ORIGINS entry %r is not an exact origin; ignored", o)
+    return tuple(dict.fromkeys((*DEV_ORIGINS, *extra)))
 
 
 def _float(name: str, default: float) -> float:
@@ -78,7 +98,7 @@ class Settings:
     geocoder_enabled: bool = os.environ.get("TT_GEOCODER", "nominatim") != "off"
     user_agent: str = field(default_factory=lambda: os.environ.get("TT_USER_AGENT", f"TERRATRACE-prototype/{__version__} (university innovation expo)"))
 
-    cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+    cors_origins: tuple[str, ...] = field(default_factory=_cors_origins)
 
     # In-memory cache entries per cache (results, history, imagery availability, ...). Evicted entries are re-read from
     # the method-versioned files in cache_dir or rebuilt from the same inputs; nothing measured is lost.
