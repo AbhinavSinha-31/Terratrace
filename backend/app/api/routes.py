@@ -32,6 +32,7 @@ def _err(status: int, code: str, message: str | None = None, retryable: bool | N
 
 
 RID = r"^[A-Za-z0-9-]{8,64}$"
+YEAR_MIN, YEAR_MAX = 1984, 2100
 # Facts of one event serialise to ~2 KB (frontend/src/explain/facts.ts); anything far larger is not a real request.
 MAX_FACTS_CHARS = 16_000
 
@@ -42,13 +43,37 @@ def _tile_redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=600"})
 
 
+def _year() -> Any:
+    return Query(None, ge=YEAR_MIN, le=YEAR_MAX)
+
+
+def _aid() -> Any:
+    """Area id (featured slug or "aoi-<hex>"). Length-bounded here; analysis.aoi_doc() accepts only ids the backend
+    knows or generated (anything else -> 404 not_found), so an id never reaches the filesystem unchecked."""
+    return Path(..., min_length=1, max_length=80)
+
+
+def _window(baseline: int | None, comparison: int | None) -> tuple[int, int]:
+    """The requested analysis window (defaults filled in); 422 unless baseline < comparison."""
+    b, c = baseline or DEFAULT_B, comparison or DEFAULT_C
+    if not b < c:
+        raise _err(422, "invalid_window", "The comparison year must be after the baseline year.", False)
+    return b, c
+
+
+def _tile_xyz(z: int, x: int, y: int) -> None:
+    """A tile index that exists at zoom z (0 <= x, y < 2^z)."""
+    if not (x < 2 ** z and y < 2 ** z):
+        raise _err(404, "not_found", "This map tile does not exist.", False)
+
+
 async def _run(aid: str, baseline: int | None, comparison: int | None, rid: str | None = None) -> dict[str, Any]:
     try:
-        return await analysis.run(aid, baseline or DEFAULT_B, comparison or DEFAULT_C, rid)
+        return await analysis.run(aid, *_window(baseline, comparison), rid)
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
     except AoiError as e:
-        raise _err(422, e.code, e.message) from None
+        raise _err(422, e.code, e.message, False) from None
 
 
 @router.get("/health", response_model=Health)
@@ -81,12 +106,12 @@ def register_aoi(req: AoiRegisterRequest) -> dict[str, Any]:
     try:
         _, doc = analysis.register_aoi(req.geometry, req.name)
     except AoiError as e:
-        raise _err(422, e.code, e.message) from None
+        raise _err(422, e.code, e.message, False) from None
     return doc
 
 
 @router.get("/aoi/{aid}")
-def get_aoi(aid: str) -> dict[str, Any]:
+def get_aoi(aid: str = _aid()) -> dict[str, Any]:
     """A registered area (featured or custom): geometry and metadata only — no analysis, no Earth Engine call."""
     try:
         return analysis.aoi_doc(aid)
@@ -95,11 +120,11 @@ def get_aoi(aid: str) -> dict[str, Any]:
 
 
 @router.get("/analysis/{aid}/history")
-async def get_analysis_history(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
+async def get_analysis_history(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year()) -> dict[str, Any]:
     """Measured per-year statistics for the years OUTSIDE the analysed window (Time Machine and charts). They never
     change the window's result or validation. A public error — never estimates — when they cannot be measured."""
     try:
-        return await analysis.history(aid, baseline or DEFAULT_B, comparison or DEFAULT_C)
+        return await analysis.history(aid, *_window(baseline, comparison))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
     except analysis.HistoryUnavailable as e:
@@ -107,7 +132,7 @@ async def get_analysis_history(aid: str, baseline: int | None = None, comparison
 
 
 @router.get("/analysis/{aid}", response_model=AnalysisEnvelope)
-async def get_analysis(aid: str, baseline: int | None = None, comparison: int | None = None,
+async def get_analysis(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year(),
                        rid: str | None = Query(None, pattern=RID)) -> dict[str, Any]:
     return await _run(aid, baseline, comparison, rid)
 
@@ -130,7 +155,7 @@ def create_analysis_job(req: AnalysisJobRequest, rid: str | None = Query(None, p
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
     except AoiError as e:
-        raise _err(422, e.code, e.message) from None
+        raise _err(422, e.code, e.message, False) from None
 
 
 @router.get("/analysis-jobs/{job_id}")
@@ -152,17 +177,17 @@ def cancel_analysis_job(job_id: str = Path(..., pattern=JOB_ID)) -> dict[str, An
 
 
 @router.get("/analysis-status/{aid}")
-def get_analysis_status(aid: str, baseline: int | None = None, comparison: int | None = None) -> dict[str, Any]:
+def get_analysis_status(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year()) -> dict[str, Any]:
     """Stored status of an analysis (RUNNING / READY / INVALID_ANALYSIS / UNAVAILABLE / NOT_RUN). Read-only: it never
     starts or runs an analysis, so featured cards can show real state without triggering Earth Engine work."""
     try:
-        return analysis.stored_status(aid, baseline or DEFAULT_B, comparison or DEFAULT_C)
+        return analysis.stored_status(aid, *_window(baseline, comparison))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
 
 
 @router.get("/progress/{rid}")
-def get_progress(rid: str) -> dict[str, Any]:
+def get_progress(rid: str = Path(..., pattern=RID)) -> dict[str, Any]:
     """Real analysis stage for a client request id (no percentages are invented)."""
     return analysis.progress(rid)
 
@@ -172,7 +197,7 @@ async def analyze(req: AnalyzeRequest, rid: str | None = Query(None, pattern=RID
     try:
         aid, _ = analysis.register_aoi(req.geometry, req.name)
     except AoiError as e:
-        raise _err(422, e.code, e.message) from None
+        raise _err(422, e.code, e.message, False) from None
     return await _run(aid, req.baseline_period.year, req.comparison_period.year, rid)
 
 
@@ -207,14 +232,20 @@ async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> di
 
 
 @router.get("/tiles/{aid}/{kind}/{year}/{z}/{x}/{y}")
-async def tiles(aid: str, kind: str, year: int, z: int, x: int, y: int,
-                baseline: int | None = Query(None, ge=1984, le=2100)) -> RedirectResponse:
+async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+                z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0),
+                baseline: int | None = _year()) -> RedirectResponse:
     """Earth Engine map tiles for a READY live analysis (proxied so no credentials reach the browser).
 
     A change layer depends on two years: `baseline` (query) is required unless exactly one stored READY result of this
     AOI ends at `year`, whose baseline is then used."""
     if kind not in ("imagery", "forest", "change"):
         raise _err(404, "not_found")
+    _tile_xyz(z, x, y)
+    # Only the method's composite years exist as layers: any other year would start a new Earth Engine map request.
+    years = imagery.candidate_years()
+    if year not in years or (baseline is not None and baseline not in years):
+        raise _err(404, "not_found", "This map layer does not exist for this analysis.", False)
     try:
         try:
             # Registered AOI on disk (layers survive a backend restart), rendered over what was actually analysed.
@@ -257,7 +288,7 @@ async def imagery_availability(aoi: str = Query(..., min_length=1, max_length=80
 
 
 @router.get("/imagery")
-async def imagery_decision(aoi: str = Query(..., min_length=1, max_length=80), year: int = Query(..., ge=1900, le=2100)) -> dict[str, Any]:
+async def imagery_decision(aoi: str = Query(..., min_length=1, max_length=80), year: int = Query(..., ge=1900, le=YEAR_MAX)) -> dict[str, Any]:
     """The canonical imagery decision for an AOI and year (the frontend never builds imagery URLs)."""
     try:
         return await imagery.decide(aoi, year)
@@ -274,8 +305,10 @@ def imagery_basemaps() -> dict[str, Any]:
 
 
 @router.get("/imagery/tiles/{aid}/{year}/{z}/{x}/{y}")
-async def imagery_tiles(aid: str, year: int, z: int, x: int, y: int) -> RedirectResponse:
+async def imagery_tiles(aid: str = _aid(), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+                        z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> RedirectResponse:
     """Earth Engine composite tiles for a year MEASURED as AVAILABLE (proxied; no credentials reach the browser)."""
+    _tile_xyz(z, x, y)
     try:
         url = await imagery.tile_url(aid, year)
     except analysis.AnalysisNotFound:
