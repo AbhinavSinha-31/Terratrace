@@ -52,6 +52,32 @@ export interface StudyArea {
   thumbnail_url: string;
   featured?: boolean;
   custom?: boolean;
+  /** Featured only: the standard window moved inward to MEASURED analysable years (absent offline). */
+  default_window?: [number, number];
+}
+
+/** Headline figures of a stored READY result (GET /api/featured/summary) — the result's own values. */
+export interface StoredKpis {
+  event_area_ha: number;
+  event_count: number;
+  baseline_year: number | null;
+  latest_year: number | null;
+  gross_loss_ha: number | null;
+  gross_gain_ha: number | null;
+  net_change_ha: number | null;
+}
+
+/** Stored outcome of one featured investigation for its default window. Read-only; never runs an analysis. */
+export interface FeaturedSummaryItem {
+  id: string;
+  default_window: [number, number];
+  status: 'READY' | 'INVALID_ANALYSIS' | 'UNAVAILABLE' | 'RUNNING' | 'NOT_RUN' | string;
+  reasonCode: string | null;
+  reason: string | null;
+  issueYears?: number[][];
+  selected_area_km2?: number;
+  maximum_area_km2?: number;
+  kpis?: StoredKpis;
 }
 
 export interface StudyAreaIndex {

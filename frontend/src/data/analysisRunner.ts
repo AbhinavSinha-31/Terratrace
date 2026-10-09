@@ -34,6 +34,20 @@ export function useAnalysisRunner(): void {
   const qc = useQueryClient();
   const status = useUi((s) => s.investigation.analysisStatus);
   const rid = useUi((s) => s.investigation.analysisRequestId);
+  const studyId = useUi((s) => s.investigation.study?.id ?? null);
+  const b = useUi((s) => s.investigation.baselineYear);
+  const c = useUi((s) => s.investigation.comparisonYear);
+
+  // An opened study with a STORED result for this window shows it at once (GET /api/analysis-result: read-only, never
+  // computes — this is not an analysis run). Nothing stored: the study stays "Ready to analyze".
+  useEffect(() => {
+    if (status !== 'idle' || !studyId) return;
+    let alive = true;
+    client.storedAnalysis(studyId, { start: b, end: c })
+      .then((res) => { if (alive && res && useUi.getState().loadStoredAnalysis({ studyId, baselineYear: b, comparisonYear: c }, res)) dev('stored result', { studyId, b, c, status: res.status }); })
+      .catch((e: ApiError) => dev('stored result unavailable', { studyId, code: e.code }));
+    return () => { alive = false; };
+  }, [status, studyId, b, c]);
 
   useEffect(() => {
     if (status !== 'running' || !rid || dispatched.has(rid)) return;

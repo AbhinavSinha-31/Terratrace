@@ -96,7 +96,7 @@ function NoAreaState() {
         </p>
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           {featured.map((a) => (
-            <button key={a.id} onClick={() => useUi.getState().openAnalysis(a.id, { view: tm ? 'timemachine' : 'analysis', name: a.name, geometry: a.geometry, run: true })}
+            <button key={a.id} onClick={() => useUi.getState().openAnalysis(a.id, { view: tm ? 'timemachine' : 'analysis', name: a.name, geometry: a.geometry, window: a.default_window ? { start: a.default_window[0], end: a.default_window[1] } : undefined, run: true })}
               className="tt-press flex items-center justify-between rounded-md px-3.5 py-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:-translate-y-px hover:bg-hover">
               <span><span className="block text-[12.5px] font-medium text-ink">{a.short_name}</span><span className="block text-[10.5px] text-ink-3">{a.country} · {fmtKm2(a.area_km2)} km²</span></span>
               <ChevronRight size={15} className="text-ink-3" />

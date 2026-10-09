@@ -17,6 +17,7 @@ os.environ["ANTHROPIC_CONFIG_DIR"] = str(Path(_tmp) / "no-anthropic")
 os.environ["EARTHENGINE_CREDENTIALS"] = str(Path(_tmp) / "no-ee")
 os.environ["TT_CACHE_DIR"] = _tmp
 os.environ["TT_GEOCODER"] = "off"
+os.environ["TT_PRECOMPUTE_FEATURED"] = "false"
 
 import pytest  # noqa: E402
 

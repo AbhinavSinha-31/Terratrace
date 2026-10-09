@@ -8,7 +8,7 @@
  */
 import type {
   AnalysisEnvelope, AnalysisResult, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
-  AnalysisHistory, AnalysisJob, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
+  AnalysisHistory, AnalysisJob, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -185,6 +185,22 @@ export const client = {
   /** Stored analysis status (READY / INVALID_ANALYSIS / UNAVAILABLE / RUNNING / NOT_RUN). Read-only: never analyses. */
   analysisStatus(id: string, window: { start: number; end: number }): Promise<{ status: string; reasonCode: string | null; reason: string | null; issueYears?: number[][]; selected_area_km2?: number; maximum_area_km2?: number }> {
     return request(`${API}/analysis-status/${encodeURIComponent(id)}?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: 15000 });
+  },
+
+  /** Stored outcome + headline KPIs of every featured investigation (read-only; never starts an analysis). */
+  featuredSummary(): Promise<{ items: FeaturedSummaryItem[] }> {
+    return request(`${API}/featured/summary`, { timeoutMs: 15000 });
+  },
+
+  /** The STORED analysis for an area + window, or null when none is stored (read-only; never computes). */
+  async storedAnalysis(id: string, window: { start: number; end: number }): Promise<AnalysisResult | null> {
+    try {
+      const env = await request<AnalysisEnvelope>(`${API}/analysis-result/${encodeURIComponent(id)}?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: 15000 });
+      return fromEnvelope(env);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
   },
 
   /** Registers a selected area (no analysis, no Earth Engine) so its live imagery can load before Analyze. */

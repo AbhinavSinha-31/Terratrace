@@ -98,6 +98,10 @@ async function run(label, { offline }) {
   // ---- backend state
   const health = offline ? null : await page.evaluate(async () => (await fetch('/api/health')).json());
   const live = health?.analysis?.status === 'ready';
+  // Stored featured outcomes (read-only endpoint): what the overview and an opened study must show — never more.
+  const stored = offline ? null : await page.evaluate(async () => (await fetch('/api/featured/summary')).json()).catch(() => null);
+  const storedOf = (id) => stored?.items?.find((i) => i.id === id) ?? null;
+  const hasStored = (id) => ['READY', 'INVALID_ANALYSIS', 'UNAVAILABLE'].includes(storedOf(id)?.status);
   console.log(`\n# ${label}: ${offline ? 'backend unreachable (UI preview)' : live ? 'Earth Engine configured — real analyses' : `Earth Engine ${health?.analysis?.status}`}`);
 
   // ---- landing
@@ -117,7 +121,21 @@ async function run(label, { offline }) {
   check(cards.every((c) => !METRIC_TEXT.test(c) && !/\bevents\b/.test(c)), `${label}: featured cards carry no metrics`);
   check(cards.every((c) => /km²/.test(c) && /live analysis/i.test(c)), `${label}: cards show AOI area + analysis status`);
   const overview = await page.locator('[data-testid="overview-detected-change"]').innerText();
-  check(/No completed live analyses/.test(overview), `${label}: overview has no detected-change total`, overview.replace(/\s+/g, ' '));
+  {
+    // The overview total is exactly the stored READY featured results' own event area / count (control sites excluded).
+    const areasDoc = offline ? { items: [] } : await page.evaluate(async () => (await fetch('/api/study-areas')).json()).catch(() => ({ items: [] }));
+    const controlIds = new Set((areasDoc.items ?? []).filter((a) => a.tags?.some((t) => /control site/i.test(t))).map((a) => a.id));
+    const ready = (stored?.items ?? []).filter((i) => i.status === 'READY' && i.kpis && !controlIds.has(i.id));
+    const flat = overview.replace(/\s+/g, ' ');
+    if (!ready.length) check(/No (completed live|change-site) analyses/.test(overview), `${label}: overview has no detected-change total without stored READY results`, flat);
+    else {
+      const ha = ready.reduce((a, i) => a + i.kpis.event_area_ha, 0);
+      const n = ready.reduce((a, i) => a + i.kpis.event_count, 0);
+      const haTxt = new Intl.NumberFormat('en-US', { maximumFractionDigits: Math.abs(ha) >= 100 ? 0 : 1 }).format(ha);
+      check(flat.includes(`${haTxt} ha`) && flat.includes(`${n} events · ${ready.length} live ${ready.length === 1 ? 'analysis' : 'analyses'}`),
+        `${label}: overview total = stored READY featured results (${haTxt} ha, ${n} events)`, flat);
+    }
+  }
   const hotspots = await page.evaluate(() => window.__tt.map.getSource('global-hotspots')?._data?.features?.length ?? 0);
   check(hotspots === 0, `${label}: no global hotspots without READY analyses`, `${hotspots} features`);
   const sub = await page.locator('.tt-marker--featured').allInnerTexts();
@@ -172,9 +190,18 @@ async function run(label, { offline }) {
     const n0 = analysisRequests.length;
     await page.evaluate((h) => { window.location.hash = h; }, `#/analysis/${id}`);
     await page.waitForTimeout(1500);
-    const opened = await inv();
     check(analysisRequests.length === n0, `${label}: ${id} opening the study sends 0 analysis requests`, `${analysisRequests.length - n0} sent`);
-    check(opened.study === id && opened.status === 'idle' && !opened.has, `${label}: ${id} opens as Ready to analyze (no result)`, JSON.stringify({ s: opened.status, has: opened.has }));
+    if (hasStored(id)) {
+      // A STORED result for the site's default window opens at once (read-only lookup) — still 0 analysis requests.
+      const w = storedOf(id).default_window;
+      await page.waitForFunction(() => window.__ttUi.getState().investigation.analysisStatus === 'complete', null, { timeout: 30000 }).catch(() => {});
+      const o = await inv();
+      check(o.study === id && o.status === 'complete' && o.has && JSON.stringify(o.resYears) === JSON.stringify(w) && analysisRequests.length === n0,
+        `${label}: ${id} opens with its stored ${storedOf(id).status} result for ${w.join('→')} (0 analysis requests)`, JSON.stringify({ s: o.status, has: o.has, years: o.resYears }));
+      continue;   // the "Ready to analyze" / Run flow below needs a study WITHOUT a stored result
+    }
+    const opened = await inv();
+    check(opened.study === id && opened.status === 'idle' && !opened.has, `${label}: ${id} opens as Ready to analyze (no stored result)`, JSON.stringify({ s: opened.status, has: opened.has }));
     check((await page.locator('[data-testid="ready-to-analyze"]').count()) === 1, `${label}: ${id} 'Ready to analyze' panel shown`);
     const readyName = ((await page.locator('[data-testid="ready-to-analyze"]').innerText().catch(() => '')).split('\n')[1] ?? '').trim();
     check(readyName.length > 0 && readyName !== 'Selected area', `${label}: ${id} study metadata renders (name)`, readyName);
@@ -218,7 +245,14 @@ async function run(label, { offline }) {
     const id = FEATURED[1];   // not the loop's last study: opening it must reset to idle
     await page.evaluate((i) => { window.location.hash = `#/analysis/${i}`; }, id);
     await page.waitForTimeout(1000);
-    check((await inv()).status === 'idle', `${label}: switching study resets the analysis to idle`);
+    {
+      // Switching never carries the previous study's result over: idle, or THIS study's own stored result for its
+      // default window (read-only lookup) — never another study's.
+      await page.waitForTimeout(1500);
+      const s = await inv();
+      const own = hasStored(id) && s.status === 'complete' && s.study === id && JSON.stringify(s.resYears) === JSON.stringify(storedOf(id).default_window);
+      check(s.status === 'idle' || own, `${label}: switching study resets the analysis (idle, or its own stored result)`, JSON.stringify({ s: s.status, study: s.study, years: s.resYears }));
+    }
     if (!live) {
       await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
       await settle();
@@ -305,6 +339,8 @@ async function run(label, { offline }) {
     await page.route(`**/api/imagery/availability?aoi=${AOI}`, (r) => r.fulfill({ json: fixture }));
     await page.route(`**/api/imagery?aoi=${AOI}&year=*`, (r) => r.fulfill({ json: decision(Number(new URL(r.request().url()).searchParams.get('year'))) }));
     await page.route(`**/api/imagery/tiles/${AOI}/**`, (r) => r.fulfill({ status: 404, body: '' }));
+    // This section is about imagery WITHOUT an analysis: no stored result is served for the fixture AOI.
+    await page.route(`**/api/analysis-result/${AOI}?*`, (r) => r.fulfill({ status: 404, json: { detail: { code: 'not_run', user_message: 'This analysis has not been run yet.', retryable: false } } }));
     const nA = analysisRequests.length;
     await page.goto(`${BASE}#/analysis/${AOI}?year=2020`, { waitUntil: 'domcontentloaded' });
     // A hash change keeps the document: earlier sections may have cached this AOI's REAL availability (10 min

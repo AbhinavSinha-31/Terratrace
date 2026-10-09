@@ -45,16 +45,28 @@ export function useStudyCardStatus(id: string): CardStatus {
 }
 
 /** Card status plus a short, factual detail (why validation failed / why unavailable) and the full reason. */
+/**
+ * Stored outcome + headline KPIs of every featured investigation for its DEFAULT window (read-only). Re-read whenever
+ * the open investigation's analysis settles, so returning to the cards / overview shows the new state.
+ */
+export function useFeaturedSummary() {
+  const health = useHealth().data;
+  const settled = useUi((s) => `${s.investigation.study?.id ?? ''}:${s.investigation.analysisStatus}:${s.investigation.analysisRequestId ?? ''}`);
+  return useQuery({
+    queryKey: ['featured-summary', settled],
+    queryFn: health?.backend === false ? skipToken : () => client.featuredSummary(),
+    staleTime: 30_000, retry: false, placeholderData: (prev) => prev,
+  });
+}
+
 export function useStudyCard(id: string): { status: CardStatus; detail: string | null; reason: string | null } {
   const inv = useUi((s) => s.investigation);
   const health = useHealth().data;
-  const isThis = inv.study?.id === id && inv.baselineYear === DEFAULT_ANALYSIS_WINDOW.start && inv.comparisonYear === DEFAULT_ANALYSIS_WINDOW.end;
-  const stored = useQuery({
-    // Re-read whenever this study's analysis settles, so returning to the cards shows the new state.
-    queryKey: ['analysis-status', id, isThis ? `${inv.analysisStatus}:${inv.analysisRequestId}` : 'other'],
-    queryFn: health?.backend === false ? skipToken : () => client.analysisStatus(id, DEFAULT_ANALYSIS_WINDOW),
-    staleTime: 30_000, retry: false,
-  });
+  const summary = useFeaturedSummary();
+  const item = summary.data?.items.find((i) => i.id === id);
+  const win = item?.default_window ?? [DEFAULT_ANALYSIS_WINDOW.start, DEFAULT_ANALYSIS_WINDOW.end];
+  const isThis = inv.study?.id === id && inv.baselineYear === win[0] && inv.comparisonYear === win[1];
+  const stored = { data: item, isError: summary.isError };
   // The card shows the REAL failure category from the backend: an oversized area is a deterministic AOI validation
   // result, never a scientific one; a failed validity check is never shown as "unavailable".
   const fromResult = (s: string | undefined | null, code?: string | null): CardStatus | null =>

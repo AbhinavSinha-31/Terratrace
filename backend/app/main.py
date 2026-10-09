@@ -7,6 +7,7 @@ Serves the API under /api and, when frontend/dist exists, the built app at /.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -40,6 +41,9 @@ async def lifespan(_: FastAPI):
 
     purge_stale_imagery()   # imagery availability is method-versioned too
     threading.Thread(target=ee_provider.status, name="ee-warmup", daemon=True).start()
+    if settings.precompute_featured:
+        from .services import featured
+        featured.start_background(asyncio.get_running_loop())
     yield
 
 

@@ -142,6 +142,8 @@ interface UiState {
    */
   requestAnalysis(): void;
   acceptAnalysis(meta: AnalysisRequestMeta, result: AnalysisResult): boolean;
+  /** Show a STORED result (read-only lookup, no analysis run) — only while idle on exactly that study + window. */
+  loadStoredAnalysis(meta: { studyId: string; baselineYear: number; comparisonYear: number }, result: AnalysisResult): boolean;
   failAnalysis(meta: AnalysisRequestMeta, error: { code?: string; message: string; retryable?: boolean }): boolean;
   /** Real job progress for the current request (ignored for a stale request). */
   setAnalysisJob(meta: AnalysisRequestMeta, job: AnalysisJobProgress): boolean;
@@ -314,6 +316,12 @@ export const useUi = create<UiState>((set, get) => ({
     const inv = get().investigation;
     if (!inv.study && !inv.aoi) return;
     set({ investigation: { ...inv, ...IDLE_ANALYSIS, analysisStatus: 'running', analysisRequestId: newRid() }, selectedEventId: null, compare: false });
+  },
+  loadStoredAnalysis: (meta, result) => {
+    const inv = get().investigation;
+    if (inv.analysisStatus !== 'idle' || inv.study?.id !== meta.studyId || inv.baselineYear !== meta.baselineYear || inv.comparisonYear !== meta.comparisonYear) return false;
+    set({ investigation: { ...inv, analysisStatus: 'complete', analysisResult: result, analysisError: null, analysisJob: null, analysisRequestId: `stored-${newRid()}` } });
+    return true;
   },
   acceptAnalysis: (meta, result) => {
     const s = get();

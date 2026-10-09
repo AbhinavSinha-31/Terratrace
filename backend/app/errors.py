@@ -38,6 +38,8 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "invalid_request": ("The request could not be processed. Check the selected area and years.", False),
     "tiles_unavailable": ("Analysis imagery is temporarily unavailable.", True),
     "imagery_check_failed": ("Imagery availability could not be checked right now.", True),
+    # Read-only lookup of a stored result that does not exist (GET /api/analysis-result).
+    "not_run": ("This analysis has not been run yet.", False),
     # Pre-flight refusals of a custom area (services/analysis.preflight): retrying cannot change the answer.
     "outside_sentinel2_coverage": ("This area is outside Sentinel-2 coverage (land between 56° S and 84° N), so there is no "
                                    "imagery to analyse. Choose an area within that range.", False),

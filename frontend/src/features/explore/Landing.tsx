@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
-import { useHealth, useReadyResults, useStudyAreas, useStudyCard } from '../../data/queries';
+import { useFeaturedSummary, useHealth, useStudyAreas, useStudyCard } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
 import { fmtHa, fmtKm2, shortBiome } from '../../lib/format';
@@ -59,19 +59,22 @@ function Hero() {
 // ---------------------------------------------------------------- right panels
 function OverviewPanel() {
   const areas = useStudyAreas();
-  const ready = useReadyResults();
+  const summary = useFeaturedSummary();
   const { data: health } = useHealth();
   const items = areas.data?.items ?? [];
   // Control sites (stable forest, tagged in the featured data) measure the false-alarm rate: their detections are
   // reported separately and never added to the detected-change total.
   const isControl = (id: string) => !!items.find((a) => a.id === id)?.tags.some((t) => /control site/i.test(t));
+  // STORED READY results of the featured investigations (pre-computed by the backend for each default window) — the
+  // results' own figures, read-only. INVALID / UNAVAILABLE sites contribute nothing.
+  const ready = (summary.data?.items ?? []).filter((i) => i.status === 'READY' && i.kpis);
   const counted = ready.filter((r) => !isControl(r.id));
   const controls = ready.filter((r) => isControl(r.id));
   // "Detected change" = area of the detected change events (the polygons drawn on the map) of completed live
-  // analyses — not total_loss_ha, which sums gross year-to-year forest-mask transitions (including reversals).
-  const eventsOf = (rs: typeof ready) => rs.flatMap((r) => r.bundle?.events.features ?? []);
-  const areaOf = (rs: typeof ready) => eventsOf(rs).reduce((a, f) => a + f.properties.area_ha, 0);
-  const events = eventsOf(counted).length;
+  // analyses — not gross loss, which sums year-to-year forest-mask transitions (including reversals).
+  const areaOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_area_ha ?? 0), 0);
+  const countOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_count ?? 0), 0);
+  const events = countOf(counted);
   const n = items.length;
   const eeReady = health?.analysis.status === 'ready';
   return (
@@ -117,11 +120,11 @@ function OverviewPanel() {
           </div>
         )}
         {controls.map((r) => {
-          const fs = eventsOf([r]);
+          const n = countOf([r]);
           const name = items.find((a) => a.id === r.id)?.short_name ?? r.id;
           return (
-            <div key={r.id} className="mt-2 text-[10.5px] leading-snug text-ink-3">
-              Control site · {name}: {fs.length} {fs.length === 1 ? 'detection' : 'detections'} ({fmtHa(areaOf([r]))} ha) — false-alarm check, not counted
+            <div key={r.id} className="mt-2 text-[10.5px] leading-snug text-ink-3" data-testid="overview-control">
+              Control site · {name}: {n} {n === 1 ? 'detection' : 'detections'} ({fmtHa(areaOf([r]))} ha) — false-alarm check, not counted
             </div>
           );
         })}
@@ -177,7 +180,8 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
       initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + index * 0.07, duration: 0.5, ease: EASE }}
       onClick={() => {
         if (import.meta.env.DEV) console.debug('[analysis] featured card click', { id: area.id, bbox: area.bbox, window: DEFAULT_ANALYSIS_WINDOW });
-        open(area.id, { name: area.name, geometry: area.geometry, run: true });
+        // The site's default window (measured-analysable years): a stored result for it opens instantly.
+        open(area.id, { name: area.name, geometry: area.geometry, window: area.default_window ? { start: area.default_window[0], end: area.default_window[1] } : undefined, run: true });
       }}
       data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}

@@ -16,7 +16,7 @@ from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
-from ..services import analysis, imagery, search, tiles as tile_cache
+from ..services import analysis, featured, imagery, search, tiles as tile_cache
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -113,8 +113,17 @@ def health() -> Health:
 
 @router.get("/study-areas")
 def study_areas() -> dict[str, Any]:
-    """Featured investigations — predefined AOIs only (no metrics)."""
-    return registry.featured()
+    """Featured investigations — predefined AOIs only (no metrics), each with its default analysis window (the standard
+    window moved inward to measured-analysable years; see services/featured.py)."""
+    doc = registry.featured()
+    return {**doc, "items": [{**a, "default_window": list(featured.default_window(a["id"]))} for a in doc["items"]]}
+
+
+@router.get("/featured/summary")
+def featured_summary() -> dict[str, Any]:
+    """Stored outcome of every featured investigation for its default window (+ headline KPIs when READY).
+    Read-only: never starts an analysis. The overview totals and featured cards come from here."""
+    return {"items": [featured.summary(aid) for aid in featured.featured_ids()]}
 
 
 @router.post("/aoi")
@@ -153,6 +162,19 @@ async def get_analysis_history(aid: str = _aid(), baseline: int | None = _year()
 async def get_analysis(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year(),
                        rid: str | None = Query(None, pattern=RID)) -> dict[str, Any]:
     return await _run(aid, baseline, comparison, rid)
+
+
+@router.get("/analysis-result/{aid}", response_model=AnalysisEnvelope)
+def get_stored_analysis(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year()) -> dict[str, Any]:
+    """The STORED analysis envelope for an area and window (READY / INVALID_ANALYSIS / UNAVAILABLE), so an opened
+    investigation shows its real result at once. Read-only: 404 not_run when nothing is stored — it never computes."""
+    try:
+        env = analysis.stored_envelope(aid, *_window(baseline, comparison))
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    if env is None:
+        raise _err(404, "not_run", "This analysis has not been run yet.", False)
+    return env
 
 
 # ----------------------------------------------------------------------------- asynchronous analysis jobs

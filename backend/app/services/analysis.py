@@ -523,8 +523,33 @@ def stored_status(aid: str, b: int, c: int) -> dict[str, Any]:
     issues = [i["years"] for i in ((cached.get("quality") or {}).get("issues") or [])]
     f = RESULTS / f"{key}.json"
     stored_at = datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).isoformat(timespec="seconds") if f.exists() else None
-    return {**base, "status": cached["status"], "reasonCode": cached.get("reasonCode"), "reason": cached.get("reason"),
-            "issueYears": issues, "stored_at": stored_at}
+    out = {**base, "status": cached["status"], "reasonCode": cached.get("reasonCode"), "reason": cached.get("reason"),
+           "issueYears": issues, "stored_at": stored_at}
+    if cached["status"] == "READY":   # headline measurements of the stored READY result (overview totals)
+        out["kpis"] = headline_kpis(cached)
+    return out
+
+
+def headline_kpis(result: dict[str, Any]) -> dict[str, Any]:
+    """The stored READY result's own headline figures (no recomputation): event area/count and forest change."""
+    k = ((result.get("summary") or {}).get("kpis")) or {}
+    feats = (result.get("events") or {}).get("features") or []
+    return {
+        "event_area_ha": round(sum(f["properties"]["area_ha"] for f in feats), 1),
+        "event_count": len(feats),
+        **{n: k.get(n) for n in ("baseline_year", "latest_year", "gross_loss_ha", "gross_gain_ha", "net_change_ha")},
+    }
+
+
+def stored_envelope(aid: str, b: int, c: int) -> dict[str, Any] | None:
+    """The stored outcome as a full envelope, or None when nothing is stored. Read-only: never computes, never calls
+    Earth Engine, never starts a job. An area over the interactive limit is never served a stored result."""
+    aoi = aoi_doc(aid)   # AnalysisNotFound -> 404
+    if _area_limit(aoi):
+        return None
+    key = _key(aid, b, c)
+    cached = _results.get(key) or _load_result(key)
+    return _from_result(aid, aoi, b, c, cached) if cached else None
 
 
 def progress(rid: str) -> dict[str, Any]:

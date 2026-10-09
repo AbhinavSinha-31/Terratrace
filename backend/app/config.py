@@ -109,6 +109,10 @@ class Settings:
     ee_tile_concurrency: int = _bounded_int("TT_EE_TILE_CONCURRENCY", 3, 1, 16)
     tile_cache_mb: int = _bounded_int("TT_TILE_CACHE_MB", 1024, 50, 100_000)
 
+    # Pre-compute the featured investigations' results in the background after startup (one at a time; skipped when
+    # already stored for the current method version). Off in tests.
+    precompute_featured: bool = os.environ.get("TT_PRECOMPUTE_FEATURED", "true").strip().lower() in ("1", "true", "yes")
+
     # Largest accepted request body. Real bodies are a drawn AOI polygon or one event's facts (a few KB).
     max_request_bytes: int = _bounded_int("TT_MAX_REQUEST_BYTES", 1_000_000, 10_000, 20_000_000)
 
