@@ -155,6 +155,9 @@ interface UiState {
   setCompare(on: boolean): void;
   setImagery(m: ImageryMode): void;
   setLayer(k: LayerKey, on: boolean): void;
+  /** Reference context map layers (hillshade, slope, Hansen tree cover 2000, Hansen loss year), off by default. */
+  contextLayers: Record<string, boolean>;
+  setContextLayer(id: string, on: boolean): void;
   setForestOpacity(v: number): void;
   setSelection(s: Selection | null): void;
   setDrawTool(t: DrawTool): void;
@@ -387,6 +390,8 @@ export const useUi = create<UiState>((set, get) => ({
     }),
   setImagery: (m) => set((s) => ({ imagery: m, layers: { ...s.layers, satellite: true } })),
   setLayer: (k, on) => set((s) => ({ layers: { ...s.layers, [k]: on } })),
+  contextLayers: {},
+  setContextLayer: (id, on) => set((s) => ({ contextLayers: { ...s.contextLayers, [id]: on } })),
   setForestOpacity: (v) => set((s) => ({ layers: { ...s.layers, forestOpacity: v } })),
   // Candidate AOI (drawn / searched / clicked) while no study is open. A new AOI resets the analysis.
   setSelection: (sel) => set((s) => ({

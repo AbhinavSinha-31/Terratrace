@@ -184,6 +184,28 @@ async function run(label, { offline }) {
     };
   });
 
+  /**
+   * Area context (reference datasets): shown whatever the analysis status, labelled "Reference context, not a
+   * TerraTrace result", the dataset + year under EVERY value; offline it says unavailable and shows no value.
+   */
+  const checkContext = async (name) => {
+    await page.waitForFunction(() => ['READY', 'UNAVAILABLE', 'ERROR'].includes(document.querySelector('[data-testid="area-context"]')?.getAttribute('data-status')), null, { timeout: 150000 }).catch(() => {});
+    const status = await page.locator('[data-testid="area-context"]').getAttribute('data-status').catch(() => null);
+    const label = await page.locator('[data-testid="context-label"]').innerText().catch(() => '');
+    const rows = await page.locator('[data-testid="context-row"]').count();
+    const sources = await page.locator('[data-testid="context-source"]').allInnerTexts();
+    check(label === 'Reference context, not a TerraTrace result', `${name} area context labelled as reference, not a TerraTrace result`, label);
+    if (offline) {
+      check(status === 'ERROR' && rows === 0 && (await page.locator('[data-testid="context-unavailable"]').count()) >= 1, `${name} offline: area context unavailable, no values shown`, String(status));
+    } else {
+      check(status === 'READY' || status === 'UNAVAILABLE', `${name} area context measured or explicitly unavailable`, String(status));
+      if (status === 'READY') {
+        check(rows > 0 && sources.length === rows && sources.every((s) => /·/.test(s) && /\b(19|20)\d\d\b/.test(s)), `${name} every reference value carries its dataset and year`, `${rows} rows / ${sources.length} source lines`);
+        check((await page.locator('[data-testid="context-not-current"]').innerText().catch(() => '')).startsWith('None of these is current forest cover'), `${name} reference forest cover is never presented as current`);
+      }
+    }
+  };
+
   // ---- every featured study
   for (const id of FEATURED) {
     // A. Opening a study populates the investigation, sends ZERO analysis requests, shows Ready to analyze.
@@ -198,6 +220,8 @@ async function run(label, { offline }) {
       const o = await inv();
       check(o.study === id && o.status === 'complete' && o.has && JSON.stringify(o.resYears) === JSON.stringify(w) && analysisRequests.length === n0,
         `${label}: ${id} opens with its stored ${storedOf(id).status} result for ${w.join('→')} (0 analysis requests)`, JSON.stringify({ s: o.status, has: o.has, years: o.resYears }));
+      await page.getByRole('tab', { name: /Overview/ }).click().catch(() => {});
+      await checkContext(`${label}: ${id}`);
       continue;   // the "Ready to analyze" / Run flow below needs a study WITHOUT a stored result
     }
     const opened = await inv();
@@ -205,6 +229,7 @@ async function run(label, { offline }) {
     check((await page.locator('[data-testid="ready-to-analyze"]').count()) === 1, `${label}: ${id} 'Ready to analyze' panel shown`);
     const readyName = ((await page.locator('[data-testid="ready-to-analyze"]').innerText().catch(() => '')).split('\n')[1] ?? '').trim();
     check(readyName.length > 0 && readyName !== 'Selected area', `${label}: ${id} study metadata renders (name)`, readyName);
+    await checkContext(`${label}: ${id}`);
     // Imagery != analysis: imagery is requested for the study; the analysis stays idle whatever imagery does.
     const img = await checkImagery(`${label}: ${id}`, id);
     check(offline || imageryRequests.some((u) => u.includes(`aoi=${id}&`)), `${label}: ${id} imagery requested from the backend imagery endpoint`);
@@ -358,8 +383,14 @@ async function run(label, { offline }) {
     const s = await imgState();
     check(s.imagery === 'READY' && s.liveLayers.some((l) => l.id === `img-s2-live-${AOI}-2020` && l.visible), `${label}: READY imagery decision drawn as a raster layer from the backend tile template`, JSON.stringify(s.liveLayers));
     check(s.analysis === 'idle' && !s.hasResult && /no analysis/.test(s.text), `${label}: imagery READY while analysis stays idle — imagery-only never appears as analysis`, JSON.stringify({ a: s.analysis, t: s.text }));
-    const body = await page.locator('body').innerText();
-    check(!METRIC_TEXT.test(body) && (await page.evaluate(() => window.__tt.state.events.length)) === 0, `${label}: imagery-only view renders no measurements or events`);
+    // The labelled reference context (dataset names such as "Hansen Global Forest Change") is not a TerraTrace
+    // measurement and is shown whatever the analysis status: excluded from this scan, nothing else is.
+    const body = await page.evaluate(() => {
+      const clone = document.body.cloneNode(true);
+      clone.querySelectorAll('[data-testid="area-context"], [data-testid="context-layers"]').forEach((n) => n.remove());
+      return clone.innerText ?? clone.textContent ?? '';
+    });
+    check(!METRIC_TEXT.test(body) && (await page.evaluate(() => window.__tt.state.events.length)) === 0, `${label}: imagery-only view renders no measurements or events`, (body.match(METRIC_TEXT) ?? [''])[0]);
     // A year without usable imagery draws NOTHING (no substitution with another year) and says so.
     await page.evaluate(() => window.__ttUi.getState().setYear(1995));
     await waitImagery();

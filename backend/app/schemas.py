@@ -44,6 +44,67 @@ class AnalyzeRequest(BaseModel):
         return v
 
 
+class ContextSource(BaseModel):
+    """Dataset behind a reference-context value: name, catalogue ID and the year(s) the value describes."""
+    model_config = ConfigDict(extra="allow")
+    dataset: str
+    id: str
+    year: str | None = None
+    year_label: str | None = None
+    resolution_m: int | None = None
+    note: str | None = None
+
+
+class TerrainContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: Literal["READY", "UNAVAILABLE"]
+    reason: str | None = None
+    source: ContextSource
+    elevation_m: dict[str, float | None] | None = None      # min, p5, mean, p95, max
+    slope_mean_deg: float | None = None
+    steep_share_pct: float | None = None
+    steep_threshold_deg: float
+    dem_coverage_pct: float | None = None
+
+
+class ForestCoverValue(BaseModel):
+    """One dated reference value (Hansen year-2000 baseline, loss per year 2001–2025, gain 2000–2012, WorldCover 2021)."""
+    model_config = ConfigDict(extra="allow")
+    status: Literal["READY", "UNAVAILABLE"]
+    reason: str | None = None
+    source: ContextSource
+
+
+class ForestCoverContext(BaseModel):
+    tree_cover_2000: ForestCoverValue
+    loss_by_year: ForestCoverValue
+    gain_2000_2012: ForestCoverValue
+    worldcover_2021: ForestCoverValue
+
+
+class ContextLayer(BaseModel):
+    id: str
+    label: str
+    dataset: str
+    year_label: str
+    reference: Literal[True] = True
+    tiles: list[str]
+
+
+class AreaContext(BaseModel):
+    """Terrain and forest cover from REFERENCE datasets (services/context.py) — never a TerraTrace result."""
+    model_config = ConfigDict(extra="allow")
+    status: Literal["READY", "UNAVAILABLE"]
+    reason: str | None = None
+    label: str
+    context_version: str
+    computed_at: str | None = None
+    area_ha: float | None = None
+    terrain: TerrainContext | None = None
+    forest: ForestCoverContext | None = None
+    layers: list[ContextLayer] | None = None
+
+
 class AnalysisEnvelope(BaseModel):
     model_config = ConfigDict(extra="allow")
     analysis_id: str
@@ -57,6 +118,8 @@ class AnalysisEnvelope(BaseModel):
     summary: dict[str, Any] | None = None
     events: dict[str, Any] | None = None
     layers: dict[str, Any] | None = None
+    # Reference context of the area (cached; null until measured). Present whatever the analysis status.
+    context: AreaContext | None = None
 
 
 class AoiPreviewRequest(BaseModel):

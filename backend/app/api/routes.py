@@ -14,9 +14,9 @@ from ..config import settings
 from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
-from ..providers.earth_engine.provider import EarthEngineError, layer_key, provider as ee_provider
-from ..schemas import AnalysisEnvelope, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
-from ..services import analysis, featured, imagery, search, tiles as tile_cache
+from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
+from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
+from ..services import analysis, context as area_context, featured, imagery, search, tiles as tile_cache
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -138,12 +138,19 @@ def register_aoi(req: AoiRegisterRequest) -> dict[str, Any]:
 
 
 @router.get("/aoi/{aid}")
-def get_aoi(aid: str = _aid()) -> dict[str, Any]:
-    """A registered area (featured or custom): geometry and metadata only — no analysis, no Earth Engine call."""
+async def get_aoi(aid: str = _aid(), include: str | None = Query(None, pattern="^context$")) -> dict[str, Any]:
+    """A registered area (featured or custom): geometry and metadata — no analysis. With ?include=context, also its
+    REFERENCE context (terrain, forest cover; services/context.py): measured once per area, then cached. A context
+    that cannot be measured is returned as UNAVAILABLE with a public reason — never estimated."""
     try:
-        return analysis.aoi_doc(aid)
+        doc = analysis.aoi_doc(aid)
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
+    if include != "context":
+        return doc
+    geometry = analysis.analysis_target(doc)["geometry"]
+    ctx = await asyncio.to_thread(area_context.ensure, aid, geometry)
+    return {**doc, "context": AreaContext.model_validate(ctx).model_dump()}
 
 
 @router.get("/analysis/{aid}/history")
@@ -269,6 +276,38 @@ async def explain(req: ExplainRequest, provider: str = Query("auto", pattern="^(
 async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> dict[str, Any]:
     results, notice = await search.search(q)
     return {"query": q, "results": results, "notice": notice}
+
+
+@router.get("/tiles/{aid}/context/{layer}/{z}/{x}/{y}")
+async def context_tiles(aid: str = _aid(), layer: str = Path(..., max_length=32),
+                        z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
+    """Reference context map tiles (hillshade, slope, Hansen tree cover 2000, Hansen loss year) — never TerraTrace
+    results. Same validation, cache, concurrency cap, backoff and public errors as the analysis tile route; declared
+    BEFORE it so /tiles/{aid}/context/... is never parsed as a year."""
+    if layer not in CONTEXT_LAYERS:
+        raise _err(404, "not_found", "This map layer does not exist.", False)
+    _tile_xyz(z, x, y)
+    try:
+        try:
+            geometry = analysis.analysis_target(analysis.aoi_doc(aid))["geometry"]
+        except analysis.AnalysisNotFound:
+            raise _err(404, "not_found") from None
+
+        async def template() -> str:
+            return await asyncio.to_thread(ee_provider.context_tile_url, aid, layer, geometry)
+
+        key = tile_cache.cache_key(f"ctx-{layer}-{area_context.CONTEXT_VERSION}", aid, 0, z, x, y)
+        return await _serve_tile(key, z, x, y, template, lambda: ee_provider.drop_mapid((aid, f"ctx:{layer}", 0)))
+    except HTTPException:
+        raise
+    except EarthEngineError as e:
+        if e.code == "unknown_layer":
+            raise _err(404, "not_found", "This map layer does not exist.", False) from None
+        log.warning("Context tiles %s/%s unavailable: %s", aid, layer, e)
+        raise _err(503, "tiles_unavailable") from None
+    except Exception as e:  # noqa: BLE001 — ee transport errors / TileUnavailable; details stay in the log
+        log.warning("Context tiles %s/%s unavailable: %s", aid, layer, e)
+        raise _err(503, "tiles_unavailable") from None
 
 
 @router.get("/tiles/{aid}/{kind}/{year}/{z}/{x}/{y}")

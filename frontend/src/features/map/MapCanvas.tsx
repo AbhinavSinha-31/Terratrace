@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ChangeEvent, ChangeType, Severity, StudyArea } from '../../data/contracts';
-import { useBasemaps, useCandidateAoi, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
+import { useAreaContext, useBasemaps, useCandidateAoi, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import { EXPLORE_REGIONS } from '../../lib/regions';
 import { squareAround } from '../../lib/geo';
@@ -37,6 +37,9 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   const readyResults = useReadyResults();
   const imagery = useUi((s) => s.imagery);
   const layers = useUi((s) => s.layers);
+  // Reference context layers of the open study only (shown whatever the analysis status; off until toggled).
+  const contextLayers = useAreaContext(aoiId).data?.layers ?? null;
+  const contextOn = useUi((s) => s.contextLayers);
   const sevFilter = useUi((s) => s.severityFilter);
   const typeFilter = useUi((s) => s.typeFilter);
   const selectedId = useUi((s) => s.selectedEventId);
@@ -59,7 +62,7 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   );
 
   const state = {
-    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, imageryAoi, events, hotspots, year, imagery, layers, severities, types,
+    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, imageryAoi, events, hotspots, year, imagery, layers, contextLayers, contextOn, severities, types,
     selectedId, hoveredId, hoveredAoiId,
     draft: drawTool ? draft : aoiId ? null : selection?.geometry ?? null,
     pin: drawTool || aoiId ? null : selection?.point ?? null,

@@ -7,7 +7,7 @@
  * and real reference imagery — never metrics, events or narratives.
  */
 import type {
-  AnalysisEnvelope, AnalysisResult, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
+  AnalysisEnvelope, AnalysisResult, AreaContext, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
   AnalysisHistory, AnalysisJob, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
@@ -209,6 +209,12 @@ export const client = {
   },
 
   /** A registered area's geometry + metadata (no analysis). Needed for custom areas opened by link / reload. */
+  /** Reference context of an area (terrain, forest cover) — measured once by the backend, then cached. */
+  async areaContext(id: string): Promise<AreaContext> {
+    const doc = await request<StudyArea & { context: AreaContext }>(`${API}/aoi/${encodeURIComponent(id)}?include=context`, { timeoutMs: 120000 });
+    return doc.context;
+  },
+
   getAoi(id: string): Promise<StudyArea> {
     return request<StudyArea>(`${API}/aoi/${encodeURIComponent(id)}`, { timeoutMs: 15000 });
   },

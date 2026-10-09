@@ -28,6 +28,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("GET", re.compile(r"^/api/imagery/availability$"), "compute"),
     ("GET", re.compile(r"^/api/imagery$"), "compute"),                     # an uncached (area, year) is an EE request
     ("POST", re.compile(r"^/api/aoi$"), "compute"),
+    ("GET", re.compile(r"^/api/aoi/[^/]+$"), "compute"),                   # ?include=context measures reference datasets
     ("POST", re.compile(r"^/api/aoi/preview$"), "compute"),
     ("GET", re.compile(r"^/api/search$"), "search"),
     ("POST", re.compile(r"^/api/explain$"), "explain"),

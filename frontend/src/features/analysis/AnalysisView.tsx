@@ -15,6 +15,7 @@ import { EventList } from './EventList';
 import { EventInspector } from './EventInspector';
 import { LayerPanel } from './LayerPanel';
 import { ReportModal } from './ReportModal';
+import { AreaContextPanel } from './AreaContext';
 
 function DrawerBody() {
   const tab = useUi((s) => s.tab);
@@ -33,7 +34,7 @@ function DrawerBody() {
           <div className="t-label text-ink-3">No analysis result</div>
           <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? 'Selected area'}</div>
         </div>
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5"><AnalysisErrorPanel error={q.error} onRetry={() => q.refetch()} /></div>
+        <div className="scroll-thin min-h-0 flex-1 space-y-6 overflow-y-auto p-5"><AnalysisErrorPanel error={q.error} onRetry={() => q.refetch()} /><AreaContextPanel /></div>
       </div>
     );
   }
@@ -48,6 +49,7 @@ function DrawerBody() {
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5">
           <AnalysisUnavailable result={q.data} onRetry={() => q.refetch()} />
+          <div className="mt-6"><AreaContextPanel /></div>
         </div>
       </div>
     );
@@ -73,7 +75,7 @@ function DrawerBody() {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5" id="tt-drawer-scroll">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={selected ? `ev-${selected.id}` : tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-            {selected ? <EventInspector event={selected} /> : tab === 'overview' ? <Overview /> : <EventList />}
+            {selected ? <EventInspector event={selected} /> : tab === 'overview' ? <><Overview /><div className="mt-6"><AreaContextPanel /></div></> : <EventList />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -119,11 +121,12 @@ function ReadyToAnalyze({ name }: { name?: string }) {
         <div className="t-label text-ink-3">Ready to analyze</div>
         <div className="mt-1 truncate text-[15px] font-semibold text-ink">{name ?? 'Selected area'}</div>
       </div>
-      <div className="space-y-4 p-5">
+      <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
         <p className="text-[12.5px] leading-relaxed text-ink-2">
           Baseline <b className="t-data text-ink">{b}</b> → comparison <b className="t-data text-ink">{c}</b>. No analysis has been run for these years yet.
         </p>
         <Button variant="brand" onClick={() => useUi.getState().requestAnalysis()}>Run live analysis {b} → {c}</Button>
+        <div className="pt-2"><AreaContextPanel /></div>
       </div>
     </div>
   );

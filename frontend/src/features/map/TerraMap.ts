@@ -7,7 +7,7 @@ import maplibregl, {
   type StyleSpecification,
 } from 'maplibre-gl';
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
-import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, ImageryDecision, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
+import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, ContextLayer, ImageryDecision, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
 import type { ImageryMode, LayerToggles } from '../../state/store';
 import type { ExploreRegion } from '../../lib/regions';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
@@ -39,6 +39,9 @@ export interface MapState {
   year: number;
   imagery: ImageryMode;
   layers: LayerToggles;
+  /** Reference context layers of the open area (backend templates; never TerraTrace results) and their toggles. */
+  contextLayers: ContextLayer[] | null;
+  contextOn: Record<string, boolean>;
   severities: Severity[];
   types: ChangeType[];
   selectedId: string | null;
@@ -396,6 +399,9 @@ export class TerraMap {
     const ovKey = `${s.year}|${s.layers.forest}|${s.layers.ndvi}|${s.layers.forestOpacity}|${s.catalog?.aoi_id}`;
     if (this.changed('overlays', ovKey)) this.updateOverlays();
 
+    const ctxKey = `${s.aoi?.id ?? ''}|${(s.contextLayers ?? []).map((l) => `${l.id}:${!!s.contextOn[l.id]}`).join(',')}`;
+    if (this.changed('context', ctxKey)) this.applyContextLayers();
+
     if (this.changed('labels', `${s.layers.labels}|${this.basemapsAdded}`) && m.getLayer('labels')) m.setLayoutProperty('labels', 'visibility', s.layers.labels ? 'visible' : 'none');
 
     if (this.changed('events', s.events)) {
@@ -603,6 +609,28 @@ export class TerraMap {
       window.setTimeout(() => {
         if (!this.destroyed && this.imageryLayer !== before && m.getLayer(before)) m.setLayoutProperty(before, 'visibility', 'none');
       }, 900);
+    }
+  }
+
+  /**
+   * Reference context layers (hillshade, slope, Hansen tree cover 2000, Hansen loss year): raster tiles from the
+   * backend's context route through the bounded Earth Engine tile loader, clipped to the open area, drawn above the
+   * imagery and below the analysis overlays. Layers of another area are removed.
+   */
+  private applyContextLayers() {
+    const m = this.map;
+    const s = this.state;
+    const wanted = new Map((s.aoi ? s.contextLayers ?? [] : []).map((l) => [`ctx-${s.aoi!.id}-${l.id}`, l]));
+    for (const l of m.getStyle().layers) {
+      if (l.id.startsWith('ctx-') && !wanted.has(l.id)) { m.removeLayer(l.id); if (m.getSource(l.id)) m.removeSource(l.id); }
+    }
+    for (const [id, l] of wanted) {
+      if (!m.getSource(id)) {
+        m.addSource(id, { type: 'raster', tiles: l.tiles.map(eeTiles), tileSize: 256, maxzoom: 15, attribution: `${l.dataset} · ${l.year_label}`, ...(s.aoi ? { bounds: s.aoi.bbox } : {}) });
+        const opacity = l.id === 'hillshade' ? 0.55 : l.id === 'slope' ? 0.6 : 0.8;
+        m.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 200 } }, 'anchor-overlays');
+      }
+      m.setLayoutProperty(id, 'visibility', s.contextOn[l.id] ? 'visible' : 'none');
     }
   }
 

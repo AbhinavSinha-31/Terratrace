@@ -81,6 +81,8 @@ def _pass(ids: list[str], loop: asyncio.AbstractEventLoop | None, per_site_timeo
         except Exception as e:  # noqa: BLE001 — availability failure: the window stays the standard one
             log.warning("Featured %s: availability not measured (%s)", aid, type(e).__name__)
         b, c = default_window(aid)
+        from . import context as area_context
+        area_context.ensure(aid, analysis.analysis_target(analysis.aoi_doc(aid))["geometry"])   # reference context
         status = analysis.stored_status(aid, b, c)["status"]
         if status in STORED:
             out.append((aid, f"stored {status} {b}-{c}"))

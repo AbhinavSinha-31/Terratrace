@@ -38,6 +38,7 @@ from ..errors import diagnostics, public_error
 from ..lru import LRUDict
 from ..providers import registry
 from ..providers.earth_engine.provider import RESTRICTED_MODE, EarthEngineError, provider as ee_provider
+from . import context as area_context
 from . import science as sc
 from .geometry import Aoi, AoiError, validate_aoi
 
@@ -139,6 +140,8 @@ def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, cod
         "source": dict(NO_SOURCES),
         # Observation quality (scene counts, coverage, pass/fail reasons) — never forest/change metrics.
         "quality": quality,
+        # Reference context (terrain, forest cover) — whatever the analysis status; cached only, never computed here.
+        "context": area_context.cached(aid),
     }
     if diag:
         env["diagnostics"] = diag
@@ -460,6 +463,7 @@ def _execute(job: Job) -> None:
             return
         cached = _results.get(key) or _load_result(key)
         if cached:
+            area_context.ensure(aid, analysis_target(aoi)["geometry"])   # once per area; never fails the job
             job.finish(_from_result(aid, aoi, b, c, cached))
             return
         if _service_unavailable():
@@ -475,6 +479,7 @@ def _execute(job: Job) -> None:
         if result.get("status") in ("READY", "UNAVAILABLE", "INVALID_ANALYSIS") and not result.get("diagnostic"):
             _results[key] = result
             _save_result(key, result, analysis_target(aoi)["geometry"])
+        area_context.ensure(aid, analysis_target(aoi)["geometry"])   # reference context; never fails the job
         job.finish(_from_result(aid, aoi, b, c, result))
     except AnalysisCancelled:
         log.info("[%s] stopped after cancellation", job.id)

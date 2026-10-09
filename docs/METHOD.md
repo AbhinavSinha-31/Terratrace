@@ -156,3 +156,26 @@ is measured metadata — not a forest or change measurement.
   SLC-off gaps and phenology; the gain-stability rule is what exposes this.
 * An event polygon consists only of pixels that passed the change rule, so its converted share is 1 by
   construction (it is not an independent measurement).
+
+## 9. Area context (reference datasets — not TerraTrace results)
+
+Every area also shows terrain and forest cover from published reference datasets, whatever the state of its
+TerraTrace analysis. They are labelled **"Reference context, not a TerraTrace result"**, every value carries its
+dataset and year, and they never feed, adjust or replace a TerraTrace measurement. One Earth Engine request per area
+([`services/context.py`](../backend/app/services/context.py)), cached per dataset version; a request that fails is
+reported as unavailable (never estimated) and measured again later.
+
+| Value | Dataset (Earth Engine ID) | Date | Notes |
+|---|---|---|---|
+| Elevation (min, 5–95 %, mean, max), mean slope, share steeper than 30° | Copernicus DEM GLO-30, 30 m (`COPERNICUS/DEM/GLO30_2024_1`) | radar acquired 2011–2015, 2024 release | Surface model: over forest, elevation includes the canopy. The tiles are mosaicked with their own projection before computing slope. `COPERNICUS/DEM/GLO30` is deprecated in the catalogue in favour of this ID. |
+| Tree cover, share of land | Hansen Global Forest Change v1.13 (`UMD/hansen/global_forest_change_2025_v1_13`) | **year-2000 baseline** | Canopy ≥ 30 % at 30 m; land = Hansen `datamask` 1. |
+| Tree cover loss per year | Hansen GFC v1.13 | **each year 2001–2025** | Within the year-2000 tree cover. Stand-replacing canopy removal (incl. logging, fire, plantation harvest) — not necessarily deforestation; method updates make years not strictly comparable. A year with no loss pixel over the measured area is a measured 0. |
+| Tree cover gain | Hansen GFC v1.13 | **2000–2012 only** | Not updated after 2012. |
+| Tree cover class, share of land | ESA WorldCover v200, 10 m (`ESA/WorldCover/v200`) | **2021** | Class "Tree cover" (10); mangroves are a separate class; permanent water excluded from the land area. |
+
+None of these is current forest cover, and no "remaining tree cover" is derived (baseline minus loss would ignore
+regrowth). The definitions differ and are not comparable with each other or with TerraTrace's forest mask — e.g.
+Hasdeo Arand (measured 2026-10-09): Hansen year-2000 tree cover 22.5 % of land, WorldCover 2021 tree cover 61.0 %,
+TerraTrace's own 2019 forest mask ~57 %. Map layers (hillshade, slope, Hansen tree cover 2000, Hansen loss year) are
+served by `/api/tiles/{aid}/context/{layer}/…` with the same validation, cache and Earth Engine concurrency cap as
+the other tile routes.

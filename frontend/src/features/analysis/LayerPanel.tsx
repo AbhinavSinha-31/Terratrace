@@ -1,5 +1,5 @@
-import { ChevronsLeft, Flame, Layers, Map as MapIcon, Satellite, Scan, SquareDashed, TreePine, Type } from 'lucide-react';
-import { useCurrentBundle } from '../../data/queries';
+import { ChevronsLeft, Flame, Layers, Map as MapIcon, Mountain, Satellite, Scan, SquareDashed, TreePine, Type } from 'lucide-react';
+import { useAreaContext, useCurrentBundle } from '../../data/queries';
 import { useUi } from '../../state/store';
 import { useImageryState } from '../../data/viewState';
 import { SEVERITIES, type GradientLegend } from '../../data/contracts';
@@ -34,6 +34,11 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
   const hasNdvi = !!ndviLegend;
   const img = analysis?.layers.imagery.find((i) => i.year === year);
   const imageryState = useImageryState();
+  // Reference context layers (never TerraTrace results): available whatever the analysis status.
+  const studyId = useUi((s) => s.investigation.study?.id ?? null);
+  const ctxLayers = useAreaContext(studyId).data?.layers ?? [];
+  const ctxOn = useUi((s) => s.contextLayers);
+  const setCtx = useUi((s) => s.setContextLayer);
 
   return (
     <div>
@@ -62,6 +67,15 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
         <LayerToggle icon={<SquareDashed size={14} />} label="Detected change" hint="Change polygons that passed the detection rule" on={layers.change} onChange={(v) => set('change', v)} />
         <LayerToggle icon={<Flame size={14} />} label="Change intensity" hint="Density of detected change, weighted by area" on={layers.intensity} onChange={(v) => set('intensity', v)} />
         </>}
+        {ctxLayers.length > 0 && (
+          <div className="pt-2" data-testid="context-layers">
+            <div className="t-label px-1 pb-1 pt-1 !text-[9px] text-ink-4">Reference context · not TerraTrace results</div>
+            {ctxLayers.map((l) => (
+              <LayerToggle key={l.id} icon={l.id === 'hillshade' || l.id === 'slope' ? <Mountain size={14} /> : <TreePine size={14} />}
+                label={l.label} hint={`${l.dataset} · ${l.year_label}`} on={!!ctxOn[l.id]} onChange={(v) => setCtx(l.id, v)} />
+            ))}
+          </div>
+        )}
         <LayerToggle icon={<MapIcon size={14} />} label="Study boundary" hint="Analysed area and outside mask" on={layers.boundary} onChange={(v) => set('boundary', v)} />
         <LayerToggle icon={<Type size={14} />} label="Place labels" hint="Boundaries and place names (Esri)" on={layers.labels} onChange={(v) => set('labels', v)} />
       </div>
@@ -71,6 +85,9 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
         <div className="space-y-3.5">
           {!analysis && <div className="text-[11px] leading-relaxed text-ink-3">Forest, NDVI and change layers appear after a live analysis completes and passes validation. None are simulated.</div>}
           {layers.forest && forestLegend && <Gradient legend={forestLegend} />}
+          {ctxOn.slope && <Gradient legend={{ type: 'gradient', title: 'Slope · Copernicus DEM GLO-30', note: 'reference', stops: [[0, '#1a9850'], [15, '#fee08b'], [30, '#f46d43'], [45, '#a50026']], min_label: '0°', max_label: '45°+' }} />}
+          {ctxOn.treecover2000 && <Gradient legend={{ type: 'gradient', title: 'Tree canopy · Hansen v1.13 · year 2000', note: 'reference', stops: [[30, '#c7e9c0'], [65, '#41ab5d'], [100, '#00441b']], min_label: '30 %', max_label: '100 %' }} />}
+          {ctxOn.lossyear && <Gradient legend={{ type: 'gradient', title: 'Tree cover loss year · Hansen v1.13', note: 'reference', stops: [[2001, '#ffffb2'], [2013, '#fd8d3c'], [2025, '#bd0026']], min_label: '2001', max_label: '2025' }} />}
           {layers.ndvi && ndviLegend && <Gradient legend={ndviLegend} />}
           {analysis && layers.change && (
             <div>

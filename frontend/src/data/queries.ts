@@ -126,6 +126,21 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
   return card(stored.isError ? 'Unavailable' : '…');
 }
 
+/**
+ * Reference context (terrain, forest cover) of the open area — shown whatever the analysis status. An UNAVAILABLE
+ * context (Earth Engine throttled, …) is re-requested after a minute; it is never filled in.
+ */
+export const useAreaContext = (aoi: string | null) => {
+  const backend = useHealth().data?.backend;
+  return useQuery({
+    queryKey: ['area-context', aoi],
+    queryFn: aoi && backend !== false ? () => client.areaContext(aoi) : skipToken,
+    staleTime: (q) => (q.state.data?.status === 'UNAVAILABLE' ? 60_000 : Infinity),
+    refetchInterval: (q) => (q.state.data?.status === 'UNAVAILABLE' ? 60_000 : false),
+    retry: false,
+  });
+};
+
 /** Measured per-year availability for the timeline. */
 export const useImageryAvailability = (aoi: string | null) =>
   useQuery({ queryKey: ['imagery-availability', aoi], queryFn: aoi ? () => client.imageryAvailability(aoi) : skipToken, staleTime: 10 * 60_000, retry: false });

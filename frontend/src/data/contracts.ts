@@ -365,6 +365,44 @@ export interface PublicError {
 }
 
 /** Backend response for any analysis request. summary/events/layers only when READY. */
+// ---------------------------------------------------------------- area context (reference datasets)
+/** Dataset behind a reference value: every value is shown with its dataset and year. */
+export interface ContextSource {
+  dataset: string;
+  id: string;
+  year: string | null;
+  year_label: string | null;
+  resolution_m?: number | null;
+  note?: string | null;
+}
+interface ContextValue { status: 'READY' | 'UNAVAILABLE'; reason: string | null; source: ContextSource }
+export interface TerrainContext extends ContextValue {
+  elevation_m: { min: number | null; p5: number | null; mean: number | null; p95: number | null; max: number | null } | null;
+  slope_mean_deg: number | null;
+  steep_share_pct: number | null;
+  steep_threshold_deg: number;
+  dem_coverage_pct: number | null;
+}
+export interface ForestCoverContext {
+  tree_cover_2000: ContextValue & { canopy_threshold_pct: number; area_ha: number | null; share_of_land_pct: number | null };
+  loss_by_year: ContextValue & { years: { year: number; loss_ha: number }[] | null; total_ha: number | null; share_of_2000_tree_cover_pct: number | null };
+  gain_2000_2012: ContextValue & { area_ha: number | null };
+  worldcover_2021: ContextValue & { area_ha: number | null; share_of_land_pct: number | null };
+}
+export interface ContextLayer { id: string; label: string; dataset: string; year_label: string; reference: true; tiles: string[] }
+/** Terrain + forest cover from REFERENCE datasets — "Reference context, not a TerraTrace result". */
+export interface AreaContext {
+  status: 'READY' | 'UNAVAILABLE';
+  reason: string | null;
+  label: string;
+  context_version: string;
+  computed_at?: string | null;
+  area_ha?: number | null;
+  terrain: TerrainContext | null;
+  forest: ForestCoverContext | null;
+  layers: ContextLayer[] | null;
+}
+
 export interface AnalysisEnvelope {
   analysis_id: string;
   dataMode: 'LIVE';
@@ -382,6 +420,8 @@ export interface AnalysisEnvelope {
   summary?: AoiSummary;
   events?: EventCollection;
   layers?: LayerCatalog;
+  /** Reference context of the area (null until measured) — present whatever the analysis status. */
+  context?: AreaContext | null;
 }
 
 /** What the UI holds for an open area. `bundle` is non-null only when status === 'READY'. */

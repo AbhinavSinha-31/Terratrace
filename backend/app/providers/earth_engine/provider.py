@@ -56,6 +56,15 @@ EVENT_TILE_SCALE = 4
 CSPLUS = "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED"
 DW = "GOOGLE/DYNAMICWORLD/V1"
 HANSEN = "UMD/hansen/global_forest_change_2025_v1_13"
+# Area context (reference datasets, never TerraTrace results). Chosen 2026-10-09 from the live catalogue:
+# COPERNICUS/DEM/GLO30 is deprecated in favour of GLO30_2024_1 (same GLO-30 DEM, 2024 release).
+DEM = "COPERNICUS/DEM/GLO30_2024_1"
+WORLDCOVER = "ESA/WorldCover/v200"
+WORLDCOVER_TREE = 10          # class "Tree cover" (mangroves are a separate class, 95)
+WORLDCOVER_WATER = 80         # "Permanent water bodies": excluded from the land denominator
+HANSEN_CANOPY = 30            # tree cover 2000 / loss counted where year-2000 canopy >= 30 % (GFW convention)
+STEEP_SLOPE_DEG = 30
+CONTEXT_LAYERS = ("hillshade", "slope", "treecover2000", "lossyear")
 HANSEN_LAST_YEAR = 2025  # GFC v1.13: annual loss year through 2025
 LANDSAT = {
     "LANDSAT/LT05/C02/T1_L2": ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"],
@@ -590,6 +599,92 @@ class EarthEngineProvider:
         key = (aoi_id, "aoi-imagery", year)
         with self.mapid_lock(key):
             return self.cached_mapid(key) or self.imagery_layer(aoi_id, geometry, year)["tileUrl"]
+
+    # ----------------------------------------------------------------- area context (reference datasets)
+    @staticmethod
+    def _dem():
+        """Copernicus GLO-30 elevation as ONE image with one projection. The collection is a set of 1x1 degree tiles;
+        terrain functions on an unprojected mosaic compute slope at the wrong scale, so the mosaic gets the tiles' own
+        projection (EPSG:4326, 1 arc-second) explicitly."""
+        ee = _ee()
+        col = ee.ImageCollection(DEM).select("DEM")
+        return col.mosaic().setDefaultProjection(col.first().projection()).rename("elevation")
+
+    def area_context(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        """RAW reference measurements over an area — one Earth Engine request (services/context.py interprets them).
+
+        Terrain: Copernicus GLO-30 elevation statistics, slope (degrees) and the share steeper than STEEP_SLOPE_DEG.
+        Hansen GFC v1.13: land area, year-2000 tree cover (canopy >= HANSEN_CANOPY %), loss area per loss year within
+        that year-2000 tree cover, and gain 2000-2012. ESA WorldCover v200 (2021, 10 m): land and tree-cover area.
+        Masked / missing pixels are never counted as zero."""
+        self.initialize()
+        ee = _ee()
+        geom = ee.Geometry(geometry)
+        area = ee.Image.pixelArea().divide(1e4)
+        dem = self._dem()
+        slope = ee.Terrain.slope(dem).rename("slope")
+        rr = dict(geometry=geom, scale=ANALYSIS_SCALE, maxPixels=1e10, tileScale=TILE_SCALE)
+        elev_reducer = (ee.Reducer.minMax().combine(ee.Reducer.mean(), "", True)
+                        .combine(ee.Reducer.percentile([5, 95]), "", True))
+        h = ee.Image(HANSEN)
+        land = h.select("datamask").eq(1)
+        forest2000 = h.select("treecover2000").gte(HANSEN_CANOPY).And(land)
+        loss = forest2000.And(h.select("lossyear").gt(0))
+        wc = ee.ImageCollection(WORLDCOVER).first().select("Map")
+        wc_land = wc.neq(WORLDCOVER_WATER)
+        req = ee.Dictionary({
+            "aoi": area.rename("aoi_ha").reduceRegion(ee.Reducer.sum(), **rr),
+            "elevation": dem.reduceRegion(elev_reducer, **rr),
+            "dem_cover": area.updateMask(dem.mask()).rename("dem_ha").reduceRegion(ee.Reducer.sum(), **rr),
+            "slope": slope.addBands(slope.gt(STEEP_SLOPE_DEG).rename("steep")).reduceRegion(ee.Reducer.mean(), **rr),
+            "hansen": ee.Image.cat([area.updateMask(land).rename("land_ha"),
+                                    area.updateMask(forest2000).rename("forest2000_ha"),
+                                    area.updateMask(h.select("gain").eq(1).And(land)).rename("gain_ha")])
+                        .reduceRegion(ee.Reducer.sum(), **rr),
+            "loss_by_year": area.updateMask(loss).rename("loss_ha").addBands(h.select("lossyear"))
+                              .reduceRegion(ee.Reducer.sum().group(groupField=1, groupName="lossyear"), **rr),
+            "worldcover": ee.Image.cat([area.updateMask(wc_land).rename("land_ha"),
+                                        area.updateMask(wc.eq(WORLDCOVER_TREE)).rename("tree_ha")])
+                            .reduceRegion(ee.Reducer.sum(), geometry=geom, scale=10, maxPixels=1e10, tileScale=TILE_SCALE),
+        })
+        with EETimer("area-context")("area_context [getInfo]"):
+            return req.getInfo()
+
+    def _context_image(self, layer: str, geometry: dict[str, Any]):
+        """Styled reference layer, clipped to the area. Never a TerraTrace result."""
+        ee = _ee()
+        geom = ee.Geometry(geometry)
+        h = ee.Image(HANSEN)
+        if layer == "hillshade":
+            img = ee.Terrain.hillshade(self._dem()).visualize(min=0, max=255)
+        elif layer == "slope":
+            img = ee.Terrain.slope(self._dem()).visualize(min=0, max=45, palette=["1a9850", "fee08b", "f46d43", "a50026"])
+        elif layer == "treecover2000":
+            tc = h.select("treecover2000")
+            img = tc.updateMask(tc.gte(HANSEN_CANOPY)).visualize(min=HANSEN_CANOPY, max=100, palette=["c7e9c0", "41ab5d", "00441b"])
+        elif layer == "lossyear":
+            ly = h.select("lossyear")
+            img = ly.updateMask(ly.gt(0).And(h.select("treecover2000").gte(HANSEN_CANOPY))).visualize(min=1, max=25, palette=["ffffb2", "fd8d3c", "bd0026"])
+        else:
+            raise EarthEngineError("unknown_layer", f"Unknown context layer {layer!r}.")
+        return img.clip(geom)
+
+    def context_tile_url(self, aoi_id: str, layer: str, geometry: dict[str, Any]) -> str:
+        """Tile template of a reference context layer (map IDs cached; one build per layer at a time)."""
+        if layer not in CONTEXT_LAYERS:
+            raise EarthEngineError("unknown_layer", f"Unknown context layer {layer!r}.")
+        key = (aoi_id, f"ctx:{layer}", 0)
+        cached = self.cached_mapid(key)
+        if cached:
+            return cached
+        with self.mapid_lock(key):
+            cached = self.cached_mapid(key)
+            if cached:
+                return cached
+            self.initialize()
+            url = _ee().data.getMapId({"image": self._context_image(layer, geometry)})["tile_fetcher"].url_format
+            self.store_mapid(key, url)
+            return url
 
     # ----------------------------------------------------------------- analysis
     def analyze(self, aoi: Aoi, analysis_id: str, name: str, baseline_year: int, comparison_year: int,
