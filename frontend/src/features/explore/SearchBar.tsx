@@ -53,6 +53,9 @@ export function parseLatLon(q: string): [number, number] | null {
 export function SearchBar({ compact = false }: { compact?: boolean }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  // The query the shown results belong to. Regression (2026-10-10): typing new coordinates and pressing Enter within
+  // the debounce picked the PREVIOUS query's highlighted result (the old place was selected again).
+  const [resultsFor, setResultsFor] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -75,22 +78,27 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (q.trim().length < 2) { setResults([]); setNotice(null); return; }
+    if (q.trim().length < 2) { setResults([]); setResultsFor(''); setNotice(null); return; }
     setLoading(true);
+    let current = true;   // a response for a query the user has since changed is dropped (never shown late)
     const t = window.setTimeout(async () => {
       try {
         const r = await client.search(q, featured);
+        if (!current) return;
         setResults(r.results);
+        setResultsFor(q);
         setNotice(r.notice ?? null);
         setActive(0);
       } catch {
+        if (!current) return;
         setResults([]);
+        setResultsFor(q);
         setNotice('Search failed — try coordinates such as 21.8, 86.3');
       } finally {
-        setLoading(false);
+        if (current) setLoading(false);
       }
     }, 320);
-    return () => window.clearTimeout(t);
+    return () => { current = false; window.clearTimeout(t); };
   }, [q, featured]);
 
   useEffect(() => {
@@ -111,7 +119,7 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
 
   /** Enter: use the highlighted result, or resolve the query now (coordinates locally, else search). */
   const submit = async () => {
-    if (results[active]) return pick(results[active]);
+    if (resultsFor === q && results[active]) return pick(results[active]);   // only results of what is typed NOW
     const coords = parseLatLon(q);
     if (coords) return pick({ name: `${coords[1]}, ${coords[0]}`, detail: 'Coordinates', kind: 'coordinates', center: coords, bbox: null, source: 'input' });
     if (q.trim().length < 2) return;
@@ -119,6 +127,7 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
     try {
       const r = await client.search(q, featured);
       setResults(r.results);
+      setResultsFor(q);
       setNotice(r.notice ?? null);
       if (r.results[0]) pick(r.results[0]);
       else setOpen(true);
