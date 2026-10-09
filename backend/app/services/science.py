@@ -67,9 +67,11 @@ PERIODS = [(1984, 1995), (1995, 2005), (2005, 2015)]
 METHOD: dict[str, Any] = {
     "version": METHOD_VERSION,
     "eras": (
-        "Historical (1984–2015): Landsat 5/7/8/9 Collection 2 surface reflectance, multi-year median composites, forest proxy NDVI ≥ 0.60 at 30 m. "
+        "Historical (1984–2015): Landsat 5/7/8/9 Collection 2 surface reflectance, multi-year median composites at 30 m — imagery only: "
+        "forest and forest-change figures for these years are withheld, because the only forest measure available (NDVI ≥ 0.60) cannot "
+        "tell green crops or pasture from forest. "
         "Modern: Sentinel-2 SR Harmonized (catalogue from 2017-03-28) calendar-year composites + Dynamic World V1 annual mean tree probability. "
-        "Forest from the two eras is never compared: loss/gain are computed only between years of the same era."
+        "Forest figures and change are reported for the modern era only."
     ),
     "cloud_masking": "Sentinel-2: Cloud Score+ cs_cdf ≥ 0.60 (scenes without Cloud Score+ are excluded). Landsat: QA_PIXEL dilated cloud, cloud and cloud-shadow bits.",
     "no_data": (
@@ -77,7 +79,7 @@ METHOD: dict[str, Any] = {
         f" (and ≥ {MIN_PIXEL_DW_OBS} Dynamic World observations in the modern era). Unobserved pixels stay no-data: they are never counted as non-forest, "
         "and every statistic is computed over observed pixels only. Missing statistics are reported as null, never 0."
     ),
-    "forest_rule": f"Modern: Dynamic World tree probability ≥ {FOREST_TREE_PROB:.2f} in at least a quarter of the year's observations (per-pixel {FOREST_TREE_PERCENTILE}th percentile) AND leaf-on NDVI (per-pixel {FOREST_NDVI_PERCENTILE}th percentile of clear observations) ≥ {FOREST_NDVI:.2f}. Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
+    "forest_rule": f"Modern: Dynamic World tree probability ≥ {FOREST_TREE_PROB:.2f} in at least a quarter of the year's observations (per-pixel {FOREST_TREE_PERCENTILE}th percentile) AND leaf-on NDVI (per-pixel {FOREST_NDVI_PERCENTILE}th percentile of clear observations) ≥ {FOREST_NDVI:.2f}. Historical (1984–2015): none — imagery only (the NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} Landsat proxy cannot tell green crops from forest).",
     "coverage_rule": f"A year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI is observed; forest % is relative to the observed area.",
     "seasonal_rule": (
         f"Modern era: a year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI has at least one clear Sentinel-2 observation in "
@@ -95,8 +97,8 @@ METHOD: dict[str, Any] = {
         "UNAVAILABLE if the baseline or comparison year lacks sufficient clear observations. Values are never clamped."
     ),
     "history_rule": (
-        "Periods are classified by forest-loss rate (low < 0.1 %/yr ≤ moderate < 0.4 %/yr ≤ high) within the historical Landsat era only. "
-        "Change events are only detected in the modern Sentinel-2 / Dynamic World era."
+        "1984–2015 (Landsat era) is shown as imagery only: no forest figures, change periods or loss rates are reported for it. "
+        "Forest change and change events are measured only in the modern Sentinel-2 / Dynamic World era."
     ),
     "metrics": {
         "gross_loss_ha": (
@@ -348,6 +350,41 @@ def upgrade_result(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# --------------------------------------------------------------------------- historical era: imagery only (option F)
+# Decided 2026-10-10. The Landsat NDVI >= 0.60 forest proxy cannot tell green crops or pasture from forest (Nile delta
+# cropland 52-63 % "forest"; Rondonia 19-27 % of proxy forest likely pasture - docs/METHOD.md section 8), so before 2016
+# only the imagery is shown: no forest area, forest share, loss, gain, change periods or historical summary, anywhere.
+# Applied when a result or history leaves the backend, so stored results never need recomputing.
+PROXY_STATEMENT = (
+    "Before 2016 TerraTrace shows satellite imagery only. Forest and forest-change figures for 1984–2015 are withheld "
+    "everywhere: the only forest measure available for those years (Landsat greenness, NDVI ≥ 0.60) cannot tell green "
+    "crops or pasture from forest."
+)
+PROXY_ROW_FIELDS = ("forest_ha", "forest_pct", "forest_components", "forest_components_change_pts",
+                    "loss_ha", "gain_ha", "net_change_ha", "compared_ha")
+
+
+def withhold_proxy(doc: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a summary or history document without any Landsat-era forest figure (imagery availability, observed
+    coverage and spectral means stay). Idempotent; never touches modern-era rows."""
+    out = dict(doc)
+    rows = []
+    for r in doc.get("years") or []:
+        if r.get("year") is not None and era_of(r["year"]) == "historical":
+            r = {**r, **{k: None for k in PROXY_ROW_FIELDS}, "forest_withheld": True}
+        rows.append(r)
+    if "years" in doc:
+        out["years"] = rows
+    if "periods" in doc:
+        out["periods"] = [p for p in doc.get("periods") or [] if era_of(p["from_year"]) == "modern"]
+    if "history" in doc:
+        out["history"] = None
+    out["historical_statement"] = PROXY_STATEMENT
+    if isinstance(doc.get("method"), dict):
+        out["method"] = METHOD
+    return out
+
+
 def history_for(years: list[dict[str, Any]], pair: dict[str, float | None] | None) -> dict[str, Any] | None:
     """Historical-era summary (first → last analysable Landsat composite), measured over the area observed in both."""
     hist = [y for y in years if y["era"] == "historical" and y.get("passes_quality")]
@@ -516,9 +553,7 @@ def cautions(summary: dict[str, Any] | None, context: dict[str, Any] | None) -> 
             out.append({
                 "code": "no_forest_to_monitor", "kind": "statement",
                 "message": (f"There was little or no forest to monitor here: TerraTrace's forest mask found {f_ha:,.1f} ha in {b}, "
-                            "so no forest change could be detected. This is a measured result, not a failure. "
-                            "The historical Landsat record (1984–2015) is not shown here: its NDVI forest proxy cannot tell green "
-                            "crops from forest."),
+                            "so no forest change could be detected. This is a measured result, not a failure."),
                 "datasets": [f"TerraTrace forest mask {b}"],
                 "applies_to": ["gross_gain_ha"], "gain_note": gain_note,
             })
@@ -527,8 +562,7 @@ def cautions(summary: dict[str, Any] | None, context: dict[str, Any] | None) -> 
                 "code": "little_forest", "kind": "caution",
                 "message": (f"Little forest: TerraTrace's forest mask covers {fmt_share(f_pct)} of the observed area in {b} "
                             f"({f_ha:,.1f} ha). Results for this area are less reliable: misclassified orchards, irrigated crops or "
-                            "wetlands can weigh as much as real forest. The historical Landsat record (1984–2015) is not shown here: "
-                            "its NDVI forest proxy cannot tell green crops from forest."),
+                            "wetlands can weigh as much as real forest."),
                 "datasets": [f"TerraTrace forest mask {b}"],
                 # Shown ON the gain figures (gross gain stays out of change events and headline totals).
                 "applies_to": ["gross_gain_ha"], "gain_note": gain_note,

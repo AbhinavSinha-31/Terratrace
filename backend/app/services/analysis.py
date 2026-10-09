@@ -148,12 +148,22 @@ def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, cod
         env["diagnostics"] = diag
     if status == "READY" and result:
         env["source"] = {"landsat": True, "sentinel2": True, "dynamicWorld": True, "hansen": True}
-        env.update(summary=result["summary"], events=result["events"], layers=result["layers"])
+        # Before 2016: imagery only — the Landsat proxy's forest figures and forest tiles never leave the backend.
+        env.update(summary=sc.withhold_proxy(result["summary"]), events=result["events"], layers=_without_proxy_layers(result["layers"]))
         # Statements / reliability cautions (display only; thresholds in science.py) from the result + reference context.
         env["cautions"] = sc.cautions(result["summary"], env["context"])
     elif quality is not None:
         env["source"] = {"landsat": True, "sentinel2": True, "dynamicWorld": True, "hansen": False}  # queried, not concluded
     return env
+
+
+def _without_proxy_layers(layers: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The layer list without Landsat-era forest tiles (imagery tiles stay)."""
+    if not layers:
+        return layers
+    overlays = [{**o, "tiles_by_year": {y: t for y, t in (o.get("tiles_by_year") or {}).items() if sc.era_of(int(y)) == "modern"}}
+                if o.get("kind") == "forest" else o for o in layers.get("overlays") or []]
+    return {**layers, "overlays": overlays}
 
 
 def _area_limit(aoi: dict[str, Any]) -> dict[str, Any] | None:
@@ -595,9 +605,9 @@ def _compute_history(aid: str, aoi: dict[str, Any], b: int, c: int, key: str) ->
 
 
 HISTORY_SCOPE_NOTE = (
-    "Historical context, not change detection. 1984–2015 are seven multi-year Landsat snapshots with an NDVI-only forest "
-    "proxy (no Dynamic World); 2016 onward are annual Sentinel-2 / Dynamic World composites. The two eras use different "
-    "forest definitions and are never subtracted from each other. Years outside the analysed window never change its result."
+    "Historical context, not change detection. 1984–2015 are seven multi-year Landsat snapshots shown as imagery only "
+    "(no forest figures); 2016 onward are annual Sentinel-2 / Dynamic World composites. Years outside the analysed window "
+    "never change its result."
 )
 
 
@@ -608,14 +618,14 @@ def _describe_history(doc: dict[str, Any], aoi: dict[str, Any]) -> dict[str, Any
     as `stability_issues` (informational — history never decides an analysis status). A long-term period containing an
     unstable transition is flagged, and its level is labelled as a GROSS loss rate (gain is reported next to it).
     """
-    out = dict(doc)
+    out = sc.withhold_proxy(doc)   # before 2016: imagery only (no proxy forest figures, periods or summary)
     area_ha = analysis_target(aoi).get("area_ha") or (analysis_target(aoi).get("area_km2") or 0) * 100
-    issues = sc.context_issues(doc.get("years") or [], area_ha, None)
+    issues = sc.context_issues(out.get("years") or [], area_ha, None)
     out["scope"] = "historical_context"
     out["scope_note"] = HISTORY_SCOPE_NOTE
     out["stability_issues"] = issues
     periods = []
-    for p in doc.get("periods") or []:
+    for p in out.get("periods") or []:
         unstable = [i for i in issues if p["from_year"] <= min(i["years"]) and max(i["years"]) <= p["to_year"]]
         periods.append({**p, "level_basis": "gross loss rate (loss transitions per year / forest at period start)",
                         "unstable": bool(unstable), "unstable_transitions": [i["years"] for i in unstable]})
@@ -630,13 +640,6 @@ async def history(aid: str, b: int, c: int) -> dict[str, Any]:
     key = _history_key(aid, b, c)
     if _area_limit(aoi):
         raise HistoryUnavailable(422, "analysis_too_large")
-    # The historical forest proxy (Landsat NDVI >= 0.60) cannot tell green crops from forest (measured 2026-10-10: Nile
-    # delta cropland read as 52-63 % "forest" in 1990-2015). Where the window's own result has little or no forest, its
-    # 1984-2015 record would report change on non-forest pixels, so it is withheld — never shown as forest or change.
-    win = _results.get(_key(aid, b, c)) or _load_result(_key(aid, b, c))
-    if win and win.get("status") == "READY" and any(
-            x["code"] in ("no_forest_to_monitor", "little_forest") for x in sc.cautions(win.get("summary"), None)):
-        raise HistoryUnavailable(422, "history_withheld")
     cached = _load_history(key)
     if cached:
         return _describe_history(cached, aoi)

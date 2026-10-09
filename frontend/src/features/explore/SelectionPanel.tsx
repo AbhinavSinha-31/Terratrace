@@ -132,7 +132,7 @@ function SelectionPanelBody({ selection }: { selection: NonNullable<ReturnType<t
           <Menu label="Comparison year" value={comparison} options={DEFAULT_YEARS.filter((y) => y > baseline).map(yearOpt)} onChange={(v) => setWindow(baseline, Number(v))} className="h-9 flex-1 justify-between px-3 text-[13px]" align="right" />
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
-          {baseline < 2016 ? 'Historical years (1984–2015) use Landsat (30 m); change events are detected only between analysable Sentinel-2 / Dynamic World years (2016 onward, where available).' : 'Sentinel-2 composites with Dynamic World tree evidence, where available for this area.'}
+          {baseline < 2016 ? 'Historical years (1984–2015) show Landsat imagery (30 m) only, without forest figures; forest and change are measured only between analysable Sentinel-2 / Dynamic World years (2016 onward, where available).' : 'Sentinel-2 composites with Dynamic World tree evidence, where available for this area.'}
         </p>
       </div>
 

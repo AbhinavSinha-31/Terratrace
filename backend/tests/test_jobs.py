@@ -204,7 +204,7 @@ def test_unknown_job_is_404():
 
 
 def test_history_is_separate_and_never_changes_the_window_result(monkeypatch):
-    rows = [{"year": 1990, "era": "historical", "passes_quality": True, "forest_ha": 9000.0, "loss_ha": None}]
+    rows = [{"year": 2016, "era": "modern", "passes_quality": True, "forest_ha": 9000.0, "loss_ha": None}]   # out-of-window modern year
     calls = []
 
     def hist(*a, scope="window", **k):

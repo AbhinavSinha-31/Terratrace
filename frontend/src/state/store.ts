@@ -366,8 +366,9 @@ export const useUi = create<UiState>((set, get) => ({
     const own = new Set(r.bundle.summary.years.map((y) => y.year));
     const years = [...r.bundle.summary.years, ...history.years.filter((y) => !own.has(y.year))].sort((a, b) => a.year - b.year);
     const periods = [...(history.periods ?? []), ...(r.bundle.summary.periods ?? []).filter((p) => !(history.periods ?? []).some((h) => h.from_year === p.from_year && h.to_year === p.to_year))];
-    // Forest-mask tiles exist for every analysable history year too (rebuilt server-side from the registered AOI).
-    const histOk = history.years.filter((y) => y.passes_quality && !own.has(y.year)).map((y) => y.year);
+    // Forest-mask tiles exist for every analysable modern history year too (rebuilt server-side from the registered AOI).
+    // Landsat-era years are imagery only: no forest tiles.
+    const histOk = history.years.filter((y) => y.passes_quality && !y.forest_withheld && y.era === 'modern' && !own.has(y.year)).map((y) => y.year);
     const overlays = r.bundle.layers.overlays.map((o) => (o.kind === 'forest' && o.tiles_by_year
       ? { ...o, tiles_by_year: { ...Object.fromEntries(histOk.map((y) => [String(y), [`/api/tiles/${r.id}/forest/${y}/{z}/{x}/{y}`]])), ...o.tiles_by_year } }
       : o));

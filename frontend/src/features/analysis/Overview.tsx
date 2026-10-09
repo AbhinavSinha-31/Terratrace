@@ -133,7 +133,7 @@ export function Overview() {
       <section>
         <SectionLabel aside="km² · click to jump">Forest cover over time</SectionLabel>
         <div className="tt-well px-2 pt-2"><ForestCoverChart years={s.years} selectedYear={year} window={win} onSelectYear={setYear} /></div>
-        {s.history && <p className="mt-2 text-[10.5px] leading-relaxed text-ink-4">{s.history.note}</p>}
+        {s.historical_statement && <p className="mt-2 text-[10.5px] leading-relaxed text-ink-4" data-testid="historical-statement">{s.historical_statement}</p>}
       </section>
 
       <section>

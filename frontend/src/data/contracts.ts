@@ -113,6 +113,8 @@ export interface YearStat {
   loss_by_type: Partial<Record<ChangeType, number>>;
   mean_ndvi: number | null;
   mean_nbr: number | null;
+  /** Landsat era (1984–2015): forest and change figures are withheld (imagery only); the backend sends null for them. */
+  forest_withheld?: boolean;
   clear_obs_median: number | null;
   dw_obs_median: number | null;
   imagery_status: ImageryStatus;
@@ -229,6 +231,8 @@ export interface AoiSummary {
   analysis_window?: { baseline_year: number; comparison_year: number; event_window?: [number, number]; requested?: [number, number] };
   /** Composite years with no input imagery over the AOI — omitted, never estimated. */
   unavailable_years?: { year: number; sources: Record<string, number | null>; reason: string }[];
+  /** Why 1984–2015 is imagery only (no forest figures). */
+  historical_statement?: string;
   quality?: AnalysisQuality;
   /** Input scene counts per composite year and source (Earth Engine metadata). */
   source_counts?: Record<string, Record<string, number>>;
@@ -631,4 +635,5 @@ export interface AnalysisHistory {
   years: YearStat[];
   periods: ChangePeriod[];
   history: AoiSummary['history'] | null;
+  historical_statement?: string;
 }

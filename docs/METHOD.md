@@ -11,14 +11,27 @@ never reused (they are deleted at startup and rejected on load).
 
 | Era | Years | Imagery | Forest definition |
 |---|---|---|---|
-| Historical | 1984, 1990, 1995, 2000, 2005, 2010, 2015 | Landsat 5/7/8/9 Collection 2 Level-2 surface reflectance, multi-year median (e.g. 2005 = 2004–2006; 1984 = 1984–1985) | NDVI ≥ 0.60 (30 m proxy) |
+| Historical | 1984, 1990, 1995, 2000, 2005, 2010, 2015 | Landsat 5/7/8/9 Collection 2 Level-2 surface reflectance, multi-year median (e.g. 2005 = 2004–2006; 1984 = 1984–1985) | **None — imagery only** (see §1a) |
 | Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 `trees` probability | Dynamic World `trees` (per-pixel 75th percentile, `tt-ee-2.4`) ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
 
 * Dynamic World starts mid-2015; it is never back-filled into historical years.
 * Sentinel-2 SR Harmonized is sparse before late 2018 outside Europe; such years are reported as
   unavailable, never substituted with another collection (e.g. top-of-atmosphere L1C).
-* The two forest definitions are **not comparable**: loss/gain are only computed between years of
-  the same era, and the historical summary is never subtracted from the modern one.
+* Forest figures, loss, gain and change events exist for the modern era only.
+
+### 1a. Before 2016: imagery only (decided 2026-10-10)
+
+The only forest measure available for 1984–2015 is Landsat greenness (NDVI ≥ 0.60), and it cannot tell
+green crops, pasture or grassland from forest (§8). So for every area — featured sites included — the
+Landsat years are shown as **imagery only**: their availability, observed coverage and spectral means are
+reported, but **no** forest area, forest share, loss, gain, net change, long-term change period, loss rate,
+historical summary or forest-mask tile. The rows carry `forest_withheld: true` with those fields `null`,
+and every result and history response carries `historical_statement`, which says why. Forest-mask and
+change tiles for years before 2016 are refused (404). This is applied where results leave the backend
+(`science.withhold_proxy`), so results stored earlier never expose the proxy and nothing needs recomputing;
+the Earth Engine pipeline still computes the proxy internally (it never reaches a response, never decides a
+status). Better historical forest measures (options C and E in
+[notes/landsat-proxy-options.md](notes/landsat-proxy-options.md)) may replace this once validated.
 
 ## 2. Cloud masking
 
@@ -152,13 +165,13 @@ is measured metadata — not a forest or change measurement.
 * Dynamic World is a **probability**, not a measured forest percentage. The upper-quartile `trees ≥ 0.50`
   rule depends on enough Dynamic World observations; in persistently cloudy regions Dynamic World may
   observe pixels only 0–3 times a year, and those years are then not analysable.
-* The Landsat NDVI ≥ 0.60 proxy saturates in dense tropical vegetation and is sensitive to Landsat 7
-  SLC-off gaps and phenology; the gain-stability rule is what exposes this.
+* The Landsat NDVI ≥ 0.60 proxy (no longer reported, §1a) also saturates in dense tropical vegetation and
+  is sensitive to Landsat 7 SLC-off gaps and phenology.
 * **The Landsat-era (1984–2015) forest proxy cannot tell green non-forest from forest.** NDVI ≥ 0.60 is a
-  greenness test: irrigated crops, green pasture and grassland pass it. Interim measure (2026-10-10): where
-  the window's own result has little or no forest, the 1984–2015 record is withheld (`history_withheld`)
-  and never shown as forest or change. Measured 2026-10-10 at the featured sites (proxy forest that
-  independent data call non-forest; the closer in time, the more meaningful):
+  greenness test: irrigated crops, green pasture and grassland pass it (Nile delta cropland: 52–63 %
+  "forest"). **Consequence: since 2026-10-10 no Landsat-era forest figure is shown anywhere (§1a).**
+  Measured 2026-10-10 at the featured sites (proxy forest that independent data call non-forest; the closer
+  in time, the more meaningful):
 
   | Site | Proxy 2000 vs Hansen 2000 (same year): canopy < 30 % | Proxy 2015 vs Dynamic World 2016: not trees | Proxy vs WorldCover 2021: not tree cover |
   |---|---|---|---|
@@ -170,9 +183,9 @@ is measured metadata — not a forest or change measurement.
   So the problem is material at the pasture frontier (Rondônia: roughly a fifth to a quarter of the proxy's
   "forest" around 2000–2015 is likely pasture or regrowth), modest at Silent Valley (montane grassland) and
   negligible at Similipal. Hasdeo shows a different weakness — the proxy is unstable (2,930 ha "forest" in
-  1990, 53,268 ha in 2000, 5,224 ha in 2010: missed forest, not crops). Historical periods and per-year
-  figures for these sites are still shown, labelled as the Landsat proxy; fix options are in
-  [notes/landsat-proxy-options.md](notes/landsat-proxy-options.md) (none implemented yet).
+  1990, 53,268 ha in 2000, 5,224 ha in 2010: missed forest, not crops). The interim rule that withheld the
+  record only where there was little or no forest (`history_withheld`) was replaced by §1a (option F); the
+  other options are kept in [notes/landsat-proxy-options.md](notes/landsat-proxy-options.md).
 * An event polygon consists only of pixels that passed the change rule, so its converted share is 1 by
   construction (it is not an independent measurement).
 

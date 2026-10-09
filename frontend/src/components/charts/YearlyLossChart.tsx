@@ -7,9 +7,9 @@ import { EChart, chartBase } from './EChart';
 const HIST = '#6f8a96';
 
 /**
- * Forest loss as an annual rate (ha / yr) per composite interval. Multi-year
- * Landsat intervals are averaged per year so bars are comparable; modern annual
- * intervals are stacked by event severity (validated ordinal ramp).
+ * Forest loss as an annual rate (ha / yr) per measured transition (2016 onward; 1984–2015 is imagery only).
+ * Annual transitions are stacked by event severity (validated ordinal ramp); loss outside detected events is grey;
+ * a transition spanning skipped (unanalysable) years is averaged per year.
  */
 export function YearlyLossChart({ years, selectedYear, onSelectYear }: { years: YearStat[]; selectedYear: number; onSelectYear(y: number): void }) {
   // Only measured transitions (analysable year with an analysable predecessor of the same era).
@@ -58,7 +58,7 @@ export function YearlyLossChart({ years, selectedYear, onSelectYear }: { years: 
       yAxis: { type: 'value', name: 'ha / yr', nameTextStyle: { color: INK.muted, fontSize: 9.5, align: 'left' }, splitNumber: 3, axisLabel: { ...chartBase.axisLabel, formatter: (v: number) => (v >= 1000 ? `${v / 1000}k` : String(v)) }, splitLine: chartBase.splitLine },
       series: [
         {
-          name: 'Landsat interval (avg / yr)', type: 'bar', stack: 'loss', barWidth: '60%', color: HIST, itemStyle: { color: HIST },
+          name: 'Outside detected events', type: 'bar', stack: 'loss', barWidth: '60%', color: HIST, itemStyle: { color: HIST },
           data: rows.map((r, i) => ({ value: unattributed[i], itemStyle: { color: HIST, opacity: r.year === selectedYear ? 1 : 0.6, borderColor: SURFACE, borderWidth: unattributed[i] > 0 ? 1 : 0, borderRadius: top.get(r.year) === 'hist' ? [3, 3, 0, 0] : 0 } })),
         },
         ...SEVERITIES.map((s) => ({
@@ -72,5 +72,5 @@ export function YearlyLossChart({ years, selectedYear, onSelectYear }: { years: 
     };
   }, [rows, selectedYear]);
 
-  return <EChart option={option} height={180} ariaLabel="Forest loss per year, Landsat intervals averaged per year and modern years stacked by severity" onClickData={(p) => onSelectYear(Number(p.name))} />;
+  return <EChart option={option} height={180} ariaLabel="Forest loss per year from 2016, stacked by event severity; loss outside detected events in grey" onClickData={(p) => onSelectYear(Number(p.name))} />;
 }

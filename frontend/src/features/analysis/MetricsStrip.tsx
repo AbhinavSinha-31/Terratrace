@@ -42,7 +42,7 @@ export function MetricsStrip() {
           format={(v) => fmtHa(v)}
           unit="ha"
           delta={deltaPct !== null ? { value: `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(2)}%`, direction: deltaPct < 0 ? 'down' : deltaPct > 0 ? 'up' : 'flat', tone: deltaPct < 0 ? 'bad' : 'neutral' } : undefined}
-          caption={!ys || !ys.passes_quality ? 'Insufficient clear observations' : deltaPct !== null ? `vs ${win.start}, observed in both` : `${ys.coverage_pct?.toFixed(0) ?? '—'}% of area observed`}
+          caption={ys?.forest_withheld ? 'Imagery only before 2016' : !ys || !ys.passes_quality ? 'Insufficient clear observations' : deltaPct !== null ? `vs ${win.start}, observed in both` : `${ys.coverage_pct?.toFixed(0) ?? '—'}% of area observed`}
         />
       </div>
       <Divider />

@@ -94,7 +94,7 @@ function NoAreaState() {
         <div className="grid h-11 w-11 place-items-center rounded-md bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.35)]">{tm ? <Hourglass size={20} /> : <ScanSearch size={20} />}</div>
         <h2 className="t-h1 mt-5">{tm ? 'Travel back to 1984' : 'No area under analysis'}</h2>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
-          {tm ? 'The Time Machine replays four decades of satellite-derived forest cover — Landsat since 1984, Sentinel-2 and Dynamic World since 2015 — for any analysed area.' : 'Open a featured investigation, or explore Earth and draw an area to analyse.'}
+          {tm ? 'The Time Machine replays four decades of satellite imagery — Landsat since 1984 — and measures forest cover from 2016 with Sentinel-2 and Dynamic World, for any analysed area.' : 'Open a featured investigation, or explore Earth and draw an area to analyse.'}
         </p>
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           {featured.map((a) => (

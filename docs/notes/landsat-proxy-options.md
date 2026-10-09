@@ -1,10 +1,13 @@
-# Landsat-era forest proxy: fix options (decision pending)
+# Landsat-era forest proxy: fix options
 
 **Problem.** For 1984–2015 TerraTrace's "forest" is Landsat NDVI ≥ 0.60 — a greenness test. Irrigated crops,
 green pasture and grassland pass it (Nile delta cropland: 52–63 % "forest"). Measured at the featured sites
 (METHOD.md §8): Rondônia 19–27 % of proxy forest is likely pasture/regrowth, Silent Valley 3–14 %, Similipal
 ≤ 4 %; Hasdeo shows instability (missed forest) rather than crops. Interim measure in place: the 1984–2015 record
-is withheld where the window has little or no forest. Nothing below is implemented.
+is withheld where the window has little or no forest.
+
+**Decision (2026-10-10): option F is implemented** — before 2016 imagery only, everywhere (METHOD.md §1a).
+E or C may follow once validated; the other options are kept for reference.
 
 | Option | What it does | Gains | Costs / risks |
 |---|---|---|---|

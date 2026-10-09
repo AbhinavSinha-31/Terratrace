@@ -222,27 +222,88 @@ def test_one_rounding_rule_for_shares(v, shown):
     assert fmt_share(v) == shown
 
 
-# ----------------------------------------------------------------------------- historical proxy in non-forest areas
-def test_historical_landsat_proxy_is_withheld_where_there_is_little_or_no_forest(monkeypatch):
-    """Regression (2026-10-10, Nile delta): the Landsat NDVI >= 0.60 proxy read irrigated cropland as 52-63 % 'forest'
-    and showed 'high change' periods 1984-2015 — change on non-forest pixels. Withheld, never computed."""
-    env, _ = run_job(monkeypatch, EGYPT, RAW["egypt_cropland"], ready_result("x", {2018: 0.0, 2025: 0.0}))
-    aid = env["analysis_id"]
-    analysis._results[analysis._key(aid, 2018, 2025)] = ready_result(aid, {2018: 0.0, 2025: 0.0})
-    monkeypatch.setattr(analysis, "_compute_history", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not compute")))
-    r = client.get(f"/api/analysis/{aid}/history", params={"baseline": 2018, "comparison": 2025})
-    d = r.json()["detail"]
-    assert r.status_code == 422 and d["code"] == "history_withheld" and d["retryable"] is False
-    assert "cannot tell green crops from forest" in d["user_message"]
-    assert "not shown here" in env["cautions"][0]["message"], "the statement says why the history is absent"
+# ----------------------------------------------------------------------------- before 2016: imagery only (option F)
+def hist_row(year, forest_ha, prev=None, gain_ha=0.0, loss_ha=0.0):
+    return {"year": year, "era": sc.era_of(year), "passes_quality": True, "valid_ha": 10000.0, "coverage_pct": 99.0,
+            "forest_ha": forest_ha, "forest_pct": forest_ha / 100, "previous_year": prev, "loss_ha": loss_ha, "gain_ha": gain_ha,
+            "compared_ha": 10000.0 if prev else None, "net_change_ha": gain_ha - loss_ha if prev else None,
+            "forest_components": None, "forest_components_change_pts": None, "mean_ndvi": 0.71, "mean_nbr": 0.42}
 
 
-def test_forested_areas_keep_their_historical_record(monkeypatch):
-    aid = "hasdeo-arand"
-    analysis._results[analysis._key(aid, 2019, 2025)] = ready_result(aid, {2019: 6800.0, 2025: 6750.0})
-    computed = []
+PROXY_PERIOD = {"from_year": 1984, "to_year": 1995, "loss_ha": 500.0, "gain_ha": 10.0, "net_change_ha": -490.0,
+                "rate_pct_per_year": 0.8, "level": "high", "sensors": "Landsat", "label": "Historical Landsat analysis"}
+
+
+def assert_no_proxy_figures(years):
+    for r in years:
+        if r["year"] < 2016:
+            assert r["forest_withheld"] is True
+            assert all(r[k] is None for k in sc.PROXY_ROW_FIELDS), r
+            assert r["passes_quality"] is True and r["coverage_pct"] == 99.0, "imagery availability stays"
+
+
+def test_withhold_proxy_removes_every_landsat_era_forest_figure_and_keeps_the_modern_era():
+    doc = {"years": [hist_row(1984, 6000.0), hist_row(1995, 5200.0, 1984, loss_ha=800.0), hist_row(2018, 4100.0), hist_row(2019, 4000.0, 2018, loss_ha=100.0)],
+           "periods": [PROXY_PERIOD], "history": {"first_year": 1984, "net_change_ha": -800.0}, "method": {"version": "old"}}
+    out = sc.withhold_proxy(doc)
+    assert_no_proxy_figures(out["years"])
+    assert out["years"][2] == doc["years"][2] and out["years"][3]["loss_ha"] == 100.0, "modern rows untouched"
+    assert out["periods"] == [] and out["history"] is None
+    assert "satellite imagery only" in out["historical_statement"] and "cannot tell green crops" in out["historical_statement"]
+    assert out["method"] is sc.METHOD and "imagery only" in sc.METHOD["history_rule"]
+    assert doc["years"][0]["forest_ha"] == 6000.0, "the stored document is not modified"
+    assert sc.withhold_proxy(out) == out, "idempotent"
+
+
+@pytest.mark.parametrize("aid_kind", ["non_forest", "featured"])
+def test_history_is_imagery_only_before_2016_at_every_site(monkeypatch, aid_kind):
+    """Option F (2026-10-10): every site, featured ones included, gets its pre-2016 years as imagery availability only.
+    A proxy transition that would have failed the gain-stability check raises no issue (the figure is not shown)."""
+    if aid_kind == "featured":
+        aid = "hasdeo-arand"
+    else:
+        env, _ = run_job(monkeypatch, EGYPT, RAW["egypt_cropland"], ready_result("x", {2019: 0.0, 2025: 0.0}))
+        aid = env["analysis_id"]
+    doc = {"years": [hist_row(2010, 300.0), hist_row(2015, 2900.0, 2010, gain_ha=2600.0), hist_row(2016, 50.0), hist_row(2017, 52.0, 2016, gain_ha=2.0)],
+           "periods": [PROXY_PERIOD], "history": {"first_year": 2010}, "quality_years": []}
     monkeypatch.setattr(analysis, "_service_unavailable", lambda: False)
-    monkeypatch.setattr(analysis, "_compute_history", lambda *a, **k: computed.append(1) or {"years": [], "periods": [], "history": None, "quality_years": []})
-    monkeypatch.setattr(analysis, "_describe_history", lambda doc, aoi: {"years": doc["years"]})
+    monkeypatch.setattr(analysis, "_compute_history", lambda *a, **k: doc)
     r = client.get(f"/api/analysis/{aid}/history", params={"baseline": 2019, "comparison": 2025})
-    assert r.status_code == 200 and computed == [1]
+    assert r.status_code == 200
+    d = r.json()
+    assert_no_proxy_figures(d["years"])
+    assert [y["forest_ha"] for y in d["years"] if y["year"] >= 2016] == [50.0, 52.0], "modern years outside the window keep their figures"
+    assert d["periods"] == [] and d["history"] is None and d["stability_issues"] == []
+    assert "imagery only" in d["scope_note"] and d["historical_statement"] == sc.PROXY_STATEMENT
+
+
+def test_window_result_reaching_back_before_2016_shows_no_proxy_forest(monkeypatch):
+    res = ready_result("x", {2018: 4100.0, 2025: 4000.0})
+    res["summary"]["years"] = [hist_row(2000, 7000.0), hist_row(2015, 6400.0, 2000, loss_ha=600.0)] + res["summary"]["years"]
+    res["summary"].update(periods=[PROXY_PERIOD], history={"first_year": 2000, "net_change_ha": -600.0})
+    res["layers"] = {"imagery": [{"year": 2000}, {"year": 2018}],
+                     "overlays": [{"kind": "forest", "tiles_by_year": {"2000": ["/f/2000"], "2015": ["/f/2015"], "2018": ["/f/2018"], "2025": ["/f/2025"]}}]}
+    env, _ = run_job(monkeypatch, EGYPT, RAW["egypt_cropland"], res)
+    s = env["summary"]
+    assert_no_proxy_figures(s["years"])
+    assert s["periods"] == [] and s["history"] is None and s["historical_statement"] == sc.PROXY_STATEMENT
+    assert list(env["layers"]["overlays"][0]["tiles_by_year"]) == ["2018", "2025"], "no Landsat-era forest tiles"
+    assert [l["year"] for l in env["layers"]["imagery"]] == [2000, 2018], "Landsat imagery stays"
+    assert all("1984" not in c["message"] and "Landsat" not in c["message"] for c in env["cautions"])
+
+
+@pytest.mark.parametrize("path", ["/api/tiles/hasdeo-arand/forest/2000/3/1/1", "/api/tiles/hasdeo-arand/forest/1984/3/1/1",
+                                  "/api/tiles/hasdeo-arand/change/2015/3/1/1?baseline=2010",
+                                  "/api/tiles/hasdeo-arand/change/2018/3/1/1?baseline=2015"])
+def test_landsat_era_forest_and_change_tiles_are_refused(path, monkeypatch):
+    monkeypatch.setattr(analysis.ee_provider, "tile_url", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no EE request")))
+    r = client.get(path)
+    d = r.json()["detail"]
+    assert r.status_code == 404 and d["retryable"] is False and "withheld" in d["user_message"]
+
+
+def test_landsat_era_imagery_tiles_are_not_refused_by_the_rule(monkeypatch):
+    seen = []
+    monkeypatch.setattr(analysis.ee_provider, "tile_url", lambda *a, **k: seen.append(a[1:3]) or (_ for _ in ()).throw(RuntimeError("stop")))
+    r = client.get("/api/tiles/hasdeo-arand/imagery/2000/3/1/1")
+    assert seen == [("imagery", 2000)] and r.status_code == 503, "reaches Earth Engine (stopped here by the fake)"

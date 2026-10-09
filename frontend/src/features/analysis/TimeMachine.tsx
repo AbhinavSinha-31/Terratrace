@@ -285,7 +285,11 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
                 <span className="t-data text-[14px] font-medium text-ink">{hover}</span>
                 <span className="t-label !text-[8.5px] text-ink-3">{hs.source === 'landsat' ? 'Landsat' : 'Sentinel-2'} · {hs.resolution_m} m</span>
               </div>
-              {!hs.passes_quality || hs.forest_ha === null ? (
+              {hs.forest_withheld && hs.passes_quality ? (
+                <div className="mt-1.5 text-[11px] leading-snug text-ink-2" data-testid="year-imagery-only">
+                  Imagery only{hs.coverage_pct === null ? '' : ` · ${hs.coverage_pct.toFixed(0)}% observed`}. No forest figure before 2016: Landsat greenness cannot tell green crops from forest.
+                </div>
+              ) : !hs.passes_quality || hs.forest_ha === null ? (
                 <div className="mt-1.5 text-[11px] leading-snug text-warn">{hs.quality_reason ?? 'Insufficient clear observations'}</div>
               ) : (
                 <div className="mt-1.5 grid grid-cols-2 gap-y-0.5 text-[11px]">
@@ -298,7 +302,6 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
               {(hover < win.start || hover > win.end) && (
                 <div className="mt-1.5 border-t border-line pt-1.5 text-[10.5px] leading-snug text-ink-4" data-testid="year-context">
                   Single-year context · outside the {win.start} → {win.end} analysis window. The headline figures still describe {win.start} → {win.end}.
-                  {hs.source === 'landsat' && ' Landsat NDVI proxy (30 m) — not comparable with the modern forest mask.'}
                 </div>
               )}
             </div>

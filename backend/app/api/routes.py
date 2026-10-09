@@ -16,7 +16,7 @@ from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
-from ..services import analysis, context as area_context, featured, imagery, search, tiles as tile_cache
+from ..services import analysis, context as area_context, featured, imagery, search, science as sc, tiles as tile_cache
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -325,6 +325,10 @@ async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: i
     years = imagery.candidate_years()
     if year not in years or (baseline is not None and baseline not in years):
         raise _err(404, "not_found", "This map layer does not exist for this analysis.", False)
+    # Before 2016 only imagery is shown: the Landsat proxy's forest mask (and change between proxy masks) is withheld.
+    if kind != "imagery" and (sc.era_of(year) == "historical" or (baseline is not None and sc.era_of(baseline) == "historical")):
+        raise _err(404, "not_found", "Forest layers before 2016 are withheld: the Landsat-era forest measure cannot tell "
+                                     "green crops from forest.", False)
     try:
         try:
             # Registered AOI on disk (layers survive a backend restart), rendered over what was actually analysed.

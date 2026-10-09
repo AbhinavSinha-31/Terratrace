@@ -33,7 +33,7 @@ export function AboutModal() {
         <section>
           <h3 className="t-label mb-3 text-ink-3">Pipeline</h3>
           <ol className="grid gap-2 text-[12px] text-ink-2 sm:grid-cols-2">
-            {['Cloud-masked annual / multi-year composites (Cloud Score+, Landsat QA)', 'Forest mask: Dynamic World trees ≥ 0.5 ∧ NDVI ≥ 0.6 (Landsat NDVI proxy in the 1984–2015 era); unobserved pixels stay no-data', 'Change: forest loss with ΔNDVI / ΔNBR and tree-probability drop, persistence check', 'Minimum mapping unit 2 ha → vectorised events → area in ha / km²', 'Severity (USGS dNBR for burns) and a weighted evidence score', 'Explanation from measured facts only, with a numeric fact-check'].map((s, i) => (
+            {['Cloud-masked annual / multi-year composites (Cloud Score+, Landsat QA)', 'Forest mask (2016 onward): Dynamic World trees ≥ 0.5 ∧ NDVI ≥ 0.6; 1984–2015 is imagery only; unobserved pixels stay no-data', 'Change: forest loss with ΔNDVI / ΔNBR and tree-probability drop, persistence check', 'Minimum mapping unit 2 ha → vectorised events → area in ha / km²', 'Severity (USGS dNBR for burns) and a weighted evidence score', 'Explanation from measured facts only, with a numeric fact-check'].map((s, i) => (
               <li key={s} className="flex gap-3"><span className="t-data text-accent">{String(i + 1).padStart(2, '0')}</span>{s}</li>
             ))}
           </ol>

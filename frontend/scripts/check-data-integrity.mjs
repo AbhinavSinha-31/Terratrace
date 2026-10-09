@@ -68,6 +68,25 @@ async function checkTimeline(page, name, env) {
   check(s.years.filter((y) => y < 2016).length === 7, `${name} no 2016/2018 minimum (7 historical Landsat years present)`);
   const tick = await page.locator('button:text-is("1984")').count();
   check(tick >= 1, `${name} 1984 tick rendered in the Time Machine`);
+  // Option F (2026-10-10): before 2016 imagery only — no Landsat-proxy forest figure, period, summary or forest tile.
+  const pre = await page.evaluate(() => {
+    const b = window.__ttUi.getState().investigation.analysisResult?.bundle;
+    if (!b) return null;
+    const rows = b.summary.years.filter((y) => y.year < 2016);
+    return {
+      figures: rows.filter((y) => ['forest_ha', 'forest_pct', 'loss_ha', 'gain_ha', 'net_change_ha'].some((k) => y[k] !== null && y[k] !== undefined)).map((y) => y.year),
+      periods: (b.summary.periods ?? []).filter((p) => p.from_year < 2016).length,
+      tiles: Object.keys(b.layers.overlays.find((o) => o.kind === 'forest')?.tiles_by_year ?? {}).filter((y) => Number(y) < 2016),
+      history: b.summary.history ?? null,
+      statement: b.summary.historical_statement ?? null,
+    };
+  });
+  if (pre) {
+    check(pre.figures.length === 0, `${name} no forest/change figure before 2016`, pre.figures.join(', '));
+    check(pre.periods === 0 && pre.history === null, `${name} no Landsat-era change periods or historical summary`);
+    check(pre.tiles.length === 0, `${name} no forest tiles before 2016`, pre.tiles.join(', '));
+    check(/imagery only/i.test(pre.statement ?? ''), `${name} states why 1984–2015 is imagery only`);
+  }
   const panel = await page.locator('[data-testid="analysis-unavailable"]').textContent().catch(() => null);
   if (panel) {
     const req = panel.match(/Requested window\s*(\d{4}) → (\d{4})/);
@@ -280,6 +299,11 @@ async function run(label, { offline }) {
       const s = await inv();
       const own = hasStored(id) && s.status === 'complete' && s.study === id && JSON.stringify(s.resYears) === JSON.stringify(storedOf(id).default_window);
       check(s.status === 'idle' || own, `${label}: switching study resets the analysis (idle, or its own stored result)`, JSON.stringify({ s: s.status, study: s.study, years: s.resYears }));
+      if (own && live && storedOf(id).status === 'READY') {
+        // A featured stored READY result: imagery only before 2016 (the history request is made only after a live run,
+        // so its rows are checked by the backend tests and the custom-area run below).
+        await checkTimeline(page, `${label}: ${id} READY`, null);
+      }
     }
     if (!live) {
       await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
@@ -487,6 +511,10 @@ async function run(label, { offline }) {
     if (live && env?.analysisStatus === 'READY') {
       const errs = validityErrors(env);
       check(errs.length === 0, `${label}: custom AOI READY result passes every validity rule`, errs.slice(0, 3).join('; '));
+      // After a live run the history (incl. 1984–2015) is merged in the background: imagery only before 2016.
+      const merged = await page.waitForFunction(() => window.__ttUi.getState().investigation.analysisResult?.bundle?.summary.years.some((y) => y.year < 2016), null, { timeout: 120000 }).then(() => true, () => false);
+      if (merged) await checkTimeline(page, `${label}: custom AOI with history`, null);
+      else console.log(`INFO  ${label}: custom AOI history not merged within 120 s — pre-2016 rows not checked in the UI`);
     } else {
       const text = await page.locator('[data-testid="analysis-unavailable"]').innerText({ timeout: 30000 });
       const statusOk = live ? NON_READY.includes(env?.analysisStatus) && !env?.summary : /Live analysis unavailable/i.test(text);

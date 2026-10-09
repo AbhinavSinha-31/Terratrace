@@ -5,23 +5,20 @@ import { escapeHtml, fmtHa, fmtKm2 } from '../../lib/format';
 import { EChart, chartBase } from './EChart';
 
 /**
- * Forest area per composite (km²). Two series — Landsat proxy (30 m, dashed) and
- * Dynamic World mask (10 m, solid) — are deliberately not joined: the sensors
- * are not directly comparable. Legend + dash style carry identity (not colour alone).
+ * Forest area per composite (km²), modern era only (Dynamic World mask, 10 m). 1984–2015 is imagery only: the
+ * Landsat greenness proxy cannot tell green crops from forest, so those years carry no forest figure.
  */
-export function ForestCoverChart({ years, selectedYear, window, onSelectYear }: { years: YearStat[]; selectedYear: number; window: { start: number; end: number }; onSelectYear(y: number): void }) {
+export function ForestCoverChart({ years: all, selectedYear, window, onSelectYear }: { years: YearStat[]; selectedYear: number; window: { start: number; end: number }; onSelectYear(y: number): void }) {
   const option = useMemo(() => {
+    const years = all.filter((y) => y.era === 'modern');
     const cats = years.map((y) => String(y.year));
     // Only analysable years carry a value; others are gaps (null), never 0.
     const km2 = (y: YearStat) => (y.passes_quality && y.forest_ha !== null ? y.forest_ha / 100 : null);
-    const land = years.map((y) => (y.era === 'historical' ? km2(y) : null));
-    const s2 = years.map((y) => (y.era === 'modern' ? km2(y) : null));
-    const hasLand = land.some((v) => v !== null);
-    const transition = years.find((y) => y.era === 'modern')?.year;
+    const s2 = years.map(km2);
+    const shade = cats.length ? [String(Math.max(window.start, years[0].year)), String(Math.min(window.end, years[years.length - 1].year))] : null;
     return {
       ...chartBase,
-      grid: { left: 8, right: 14, top: hasLand ? 30 : 14, bottom: 4, containLabel: true },
-      legend: hasLand ? { top: 0, left: 0, itemWidth: 16, itemHeight: 2, textStyle: { color: INK.secondary, fontSize: 10.5 }, selectedMode: false, data: ['Landsat proxy · 30 m', 'Dynamic World · 10 m'] } : undefined,
+      grid: { left: 8, right: 14, top: 14, bottom: 4, containLabel: true },
       tooltip: {
         ...chartBase.tooltip,
         trigger: 'axis',
@@ -45,28 +42,21 @@ export function ForestCoverChart({ years, selectedYear, window, onSelectYear }: 
       yAxis: { type: 'value', scale: true, splitNumber: 3, axisLabel: { ...chartBase.axisLabel, formatter: (v: number) => fmtKm2(v) }, splitLine: chartBase.splitLine },
       series: [
         {
-          name: 'Landsat proxy · 30 m', type: 'line', data: land, connectNulls: false, symbol: 'circle', symbolSize: 5,
-          lineStyle: { width: 2, color: FOREST, type: 'dashed' }, itemStyle: { color: FOREST, borderColor: '#0b1117', borderWidth: 1.5 },
-          markArea: { silent: true, itemStyle: { color: 'rgba(69,208,196,0.06)' }, data: [[{ xAxis: String(window.start) }, { xAxis: String(window.end) }]] },
-        },
-        {
           name: 'Dynamic World · 10 m', type: 'line', data: s2, connectNulls: false, symbol: 'circle',
+          markArea: shade ? { silent: true, itemStyle: { color: 'rgba(69,208,196,0.06)' }, data: [[{ xAxis: shade[0] }, { xAxis: shade[1] }]] } : undefined,
           symbolSize: (_: number, p: { dataIndex: number }) => (years[p.dataIndex].year === selectedYear ? 9 : 6),
           lineStyle: { width: 2, color: FOREST }, itemStyle: { color: FOREST, borderColor: '#0b1117', borderWidth: 2 },
           markLine: {
             silent: true, symbol: 'none',
             label: { show: false },
-            data: [
-              { xAxis: String(selectedYear), lineStyle: { color: 'rgba(69,208,196,0.7)', type: 'solid', width: 1 } },
-              ...(hasLand && transition ? [{ xAxis: String(transition), lineStyle: { color: 'rgba(255,255,255,0.18)', type: 'dotted', width: 1 } }] : []),
-            ],
+            data: selectedYear >= (years[0]?.year ?? Infinity) ? [{ xAxis: String(selectedYear), lineStyle: { color: 'rgba(69,208,196,0.7)', type: 'solid', width: 1 } }] : [],
           },
         },
       ],
     };
-  }, [years, selectedYear, window.start, window.end]);
+  }, [all, selectedYear, window.start, window.end]);
 
   return (
-    <EChart option={option} height={170} ariaLabel="Forest area per analysable composite year; Landsat proxy (historical) and Dynamic World mask (modern) are not directly comparable" onClickData={(p) => onSelectYear(Number(p.name))} />
+    <EChart option={option} height={170} ariaLabel="Forest area per analysable year from 2016 (Dynamic World forest mask); years before 2016 are imagery only" onClickData={(p) => onSelectYear(Number(p.name))} />
   );
 }
