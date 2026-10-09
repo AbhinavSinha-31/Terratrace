@@ -1,4 +1,4 @@
-# TERRATRACE scientific method — `tt-ee-2.3`
+# TERRATRACE scientific method — `tt-ee-2.4`
 
 Every number TERRATRACE shows comes from a completed **Google Earth Engine** analysis that
 passed the validity rules below. Nothing is simulated, estimated, interpolated or clamped.
@@ -12,7 +12,7 @@ never reused (they are deleted at startup and rejected on load).
 | Era | Years | Imagery | Forest definition |
 |---|---|---|---|
 | Historical | 1984, 1990, 1995, 2000, 2005, 2010, 2015 | Landsat 5/7/8/9 Collection 2 Level-2 surface reflectance, multi-year median (e.g. 2005 = 2004–2006; 1984 = 1984–1985) | NDVI ≥ 0.60 (30 m proxy) |
-| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 `trees` probability | leaf-on Dynamic World `trees` (per-pixel 90th percentile, `tt-ee-2.3`) ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
+| Modern | 2016 → last complete year | Sentinel-2 SR Harmonized annual median + Dynamic World V1 `trees` probability | Dynamic World `trees` (per-pixel 75th percentile, `tt-ee-2.4`) ≥ 0.50 **and** leaf-on NDVI (per-pixel 90th percentile of clear observations, `tt-ee-2.1`) ≥ 0.60 |
 
 * Dynamic World starts mid-2015; it is never back-filled into historical years.
 * Sentinel-2 SR Harmonized is sparse before late 2018 outside Europe; such years are reported as
@@ -62,22 +62,34 @@ deciduous forest fails the leaf-on test, so 2018 under-counted forest and 2018�
 not apply to imagery *display*, but imagery availability reports it per year as `analysable` (with the
 reason), so the analysis-window selector offers only years an analysis can use.
 
-**Leaf-on tree probability (`tt-ee-2.3`, modern era).** Both halves of the forest test are judged with
-leaves on: Dynamic World `trees` uses the same per-pixel 90th percentile of the year's observations as
-NDVI (`FOREST_NDVI_PERCENTILE`; no new constant). The annual *mean* (`tt-ee-2.2` and earlier) sat near
-0.50 for deciduous sal forest, because leaf-off dry-season scenes pull it down, so pixels flipped with
-each year's mix of clear scenes. Measured at Hasdeo Arand (2026-10-09, all of 2019–2021 analysable, the
-whole AOI observed in both years):
+**Upper-quartile tree probability (`tt-ee-2.4`, modern era).** A pixel's Dynamic World `trees` value for
+the forest test is the per-pixel **75th percentile** of the year's observations (`FOREST_TREE_PERCENTILE`):
+it is tree-covered only if at least a quarter of its observations say so. The NDVI half is unchanged
+(leaf-on 90th percentile, `tt-ee-2.1`), as are both thresholds and the 5 %/yr gain-plausibility limit.
 
-| DW statistic | forest 2019 | 2020 | 2021 | 2019→2020 gain | 2020→2021 loss |
+*Why.* The annual *mean* (`tt-ee-2.2` and earlier) sat near 0.50 for deciduous sal forest, because leaf-off
+dry-season scenes pull it down, so pixels flipped with each year's mix of clear scenes (Hasdeo Arand
+2019→2020: 8.2 %/yr "gain", then 6.0 % "loss"; forest share 45.7 → 53.3 → 47.7 %). Re-weighting the
+seasons did not help (July–September has almost no Dynamic World scenes in any year). `tt-ee-2.3` used the
+90th percentile, which fixed Hasdeo but **failed at Rondônia** (6.8 %/yr): on an evergreen pasture
+frontier a few transient high-probability scenes flip pasture and regrowth. `tt-ee-2.3` results were never
+published and are discarded. Every candidate was measured on Earth Engine at all four featured sites
+(2026-10-09, analysable years 2019–2025; Similipal 2018–2025; consecutive analysable pairs). Maximum gross
+forest gain per year:
+
+| DW statistic | Hasdeo (deciduous) | Rondônia (frontier) | Similipal | Silent Valley | |
 |---|---|---|---|---|---|
-| annual mean (old) | 45.7 % | 53.3 % | 47.7 % | 8.18 % | 6.04 % |
-| season-balanced mean (rejected) | 45.9 % | 52.2 % | 44.5 % | 7.06 % | 8.04 % |
-| leaf-on p90 (`tt-ee-2.3`) | 59.3 % | 60.4 % | 59.7 % | 3.11 % | 3.65 % |
+| annual mean (≤ 2.2) | **8.18 %** | 4.62 % | 3.87 % | 4.64 % | fails Hasdeo |
+| 90th percentile (2.3) | 3.69 % | **6.82 %** | 0.52 % | 1.06 % | fails Rondônia |
+| **75th percentile (2.4)** | 3.14 % | 3.82 % | 0.63 % | 2.35 % | stable at all four |
+| median | **5.74 %** | 2.82 % | 2.50 % | **5.30 %** | fails two |
+| highest quarterly mean | 3.49 % | **9.00 %** | 0.74 % | 1.84 % | fails Rondônia |
 
-Re-weighting the seasons does not help (July–September has almost no Dynamic World scenes in any year);
-the leaf-on statistic does. The 5 %/yr gain-plausibility limit is unchanged. The annual-mean `trees` band
-is still used, unchanged, as change *evidence* (Δ tree probability ≤ −0.30) and in event reports.
+The 75th percentile was chosen from these candidates on Hasdeo and Rondônia and then checked on the other
+two sites as hold-outs (Similipal and Silent Valley: maximum gain 0.63 % and 2.35 %). It is an empirical
+choice on four sites, not a universal calibration; other ecosystems may still fail the plausibility rule,
+and are then reported as INVALID_ANALYSIS, never adjusted. The annual-mean `trees` band is still used,
+unchanged, as change *evidence* (Δ tree probability ≤ −0.30) and in event reports.
 
 ## 5. Statistics (what each number means)
 

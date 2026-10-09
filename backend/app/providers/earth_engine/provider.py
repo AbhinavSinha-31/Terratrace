@@ -4,9 +4,9 @@ Pipeline (per AOI) — rules and thresholds live in services/science.py (method 
   0. Scene counts per composite; empty periods are reported unavailable, never composited.
   Modern era          COPERNICUS/S2_SR_HARMONIZED (Earth Engine catalogue: 2017-03-28 onward; a year is composited only
                        where scenes exist), Cloud Score+ masked (cs_cdf ≥ 0.6), calendar-year (1 Jan–31 Dec) composites
-                       + GOOGLE/DYNAMICWORLD/V1 "trees" probability (leaf-on p90 for the forest mask,
+                       + GOOGLE/DYNAMICWORLD/V1 "trees" probability (upper quartile p75 for the forest mask,
                          annual mean for change evidence) and modal label
-                       forest = leaf-on trees ≥ 0.50 AND leaf-on NDVI (both per-pixel 90th percentile) ≥ 0.60
+                       forest = trees p75 ≥ 0.50 AND leaf-on NDVI (per-pixel 90th percentile) ≥ 0.60
   Historical (1984–2015) Landsat Collection 2 Level-2 (L5/L7/L8/L9), QA_PIXEL cloud/shadow masked,
                        multi-year median composites; forest proxy = NDVI ≥ 0.60 at 30 m (no Dynamic World)
   1. Observation coverage: a pixel is observed only with enough clear (and Dynamic World) observations;
@@ -442,11 +442,11 @@ class EarthEngineProvider:
         ndvi_leafon = col.map(lambda img: img.normalizedDifference(["nir", "red"]).rename("ndvi"))             .reduce(_ee().Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])).rename("ndvi_leafon")
         dwc = self._dw_collection(geom, year)
         trees = dwc.select("trees").mean().rename("trees")   # annual mean: event evidence (Δ tree probability) and reporting
-        # Forest-mask tree probability = LEAF-ON Dynamic World "trees" (method tt-ee-2.3): the same per-pixel upper
-        # percentile as the NDVI half. The annual MEAN sits near 0.50 for deciduous sal forest (leaf-off scenes pull it
-        # down) and flipped with each year's sampling: Hasdeo Arand forest share went 45.7 % -> 53.3 % -> 47.7 % over
-        # 2019-2021 (8.2 %/yr "gain" then 6.0 % "loss"); leaf-on it is 59.3 % -> 60.4 % -> 59.7 % (measured 2026-10-09).
-        trees_leafon = dwc.select("trees").reduce(_ee().Reducer.percentile([sc.FOREST_NDVI_PERCENTILE])).rename("trees_leafon")
+        # Forest-mask tree probability = the UPPER QUARTILE of the year's Dynamic World "trees" (method tt-ee-2.4): tree-
+        # covered only if >= a quarter of the observations say so. The annual MEAN flipped deciduous sal forest with each
+        # year's season mix (Hasdeo 2019->2020: 8.2 %/yr "gain"); the 90th percentile (tt-ee-2.3) let a few transient high
+        # scenes flip pasture at Rondonia (6.8 %/yr). p75 is stable at all four featured sites (science.py, METHOD.md).
+        trees_leafon = dwc.select("trees").reduce(_ee().Reducer.percentile([sc.FOREST_TREE_PERCENTILE])).rename("trees_leafon")
         label = dwc.select("label").mode().rename("label")
         # Observation counts are measured facts (0 = observed zero times), so unmask(0) is correct HERE only.
         clear = col.select("nir").count().unmask(0).rename("clear")

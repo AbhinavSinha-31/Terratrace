@@ -13,12 +13,17 @@ from typing import Any
 # --------------------------------------------------------------------------- method version
 # Bump whenever any rule below (or the Earth Engine pipeline) changes: cached results
 # computed under another version are never reused.
-METHOD_VERSION = "tt-ee-2.3"   # 2.3: leaf-on (p90) DW tree probability in the forest mask; 2.2: seasonal-coverage rule; 2.1: leaf-on (p90) forest NDVI
+METHOD_VERSION = "tt-ee-2.4"   # 2.4: upper-quartile (p75) DW tree probability (2.3 used p90: unstable at Rondonia); 2.2: seasonal rule; 2.1: leaf-on (p90) NDVI
 
 # --------------------------------------------------------------------------- definitions
-FOREST_TREE_PROB = 0.50   # Dynamic World LEAF-ON "trees" probability (per-pixel FOREST_NDVI_PERCENTILE of the year's observations)
+FOREST_TREE_PROB = 0.50   # Dynamic World "trees" probability, per-pixel FOREST_TREE_PERCENTILE of the year's observations
 FOREST_NDVI = 0.60        # NDVI floor for the operational forest mask
-FOREST_NDVI_PERCENTILE = 90  # leaf-on statistic for BOTH forest-mask halves: per-pixel 90th percentile of the year's observations
+FOREST_NDVI_PERCENTILE = 90  # the NDVI floor is applied to leaf-on NDVI: per-pixel 90th percentile of clear observations
+# Tree probability: the UPPER QUARTILE of the year's Dynamic World observations - a pixel is tree-covered only if at least a
+# quarter of its observations say so. Measured 2026-10-09 at all four featured sites (max gross gain %/yr, limit 5):
+# annual mean 8.18 at Hasdeo (deciduous: leaf-off scenes pull it to 0.50); p90 6.82 at Rondonia (a few transient high
+# scenes over pasture/regrowth flip it); p75 3.14 / 3.82 / 0.63 / 2.35 - stable at every site (docs/METHOD.md).
+FOREST_TREE_PERCENTILE = 75
 LANDSAT_FOREST_NDVI = 0.60  # historical proxy (no Dynamic World before mid-2015)
 D_NDVI = -0.20
 D_NBR = -0.25
@@ -72,7 +77,7 @@ METHOD: dict[str, Any] = {
         f" (and ≥ {MIN_PIXEL_DW_OBS} Dynamic World observations in the modern era). Unobserved pixels stay no-data: they are never counted as non-forest, "
         "and every statistic is computed over observed pixels only. Missing statistics are reported as null, never 0."
     ),
-    "forest_rule": f"Modern: leaf-on Dynamic World tree probability ≥ {FOREST_TREE_PROB:.2f} AND leaf-on NDVI ≥ {FOREST_NDVI:.2f} (both the per-pixel {FOREST_NDVI_PERCENTILE}th percentile of the year's observations, so deciduous forest is judged with leaves on whatever the season mix of the year's scenes). Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
+    "forest_rule": f"Modern: Dynamic World tree probability ≥ {FOREST_TREE_PROB:.2f} in at least a quarter of the year's observations (per-pixel {FOREST_TREE_PERCENTILE}th percentile) AND leaf-on NDVI (per-pixel {FOREST_NDVI_PERCENTILE}th percentile of clear observations) ≥ {FOREST_NDVI:.2f}. Historical: NDVI ≥ {LANDSAT_FOREST_NDVI:.2f} (Landsat proxy).",
     "coverage_rule": f"A year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI is observed; forest % is relative to the observed area.",
     "seasonal_rule": (
         f"Modern era: a year is analysable only if ≥ {MIN_YEAR_COVERAGE:.0%} of the AOI has at least one clear Sentinel-2 observation in "

@@ -357,7 +357,7 @@ def test_forest_mask_uses_leaf_on_ndvi_with_unchanged_thresholds():
     assert 'trees_leafon.gte(sc.FOREST_TREE_PROB).And(ndvi_leafon.gte(sc.FOREST_NDVI)).updateMask(valid)' in src   # 2.3: leaf-on trees too
     assert (sc.FOREST_TREE_PROB, sc.FOREST_NDVI, sc.FOREST_NDVI_PERCENTILE) == (0.50, 0.60, 90)
     assert (sc.MAX_ANNUAL_GAIN_FRACTION, sc.MIN_PIXEL_CLEAR_OBS, sc.MIN_PIXEL_DW_OBS, sc.MIN_YEAR_COVERAGE) == (0.05, 3, 3, 0.80)
-    assert sc.METHOD_VERSION == "tt-ee-2.3"   # 2.2 seasonal rule, 2.3 leaf-on tree probability; every threshold above is unchanged
+    assert sc.METHOD_VERSION == "tt-ee-2.4"   # 2.2 seasonal rule, 2.3/2.4 tree-probability statistic; every threshold above is unchanged
 
 
 # ----------------------------------------------------------------------------- tt-ee-2.2 seasonal-coverage rule
@@ -468,14 +468,15 @@ def _s2_bands(monkeypatch) -> dict[str, str]:
     return out
 
 
-def test_forest_mask_uses_leaf_on_tree_probability_not_the_annual_mean(monkeypatch):
-    """Regression (Hasdeo Arand, 2026-10-09): the annual MEAN of Dynamic World tree probability sat near 0.50 for
-    deciduous sal forest and flipped with each year's season mix (2019->2020 'gain' 8.2 %/yr, then 6.0 % 'loss').
-    Both forest-mask halves must use the leaf-on per-pixel percentile."""
+def test_forest_mask_uses_the_upper_quartile_tree_probability(monkeypatch):
+    """Regressions (2026-10-09): the annual MEAN of Dynamic World tree probability flipped deciduous sal forest with
+    each year's season mix (Hasdeo 2019->2020 'gain' 8.2 %/yr); the 90th percentile (tt-ee-2.3) let a few transient
+    high scenes flip pasture at Rondonia (6.8 %/yr). The forest test uses the per-pixel upper quartile (p75)."""
+    assert sc.FOREST_TREE_PERCENTILE == 75
     bands = _s2_bands(monkeypatch)
     forest, tree_c = bands["forest"], bands["forest_c_tree"]
     for expr in (forest, tree_c):
-        assert "'trees'" in expr and f"percentile([{sc.FOREST_NDVI_PERCENTILE}])" in expr
+        assert "select('trees').reduce(ee.Reducer.percentile([75]))" in expr
         assert ".mean()" not in expr, "the annual mean must not decide forest"
     assert f"percentile([{sc.FOREST_NDVI_PERCENTILE}])" in bands["ndvi_leafon"]
     # change EVIDENCE still uses the annual-mean tree probability (unchanged event rule)
@@ -485,7 +486,7 @@ def test_forest_mask_uses_leaf_on_tree_probability_not_the_annual_mean(monkeypat
 def test_gain_plausibility_limit_is_not_loosened():
     assert sc.MAX_ANNUAL_GAIN_FRACTION == 0.05
     assert sc.FOREST_TREE_PROB == 0.50 and sc.FOREST_NDVI == 0.60
-    assert sc.METHOD_VERSION == "tt-ee-2.3" and "leaf-on Dynamic World" in sc.METHOD["forest_rule"]
+    assert sc.METHOD_VERSION == "tt-ee-2.4" and "75th percentile" in sc.METHOD["forest_rule"]
 
 
 def test_imagery_availability_reports_whether_an_analysis_can_use_each_year():
@@ -512,12 +513,13 @@ def test_unmeasured_seasonal_coverage_is_never_analysable():
 
 
 @live
-def test_hasdeo_arand_forest_mask_is_stable_2019_2021(ee_live):
-    """Opt-in live regression: with the leaf-on rule, no consecutive 2019–2021 pair at Hasdeo exceeds the
-    unchanged 5 %/yr gain limit (the annual-mean rule measured 8.2 %)."""
+@pytest.mark.parametrize("aid", ["hasdeo-arand", "rondonia-frontier"])
+def test_featured_forest_masks_are_stable_2019_2025(ee_live, aid):
+    """Opt-in live regression: no consecutive 2019–2025 pair exceeds the unchanged 5 %/yr gain limit at the deciduous
+    site (annual mean: 8.2 %) or the evergreen frontier (90th percentile: 6.8 %)."""
     from app.services import analysis
     from app.services.geometry import validate_aoi
-    aoi = validate_aoi(analysis.analysis_target(analysis.aoi_doc("hasdeo-arand"))["geometry"], enforce_limits=False)
-    res = p.provider.analyze(aoi, "hasdeo-arand#live-test", "Hasdeo", 2019, 2021)
+    aoi = validate_aoi(analysis.analysis_target(analysis.aoi_doc(aid))["geometry"], enforce_limits=False)
+    res = p.provider.analyze(aoi, f"{aid}#live-test", aid, 2019, 2025)
     issues = [i for i in (res.get("quality") or {}).get("issues", []) if i["rule"] == "unstable_forest_mask"]
     assert issues == [], issues
