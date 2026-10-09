@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Compass, Minus, Plus, RotateCcw, WifiOff, X } from 'lucide-react';
 import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
-import { useAnalysisState, useImageryState } from '../../data/viewState';
-import { useEeTiles } from './eeTiles';
 import { useCurrentBundle, useSelectedAoi } from '../../data/queries';
 import { CHROME, LANDING_MIN_ZOOM, analysisPadding, landingInset, landingZoom, useBreakpoint } from '../../lib/useLayout';
 import { fmtCoord } from '../../lib/format';
@@ -140,7 +138,6 @@ export function MapStage() {
         </>
       )}
 
-      {aoi && view !== 'explore' && <ReferenceImageryNotice />}
       {aoi && view !== 'explore' && <AnalysisMapControls onFit={() => useUi.getState().requestCamera({ kind: 'aoi', id: aoi.id })} />}
       {aoi && view !== 'explore' && <MapHud />}
       <TileErrorToast />
@@ -197,73 +194,6 @@ function AnalysisMapControls({ onFit }: { onFit(): void }) {
       </Tooltip>
       <Tooltip content="Fit study area" side="left"><IconButton label="Fit study area" size="sm" onClick={onFit}><RotateCcw size={14} /></IconButton></Tooltip>
     </div>
-  );
-}
-
-/**
- * Imagery honesty label. Without a READY analysis the map shows REAL IMAGERY only
- * (Sentinel-2 cloudless mosaics) — never analysis results.
- */
-function ReferenceImageryNotice() {
-  // Everything about the imagery comes from imageryState (= what the map actually renders); everything about the
-  // analysis from analysisState. The notice never builds its own imagery label.
-  const im = useImageryState();
-  const analysisState = useAnalysisState();
-  const bundle = useCurrentBundle();
-  const year = im.requestedYear;
-  const throttling = useEeTiles((s) => s.throttling);
-  const ownLayer = bundle?.layers.imagery.find((i) => i.year === year);
-  // The READY analysis' own composite for this year is explained by the analysis view itself (no extra notice).
-  const coveredByAnalysis = analysisState.state === 'READY' && !!ownLayer && !ownLayer.reference && im.source !== 'esri-current';
-  const show = im.state !== 'OFF' && im.state !== 'NONE' && !coveredByAnalysis && !im.reference;
-  const win = `${analysisState.window.start} → ${analysisState.window.end}`;
-  const analysisLine = analysisState.state === 'READY'
-    ? (im.source === 'esri-current'
-      ? <>Imagery only — current, undated basemap. The validated analysis covers {analysisState.analysedWindow?.join(' → ') ?? win}; its layers do not describe this image's date.</>
-      : <>Imagery only — not a TerraTrace result. The validated analysis covers {analysisState.analysedWindow?.join(' → ') ?? win}; it has no layer for {year}.</>)
-    : <>Satellite imagery is available for exploration, but no validated TerraTrace analysis is currently available for the selected analysis window ({win}).</>;
-  const box = 'pointer-events-none absolute left-1/2 top-[76px] z-20 -translate-x-1/2 rounded-md bg-[#0c1116]/92 px-3 py-1.5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.12)]';
-  return (
-    <AnimatePresence>
-      {show && (
-        <motion.div key="real-imagery"
-          initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-          className={box} role="status" data-testid="real-imagery-label"
-          data-imagery={im.source === 'esri-current' ? 'basemap' : im.state === 'AVAILABLE' ? 'READY' : im.state} data-source={im.source ?? ''}
-        >
-          {im.state === 'AVAILABLE' ? (
-            <>
-              <div className="t-label text-ink">{im.source === 'esri-current' ? 'Current basemap imagery · no analysis' : 'Live satellite imagery · no analysis'}</div>
-              <div className="mt-0.5 text-[11px] text-ink-2" data-testid="imagery-line">{im.label} · {im.provider === 'Google Earth Engine' ? 'Earth Engine · ' : ''}imagery only</div>
-              <div className="mt-1 max-w-[440px] text-[10.5px] leading-snug text-ink-3" data-testid="imagery-vs-analysis">{analysisLine}</div>
-              {throttling && im.provider === 'Google Earth Engine' && <div className="mt-1 text-[11px] text-warn" data-testid="imagery-throttled">Satellite imagery is temporarily throttled. Retrying…</div>}
-            </>
-          ) : im.state === 'UNAVAILABLE' ? (
-            <div data-testid="no-usable-imagery">
-              <div className="t-label text-warn">{year} · imagery unavailable</div>
-              <div className="mt-0.5 max-w-[360px] text-[11px] text-ink-2">{im.message} Nothing is substituted.</div>
-            </div>
-          ) : im.state === 'ERROR' ? (
-            <div data-testid="no-usable-imagery">
-              <div className="t-label text-warn">Imagery unavailable</div>
-              <div className="mt-0.5 text-[11px] text-ink-2" data-testid="imagery-error">{im.message} Nothing is substituted.</div>
-            </div>
-          ) : (
-            <div className="t-label text-ink-2" data-testid="imagery-loading">Loading satellite imagery · {year}</div>
-          )}
-        </motion.div>
-      )}
-      {im.reference && ownLayer && (
-        <motion.div key="reference"
-          initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-          className="pointer-events-none absolute left-1/2 top-[76px] z-20 -translate-x-1/2 rounded-md bg-[#0c1116]/92 px-3 py-2 text-center shadow-[0_0_0_1px_rgba(227,164,63,0.35)]"
-          role="status"
-        >
-          <div className="t-label text-warn">Reference imagery · desaturated</div>
-          <div className="mt-0.5 text-[11px] text-ink-2">No {ownLayer.sensor} tiles are served for {year}. Forest layer and statistics show the {year} composite.</div>
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }
 

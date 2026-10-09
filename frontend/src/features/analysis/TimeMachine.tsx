@@ -111,6 +111,17 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
     const e = availability.data?.years.find((r) => r.year === y);
     return e?.analysable ?? null;
   };
+  /** Why a year cannot be used, in plain words (measured reasons only); null when nothing is known against it. */
+  const yearBlockReason = (y: number): string | null => {
+    if (y === PENDING_YEAR) return `${y} is not complete yet, so its annual composite does not exist.`;
+    const a = avail(y);
+    if (a.ok === false) return `${a.status === 'UNAVAILABLE' ? 'No imagery' : 'Insufficient imagery'} for ${y}: ${a.reason}`;
+    if (analysable(y) === false) {
+      const why = result?.quality?.years.find((r) => r.year === y)?.reason ?? availability.data?.years.find((r) => r.year === y)?.analysisReason;
+      return `${y} imagery can be viewed, but it cannot be used in an analysis${why ? `: ${why}` : '.'}`;
+    }
+    return null;
+  };
   // The window selectors offer only years an analysis can use (all years only while that is still being measured).
   const windowYears = years.filter((y) => analysable(y) !== false);
   const yearOpts = windowYears.map((y) => ({ value: y, label: String(y), meta: eraOf(y) === 'historical' ? 'Landsat' : 'S2 · DW' }));
@@ -218,16 +229,19 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
           </div>
           {[...years, PENDING_YEAR].map((y) => {
             const hide = y !== year && y !== win.start && y !== win.end && eraOf(y) === 'modern' && y % 2 === 1 && compact;
-            return (
-              <button key={`l${y}`} tabIndex={-1} onClick={() => ui().setYear(y)} disabled={y === PENDING_YEAR}
-                title={y === PENDING_YEAR ? undefined : avail(y).ok === false ? `${avail(y).status === 'UNAVAILABLE' ? 'No imagery' : 'Insufficient imagery'}: ${avail(y).reason}` : undefined}
-                data-unavailable={avail(y).ok === false || undefined}
+            const blocked = yearBlockReason(y);
+            const label = (
+              <button key={`l${y}`} tabIndex={-1} onClick={() => { if (y !== PENDING_YEAR) ui().setYear(y); }} aria-disabled={y === PENDING_YEAR || undefined}
+                aria-label={blocked ? `${y}: ${blocked}` : String(y)}
+                data-unavailable={avail(y).ok === false || undefined} data-blocked-reason={blocked ?? undefined}
                 data-imagery-status={y === PENDING_YEAR ? undefined : avail(y).status ?? 'UNKNOWN'}
                 className={`t-data absolute top-[70px] -translate-x-1/2 text-[10.5px] ${hide ? 'hidden' : ''} ${y === year ? 'font-medium text-ink' : y === PENDING_YEAR ? 'text-ink-4' : avail(y).ok === false ? 'text-ink-4 line-through decoration-warn/60' : 'text-ink-3 hover:text-ink-2'}`}
                 style={{ left: pct(y) }}>
                 {y === TIMELINE_START ? y : `’${String(y).slice(2)}`}
               </button>
             );
+            // Disabled / struck-through years explain themselves on hover and focus.
+            return blocked ? <Tooltip key={`t${y}`} content={blocked}>{label}</Tooltip> : label;
           })}
 
           {/* sensor eras */}
@@ -303,10 +317,19 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
 
       {!compact && (
         <div className="flex shrink-0 flex-col justify-center gap-2 border-l border-line pl-4">
-          <Button size="sm" variant={compare ? 'accent' : 'secondary'} icon={<SplitSquareHorizontal size={13} />} onClick={() => ui().setCompare(!compare)} aria-pressed={compare}
-            disabled={!!compareBlocked && !compare} title={compareBlocked ?? undefined} data-testid="before-after">
-            {compare ? 'Exit compare' : 'Before / After'}
-          </Button>
+          {(() => {
+            const off = !!compareBlocked && !compare;
+            const button = (
+              <Button size="sm" variant={compare ? 'accent' : 'secondary'} icon={<SplitSquareHorizontal size={13} />} onClick={() => ui().setCompare(!compare)} aria-pressed={compare}
+                disabled={off} data-testid="before-after" className={off ? 'pointer-events-none' : undefined}>
+                {compare ? 'Exit compare' : 'Before / After'}
+              </Button>
+            );
+            // A disabled button receives no pointer events: the wrapper carries the tooltip (and keyboard focus).
+            return off
+              ? <Tooltip content={`Before / After compares two years of a validated analysis. ${compareBlocked}.`}><span tabIndex={0} className="inline-flex rounded-md outline-none focus-visible:ring-1 focus-visible:ring-accent" data-testid="before-after-wrapper">{button}</span></Tooltip>
+              : button;
+          })()}
           {compareBlocked
             ? <div className="max-w-[120px] text-center text-[10px] leading-tight text-warn" data-testid="before-after-blocked">{compareBlocked}</div>
             : <div className="t-data text-center text-[10px] text-ink-4">{win.start} → {compare ? year : win.end}</div>}

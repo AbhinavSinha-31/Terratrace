@@ -48,7 +48,12 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
       <section>
         <div className="t-label flex items-center gap-2 text-warn" data-testid="status-title"><AlertTriangle size={14} /> {title}</div>
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{error.message}</p>
-        <p className="mt-2 text-[12px] leading-relaxed text-ink-3">No analysis result exists for {b} → {c}; no measurements are shown.</p>
+        <details className="group mt-3 rounded-md shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="status-details">
+          <summary className="t-label cursor-pointer select-none px-3 py-2 text-ink-3 hover:text-ink-2">Details</summary>
+          <p className="t-data border-t border-line px-3 py-2 text-[11px] leading-relaxed text-ink-3">
+            No analysis result exists for {b} → {c}{error.code ? ` · code ${error.code}` : ''}{error.retryable === false ? ' · retrying cannot change this' : ''}.
+          </p>
+        </details>
         <div className="mt-4 flex flex-wrap gap-2">
           {canRetry && <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry} data-testid="retry">Retry</Button>}
           <Button size="sm" variant="ghost" icon={<Satellite size={13} />} onClick={() => ui().setDrawerOpen(false)}>Continue exploring imagery</Button>
@@ -80,26 +85,10 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
         <div className={`t-label flex items-center gap-2 ${tone}`} data-testid="status-title">
           <Icon size={14} className={result.status === 'PROCESSING' ? 'animate-spin' : ''} /> {title}
         </div>
-        <p className="t-data mt-2 text-[12px] text-ink-2" data-testid="analysis-window-line">
-          <span className="t-label mr-1.5 !text-[9px] text-ink-3">Analysis window</span>{result.window.baseline_year} → {result.window.comparison_year}
-          {result.quality?.analyzable_window && result.quality.analyzable_window.join('-') !== `${result.window.baseline_year}-${result.window.comparison_year}` &&
-            <span className="text-ink-3"> · analysable years {result.quality.analyzable_window.join(' → ')}</span>}
+        {/* ONE short plain-language message; the technical diagnostic is behind "Details" below. */}
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">
+          {invalid ? plainInvalidMessage(result) : result.reason}
         </p>
-        {invalid ? (
-          <>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-2" data-testid="status-message"><span className="t-label mr-1.5 !text-[9px] text-ink-3">Reason · validation diagnostic</span>{validationReason}</p>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3" data-testid="diagnostic-note">
-              The percentages above are <b className="text-ink-2">validation diagnostics</b> — measurements of the forest classification's stability used to
-              decide whether results can be trusted. They are not forest-change results and must not be read as loss or gain.
-            </p>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-3" data-testid="invalid-explanation">
-              The computation completed, but TERRATRACE withheld the result because the observations/classification did not satisfy the scientific validity checks.
-            </p>
-            <p className="mt-2 rounded-sm bg-bad/10 px-2.5 py-1.5 text-[11.5px] font-medium text-bad" data-testid="not-no-change">Not a “no change” result — no forest-change measurement is reported for this window.</p>
-          </>
-        ) : (
-          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2" data-testid="status-message">{result.reason}</p>
-        )}
         <div className="mt-4 flex flex-wrap gap-2">
           {retryable && <Button size="sm" variant="brand" icon={<RotateCcw size={13} />} onClick={onRetry}>Retry</Button>}
           {smaller && <Button size="sm" variant="secondary" icon={<ScanSearch size={13} />} onClick={() => ui().goExplore('explore')}>Try a smaller area</Button>}
@@ -109,6 +98,26 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
         </div>
       </section>
 
+      <details className="group rounded-md shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="status-details">
+        <summary className="t-label flex cursor-pointer select-none items-center justify-between px-3.5 py-2.5 text-ink-3 hover:text-ink-2">
+          <span>Details</span><span className="!normal-case !tracking-normal text-ink-4 group-open:hidden">technical diagnostic</span>
+        </summary>
+        <div className="space-y-4 border-t border-line p-3.5">
+      <p className="t-data text-[12px] text-ink-2" data-testid="analysis-window-line">
+        <span className="t-label mr-1.5 !text-[9px] text-ink-3">Analysis window</span>{result.window.baseline_year} → {result.window.comparison_year}
+        {result.quality?.analyzable_window && result.quality.analyzable_window.join('-') !== `${result.window.baseline_year}-${result.window.comparison_year}` &&
+          <span className="text-ink-3"> · analysable years {result.quality.analyzable_window.join(' → ')}</span>}
+        {code && <span className="text-ink-4"> · code {code}</span>}
+      </p>
+      {invalid && (
+        <div>
+          <p className="text-[12px] leading-relaxed text-ink-2" data-testid="validation-reason"><span className="t-label mr-1.5 !text-[9px] text-ink-3">Validation diagnostic</span>{validationReason}</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3" data-testid="diagnostic-note">
+            These percentages are <b className="text-ink-2">validation diagnostics</b> — measurements of the forest classification's stability used to
+            decide whether results can be trusted. They are not forest-change results and must not be read as loss or gain.
+          </p>
+        </div>
+      )}
       {result.quality && <QualityReport q={result.quality} />}
 
       <section className="overflow-hidden rounded-md shadow-[0_0_0_1px_rgba(255,255,255,0.065)]">
@@ -129,13 +138,22 @@ export function AnalysisUnavailable({ result, onRetry }: { result: AnalysisResul
       </section>
 
       {import.meta.env.DEV && result.diagnostics && (
-        <details className="rounded-md p-3 text-[11px] text-ink-3 shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="dev-diagnostics">
-          <summary className="cursor-pointer">Developer diagnostics (development build only)</summary>
+        <div className="rounded-md p-3 text-[11px] text-ink-3 shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="dev-diagnostics">
+          <div>Developer diagnostics (development build only)</div>
           <pre className="t-data mt-2 whitespace-pre-wrap">{JSON.stringify(result.diagnostics, null, 2)}</pre>
-        </details>
+        </div>
       )}
+        </div>
+      </details>
     </div>
   );
+}
+
+/** The plain-language sentence for a result withheld by the validity checks (the rule's numbers are in Details). */
+function plainInvalidMessage(r: AnalysisResult): string {
+  const pairs = [...new Set((r.quality?.issues ?? []).map((i) => `${i.years[0]}→${String(i.years[i.years.length - 1]).slice(2)}`))];
+  const where = pairs.length ? ` (${pairs.join(', ')})` : '';
+  return `The analysis finished, but the forest classification was not stable enough to trust${where}, so no forest-change result is shown for these years. This is not a “no change” result.`;
 }
 const QUARTERS = ['Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec'];
 const fmtPts = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)} pts`;

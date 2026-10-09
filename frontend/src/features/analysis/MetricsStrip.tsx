@@ -6,6 +6,7 @@ import { useAnalysisState, useImageryState } from '../../data/viewState';
 import { evidenceDistribution, fmtHa, fmtKm2 } from '../../lib/format';
 import { eraOf, sourceLabel } from '../../lib/time';
 import { Metric, useAnimatedNumber } from '../../design';
+import { ImageryStatus, useImageryCoveredByAnalysis } from '../map/ImageryStatus';
 
 function Divider() {
   return <div className="w-px self-stretch bg-line" aria-hidden />;
@@ -20,6 +21,7 @@ export function MetricsStrip() {
   const year = useUi((s) => s.investigation.imageryYear);
   const win = useAnalysisWindow();
   const errCode = useUi((s) => s.investigation.analysisError?.code);
+  const imageryIsAnalysis = useImageryCoveredByAnalysis();
   // No measured result (idle, running, error, or non-READY): no metrics — never zeros.
   if (!analysis || !k) return <NoMetrics status={result?.status ?? (errCode === 'service_unavailable' ? 'UNAVAILABLE' : errCode ? 'ERROR' : 'NONE')} />;
   const ys = analysis.summary.years.find((y) => y.year === year);
@@ -66,6 +68,11 @@ export function MetricsStrip() {
         </div>
       </div>
       <Divider />
+      {/* Viewing imagery that is NOT the analysis composite (another year, current basemap, throttled/unavailable):
+          the imagery honesty label takes this slot — in the bar, never over the map. */}
+      {!imageryIsAnalysis ? (
+        <div className="hidden w-[260px] shrink-0 lg:block" data-testid="imagery-indicator"><ImageryStatus /></div>
+      ) : (
       <div className="hidden min-w-[190px] lg:block">
         <div className="t-label flex items-center gap-1.5 text-ink-3"><Satellite size={11} /> Data source</div>
         <div className="mt-1.5 flex items-baseline gap-2">
@@ -78,6 +85,7 @@ export function MetricsStrip() {
               : <>{ys?.sensor ?? src.subtitle}</>}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -96,16 +104,13 @@ function NoMetrics({ status }: { status: string }) {
             {status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}
             <span className="ml-2 !normal-case !tracking-normal text-ink-3">· analysis window {analysis.window.start} → {analysis.window.end}</span>
           </div>
-          <div className="mt-1 truncate text-[11.5px] text-ink-3">No result means no result: forest-change measurements appear only for completed, validated analyses.</div>
+          {/* The reason is stated once, in the analysis panel; this bar only names the state. */}
+          <div className="mt-1 truncate text-[11.5px] text-ink-3">No forest-change figures for this window.</div>
         </div>
       </div>
       <Divider />
-      <div className="hidden min-w-[210px] lg:block" data-testid="imagery-indicator">
-        <div className={`t-label flex items-center gap-1.5 ${imagery.state === 'AVAILABLE' ? 'text-live' : 'text-ink-3'}`}>
-          <Satellite size={11} /> {imagery.state === 'AVAILABLE' ? 'Imagery available' : imagery.state === 'LOADING' ? 'Imagery loading' : imagery.state === 'OFF' ? 'Imagery off' : 'Imagery unavailable'}
-        </div>
-        <div className="t-data mt-1.5 truncate text-[14px] leading-none text-ink" data-testid="imagery-strip" data-source={imagery.source ?? ''}>{imagery.label}</div>
-        <div className="mt-1 truncate text-[11px] text-ink-3">{imagery.state === 'AVAILABLE' ? `${imagery.provider} · imagery only — not a TerraTrace result` : imagery.message ?? ''}</div>
+      <div className="hidden w-[300px] shrink-0 sm:block" data-testid="imagery-indicator" data-source={imagery.source ?? ''}>
+        <ImageryStatus />
       </div>
     </div>
   );
