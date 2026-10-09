@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Info } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { useCurrentAnalysis, useFilteredEvents, useSelectedAoi } from '../../data/queries';
 import { useAnalysisWindow, useUi } from '../../state/store';
 import type { ChangeLevel } from '../../data/contracts';
@@ -41,8 +41,14 @@ export function Overview() {
   const inWindow = events.filter((e) => e.properties.year_to > win.start && e.properties.year_to <= win.end);
   const top = [...inWindow].sort((a, b) => SEV_RANK[b.properties.severity.class] - SEV_RANK[a.properties.severity.class] || b.properties.area_ha - a.properties.area_ha).slice(0, 3);
   const dist = evidenceDistribution(inWindow);
-  // "No change" only when loss was actually measured as ~0 — never when it is missing.
-  const noChange = k.total_loss_ha !== null && k.total_loss_ha < 1 && inWindow.length === 0;
+  // Statements / reliability cautions from the backend (display only; thresholds in backend science.py).
+  const cautions = q.data.cautions ?? [];
+  const statement = cautions.find((c) => c.kind === 'statement');
+  const warnings = cautions.filter((c) => c.kind === 'caution');
+  const gainNote = cautions.find((c) => c.applies_to?.includes('gross_gain_ha'))?.gain_note ?? null;
+  // "No change" only when loss was actually measured as ~0 — never when it is missing. With little or no forest the
+  // statement above says so instead ("within the expected forest-cover range" would mislead with 0 ha of forest).
+  const noChange = !statement && k.total_loss_ha !== null && k.total_loss_ha < 1 && inWindow.length === 0;
   const dash = (v: number | null | undefined, f: (n: number) => string) => (v === null || v === undefined ? '—' : f(v));
   // Observation coverage of the two compared composites (measured; '—' when not measured).
   const cov = (y: number) => s.years.find((r) => r.year === y)?.coverage_pct ?? null;
@@ -56,6 +62,17 @@ export function Overview() {
           <Badge tone="forest">Live · Earth Engine</Badge>
         </div>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{aoi?.description}</p>
+        {statement && (
+          <p className="mt-3 rounded-md bg-white/[0.04] px-3.5 py-2.5 text-[12px] leading-relaxed text-ink-2 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]" data-testid="analysis-statement" data-code={statement.code}>
+            {statement.message}
+          </p>
+        )}
+        {warnings.map((c) => (
+          <div key={c.code} className="mt-3 flex gap-2 rounded-md bg-warn/10 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-2 shadow-[0_0_0_1px_rgba(227,164,63,0.3)]" data-testid="analysis-caution" data-code={c.code}>
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warn" />
+            <span>{c.message}<span className="t-data mt-1 block text-[9.5px] text-ink-4">Compared: {c.datasets.join(' · ')}</span></span>
+          </div>
+        ))}
         <div className="mt-4 space-y-3" data-testid="analysis-kpis">
           {([
             ['Analysis window', [
@@ -86,6 +103,8 @@ export function Overview() {
                   <div key={l} className="bg-surface px-3 py-2.5" data-kpi={l}>
                     <div className="text-[10.5px] text-ink-3">{l}</div>
                     <div className="t-data mt-0.5 text-[14px] text-ink">{v}</div>
+                    {/* Gross gain stays out of events and headline totals; with little forest it gets its own warning. */}
+                    {l === 'Forest gained' && gainNote && <div className="mt-1 text-[10px] leading-snug text-warn" data-testid="gain-note">{gainNote}</div>}
                   </div>
                 ))}
               </div>

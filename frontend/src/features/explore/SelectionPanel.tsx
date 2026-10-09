@@ -1,18 +1,71 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Eraser, Hexagon, SquareDashed, Trees } from 'lucide-react';
 import { client } from '../../data/client';
-import { useHealth } from '../../data/queries';
+import { useAreaContext, useCandidateRegistration, useHealth } from '../../data/queries';
+import { fmtShare } from '../../lib/format';
 import { selectCandidate, useAnalysisWindow, useUi } from '../../state/store';
 import { geometryAreaKm2, geometryCentroid, fmtLatLon } from '../../lib/geo';
 import { DEFAULT_YEARS, sourceLabel } from '../../lib/time';
 import { Badge, Button, IconButton, Menu, StateView, Tooltip } from '../../design';
 import { AnimatedNumber } from '../../design/Metric';
 
-/** SELECTED AREA — measurement, reference forest share, time range and the Analyze action. */
+/**
+ * Reference tree cover of the selection — the area's Earth Engine context (the SAME measurement and cache as the
+ * analysis view's Area context panel). Loading while it is measured, "unavailable" if it fails; never a sampled or
+ * guessed number. Labelled reference context with dataset and year.
+ */
+function SelectionReference() {
+  const reg = useCandidateRegistration();
+  const offline = useHealth().data?.backend === false;
+  const ctx = useAreaContext(reg.data?.id ?? null);
+  const c = ctx.data;
+  const unavailable = offline || reg.isError || ctx.isError || c?.status === 'UNAVAILABLE';
+  const loading = !unavailable && !c;
+  const tc = c?.forest?.tree_cover_2000, wc = c?.forest?.worldcover_2021;
+  const line = (label: string, v: { status: string } | undefined, pct: number | null | undefined, src: string) => (
+    <div className="mt-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10.5px] text-ink-3">{label}</span>
+        <span className="t-data text-[13px] text-ink-2">{v?.status === 'READY' ? fmtShare(pct) : 'Unavailable'}</span>
+      </div>
+      <div className="t-data text-[9px] text-ink-4">{src}</div>
+    </div>
+  );
+  return (
+    <div className="bg-surface px-3.5 py-3" data-testid="reference-tree-cover" data-status={loading ? 'LOADING' : unavailable ? 'UNAVAILABLE' : 'READY'}>
+      <div className="t-label flex items-center gap-1.5 text-ink-4"><Trees size={11} />Reference context</div>
+      {loading ? (
+        <div aria-busy="true"><div className="skeleton mt-2 h-4 w-full" /><div className="skeleton mt-2 h-4 w-full" /><div className="mt-1.5 text-[10px] text-ink-4">Measuring in Earth Engine…</div></div>
+      ) : unavailable ? (
+        <div className="mt-1.5 text-[11px] leading-snug text-warn" data-testid="reference-unavailable">Unavailable{c?.reason ? ` — ${c.reason}` : reg.isError ? ' — the area could not be registered.' : ''}</div>
+      ) : (
+        <>
+          {line('Tree cover · 2000', tc, tc?.share_of_land_pct, 'Hansen GFC v1.13 · 2000 baseline')}
+          {line('Tree cover · 2021', wc, wc?.share_of_land_pct, 'ESA WorldCover v200 · 2021')}
+          {c?.surface?.message && <div className="mt-1.5 text-[10px] leading-snug text-ink-3" data-testid="reference-surface">{c.surface.message}</div>}
+        </>
+      )}
+      <div className="mt-1.5 text-[9.5px] leading-snug text-ink-4">Not a TerraTrace result · not current forest cover</div>
+    </div>
+  );
+}
+
+/**
+ * SELECTED AREA. Regression (2026-10-10): clearing a selection crashed the app ("Cannot read properties of null
+ * (reading 'geometry')") — the panel's exit animation keeps it mounted after the selection becomes null. The panel
+ * now keeps the last selection while it animates out, so it never renders without one.
+ */
 export function SelectionPanel() {
-  const selection = useUi(selectCandidate)!;
+  const current = useUi(selectCandidate);
+  const last = useRef(current);
+  if (current) last.current = current;
+  return last.current ? <SelectionPanelBody selection={last.current} /> : null;
+}
+
+/** SELECTED AREA — measurement, reference context, time range and the Analyze action. */
+function SelectionPanelBody({ selection }: { selection: NonNullable<ReturnType<typeof selectCandidate>> }) {
   const setSelection = useUi((s) => s.setSelection);
   const setDrawTool = useUi((s) => s.setDrawTool);
   const requestAnalysis = useUi((s) => s.requestAnalysis);
@@ -35,9 +88,9 @@ export function SelectionPanel() {
   // Largest area the backend can analyse interactively (public limit from /api/health; never silently reduced).
   const interactiveMax = health?.limits.interactive_max_km2;
   const tooHeavy = !tooLarge && interactiveMax !== undefined && area > interactiveMax;
-  // The backend's pre-flight verdict (outside Sentinel-2 coverage / no forest), shown before anything is run.
-  const refusal = !tooLarge && !tooSmall && !tooHeavy && preview.data && !preview.data.valid && preview.data.message ? preview.data : null;
-  const blocked = tooLarge || tooSmall || tooHeavy || !!refusal || !!backendDown;
+  // Every area can be analysed (no forest / latitude refusal). Only a geometry the backend cannot accept blocks Run.
+  const invalidShape = !tooLarge && !tooSmall && !tooHeavy && preview.data && !preview.data.valid && preview.data.message ? preview.data : null;
+  const blocked = tooLarge || tooSmall || tooHeavy || !!invalidShape || !!backendDown;
   const yearOpt = (y: number) => ({ value: y, label: String(y), meta: sourceLabel(y).title === 'LANDSAT' ? 'Landsat' : 'S2 · DW' });
 
   return (
@@ -68,16 +121,7 @@ export function SelectionPanel() {
           <div className="t-data mt-1 text-[10.5px] text-ink-3">{(area * 100).toLocaleString('en-US', { maximumFractionDigits: 0 })} ha</div>
           <div className="mt-1 text-[10px] text-ink-4" data-testid="area-limits">Analysable: {min}–{(interactiveMax ?? max).toLocaleString()} km²</div>
         </div>
-        <div className="bg-surface px-3.5 py-3">
-          {/* REFERENCE DATA (Hansen 2000), deliberately styled unlike a TERRATRACE measurement. */}
-          <div className="t-label flex items-center gap-1.5 text-ink-4" data-testid="reference-tree-cover"><Trees size={11} /> Reference data</div>
-          <div className="mt-1.5 flex items-baseline gap-1">
-            {preview.isLoading ? <span className="skeleton h-5 w-14" /> : preview.data?.forest_cover_pct != null ? (
-              <><span className="t-data text-[16px] leading-none text-ink-3">{preview.data.forest_cover_pct.toFixed(0)}</span><span className="text-[11px] text-ink-4">% tree cover</span></>
-            ) : <span className="text-[12px] text-ink-4">Not available</span>}
-          </div>
-          <div className="mt-1 text-[10.5px] leading-snug text-ink-4" title={preview.data?.forest_source ?? undefined}>Hansen 2000 tree cover (≥ 30 % canopy) — not a TERRATRACE result</div>
-        </div>
+        <SelectionReference />
       </div>
 
       <div className="mt-5">
@@ -95,7 +139,7 @@ export function SelectionPanel() {
       <div className="mt-5 space-y-3">
         {tooLarge && <StateView compact kind="error" title="Area too large">Please select a smaller area for analysis — up to {max.toLocaleString()} km² (this selection is {area.toLocaleString('en-US', { maximumFractionDigits: 0 })} km²).</StateView>}
         {tooSmall && <StateView compact kind="error" title="Area too small">Select at least {min} km² so change regions can exceed the minimum mapping unit.</StateView>}
-        {refusal && <StateView compact kind="error" title="Area cannot be analysed"><span data-testid="area-refusal" data-code={refusal.code ?? ''}>{refusal.message}</span></StateView>}
+        {invalidShape && <StateView compact kind="error" title="Invalid area shape"><span data-testid="area-invalid" data-code={invalidShape.code ?? ''}>{invalidShape.message}</span></StateView>}
         {tooHeavy && <StateView compact kind="error" title="Analysis area exceeds the interactive limit">Analysis area exceeds TerraTrace's {interactiveMax?.toLocaleString()} km² limit. Select a smaller area — no forest-change analysis is run for this one.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && backendDown && <StateView compact kind="service-unavailable" title="Live analysis unavailable">Live Earth observation is temporarily unavailable. TERRATRACE does not display estimated, simulated, or placeholder measurements.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && !backendDown && health && !eeReady && (

@@ -179,3 +179,48 @@ Hasdeo Arand (measured 2026-10-09): Hansen year-2000 tree cover 22.5 % of land, 
 TerraTrace's own 2019 forest mask ~57 %. Map layers (hillshade, slope, Hansen tree cover 2000, Hansen loss year) are
 served by `/api/tiles/{aid}/context/{layer}/…` with the same validation, cache and Earth Engine concurrency cap as
 the other tile routes.
+
+**Land cover and surface (context version 2).** The context also reports the **ESA WorldCover v200 (2021) land-cover
+breakdown** — every class present (tree cover, shrubland, grassland, cropland, built-up, bare / sparse vegetation,
+snow and ice, permanent water, herbaceous wetland, mangroves, moss and lichen) as hectares and share of the area
+WorldCover maps (water included) — and the Hansen data mask as land / water / no data. From these measured values
+only, an area is described as **open water** (no Copernicus land elevation and nothing in WorldCover's map — open ocean
+is outside both), **mostly water** or **mostly snow and ice** (≥ half of the WorldCover-mapped area), or land. Hansen's
+"no data" (e.g. ice sheets, open ocean) is reported as such, never as zero tree cover. Measured 2026-10-10:
+Nile delta, Egypt (30.997° N, 30.849° E): cropland 86.9 %, built-up 10.6 %, tree cover 1.2 %, Hansen 2000 tree cover
+< 1 %; open Atlantic (10° S, 30° W): no DEM, no WorldCover, Hansen no data, 0 Sentinel-2 scenes in 2024; Greenland
+ice sheet (72° N, 40° W): 3,085–3,112 m, WorldCover snow and ice 100 %, Hansen no data.
+
+## 10. Every location: no forest, little forest, no imagery
+
+Since 2026-10-10 every area on Earth can be opened and analysed; nothing is refused for lack of forest.
+
+* **Change only inside the forest mask.** A change event requires *forest in the baseline year* AND no forest in the
+  comparison year AND the spectral and tree-probability tests (`change_mask`); yearly loss requires forest in the
+  earlier year. A pixel that was crop, bare soil or water in the baseline can never be reported as change. Gross
+  *gain* (non-forest → forest between consecutive years) is kept, stays out of change events and headline totals,
+  and carries its own warning when the area has little forest (below).
+* **No forest to monitor.** When TerraTrace's forest mask holds **< 2 ha** in the baseline year (one minimum mapping
+  unit — the smallest area a change event can have), the analysis completes as READY with the measured forest area
+  (possibly 0 ha), 0 events and the statement "There was little or no forest to monitor here". It is a measured
+  result, not a failure, and nothing is added to fill the page.
+* **Reliability cautions** — display only; they never change a status or a number, and each names the datasets and
+  years it compares. The thresholds are **chosen heuristics**, not a standard definition:
+  * **Little forest:** forest mask in the baseline year **< 10 % of the observed area or < 100 ha**. Reasoning: below
+    roughly a tenth of the area, or a few dozen minimum mapping units, misclassified orchards, irrigated crops or
+    wetlands can weigh as much as real forest, and gross gain in particular may reflect such misclassification — so the
+    gain figure itself carries "May reflect crop or orchard misclassification, not new forest". (FAO's 10 % canopy
+    figure informed the order of magnitude, but this is a pixel-share heuristic on TerraTrace's own mask, not the FAO
+    forest definition.)
+  * **Datasets disagree:** TerraTrace's forest share and ESA WorldCover v200's tree-cover share differ by **more than
+    10 percentage points in the same year (2021**, or the nearest analysable year, which is named). Reasoning: at the
+    four featured sites the same-year gap is 0.1–4.6 points (Rondônia 1.9, Hasdeo 4.6, Similipal 0.3, Silent Valley
+    0.1), so 10 points flags a real disagreement without flagging areas that agree. Hansen 2000 is shown but is not a
+    trigger: it is twenty years older and uses a canopy-density definition (e.g. Rondônia 73.3 % in 2000 vs 40.6 % in
+    2021 is real forest loss, not disagreement).
+* **No imagery.** Open ocean (Sentinel-2 does not image it) and areas outside Sentinel-2's systematic band (56° S –
+  84° N) complete at once as UNAVAILABLE with that reason — no Earth Engine analysis work — and the reference context
+  is still shown. Areas with too few clear observations are reported as before (insufficient usable imagery).
+* **One rounding rule for shares** (`services/units.py` / `lib/format.ts`): not measured "—"; a measured 0 "0 %";
+  more than 0 but less than 1 "< 1 %"; otherwise one decimal (e.g. "22.5 %"). Shares are stored with four decimals and
+  rounded once, at display.

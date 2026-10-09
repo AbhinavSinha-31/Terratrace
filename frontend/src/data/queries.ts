@@ -43,14 +43,20 @@ export const useImageryDecision = (aoi: string | null, year: number) =>
  * The candidate selection (search / drawn / clicked area, no study yet) registered with the backend so its
  * live imagery can load before any analysis. Registration is cheap (validation only) and never analyses.
  */
-export function useCandidateAoi(): StudyArea | null {
+/** Registration of the current search/drawn selection (same geometry -> same area id; cached). */
+export function useCandidateRegistration() {
   const candidate = useUi(selectCandidate);
   const geometry = candidate?.geometry ?? null;
-  const q = useQuery({
+  return useQuery({
     queryKey: ['aoi-register', geometry ? JSON.stringify(geometry.coordinates) : null],
     queryFn: geometry ? () => client.registerAoi(geometry, candidate?.name) : skipToken,
     staleTime: Infinity, retry: false,
   });
+}
+
+export function useCandidateAoi(): StudyArea | null {
+  const geometry = useUi(selectCandidate)?.geometry ?? null;
+  const q = useCandidateRegistration();
   return geometry ? q.data ?? null : null;
 }
 

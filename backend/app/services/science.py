@@ -482,3 +482,69 @@ def evaluate(years: list[dict[str, Any]], aoi_ha: float, event_window: tuple[int
     if event_window is None:
         return "UNAVAILABLE", "insufficient_clear_observations", NO_WINDOW_REASON, issues
     return "READY", None, None, issues
+
+
+# --------------------------------------------------------------------------- reliability cautions (display only)
+# Approved 2026-10-10. Chosen HEURISTICS (not a standard definition), applied to a READY result; they add a statement or
+# a caution, never change a status or a number:
+NO_FOREST_HA = MMU_HA          # < one minimum mapping unit of forest: no change event can exist -> "no forest to monitor"
+LITTLE_FOREST_PCT = 10.0       # forest mask < 10 % of the observed area, or ...
+LITTLE_FOREST_HA = 100.0       # ... < 100 ha (= 50 minimum mapping units) -> "little forest"
+DISAGREE_PTS = 10.0            # same-year gap TerraTrace mask vs ESA WorldCover 2021 tree cover > 10 points
+COMPARE_YEAR = 2021            # ESA WorldCover v200's year
+
+
+def cautions(summary: dict[str, Any] | None, context: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Statements and cautions for a READY result, from its MEASURED figures and the area's reference context.
+    Each names the datasets and years it compares. Never estimates; a comparison that cannot be made is not made."""
+    from .units import fmt_share
+    if not summary:
+        return []
+    kpis = summary.get("kpis") or {}
+    years = summary.get("years") or []
+    by_year = {y["year"]: y for y in years if y.get("passes_quality") and y.get("forest_ha") is not None}
+    b = kpis.get("baseline_year")
+    base = by_year.get(b)
+    out: list[dict[str, Any]] = []
+    if base is not None:
+        f_ha, valid = base["forest_ha"], base.get("valid_ha")
+        f_pct = 100.0 * f_ha / valid if valid else None
+        gain_note = "May reflect crop or orchard misclassification, not new forest."
+        if f_ha < NO_FOREST_HA:
+            # The statement supersedes the little-forest caution (a "less reliable" box next to 0 ha says nothing more);
+            # the warning on the gain figure still applies.
+            out.append({
+                "code": "no_forest_to_monitor", "kind": "statement",
+                "message": (f"There was little or no forest to monitor here: TerraTrace's forest mask found {f_ha:,.1f} ha in {b}, "
+                            "so no forest change could be detected. This is a measured result, not a failure. "
+                            "The historical Landsat record (1984–2015) is not shown here: its NDVI forest proxy cannot tell green "
+                            "crops from forest."),
+                "datasets": [f"TerraTrace forest mask {b}"],
+                "applies_to": ["gross_gain_ha"], "gain_note": gain_note,
+            })
+        elif f_ha < LITTLE_FOREST_HA or (f_pct is not None and f_pct < LITTLE_FOREST_PCT):
+            out.append({
+                "code": "little_forest", "kind": "caution",
+                "message": (f"Little forest: TerraTrace's forest mask covers {fmt_share(f_pct)} of the observed area in {b} "
+                            f"({f_ha:,.1f} ha). Results for this area are less reliable: misclassified orchards, irrigated crops or "
+                            "wetlands can weigh as much as real forest. The historical Landsat record (1984–2015) is not shown here: "
+                            "its NDVI forest proxy cannot tell green crops from forest."),
+                "datasets": [f"TerraTrace forest mask {b}"],
+                # Shown ON the gain figures (gross gain stays out of change events and headline totals).
+                "applies_to": ["gross_gain_ha"], "gain_note": gain_note,
+            })
+    wc = (((context or {}).get("forest") or {}).get("worldcover_2021") or {})
+    if wc.get("status") == "READY" and wc.get("share_of_land_pct") is not None and by_year:
+        y = min(by_year, key=lambda yr: (abs(yr - COMPARE_YEAR), yr))   # 2021, else the nearest analysable year (named)
+        row = by_year[y]
+        tt_pct = 100.0 * row["forest_ha"] / row["valid_ha"] if row.get("valid_ha") else None
+        if tt_pct is not None and abs(tt_pct - wc["share_of_land_pct"]) > DISAGREE_PTS:
+            out.append({
+                "code": "datasets_disagree", "kind": "caution",
+                "message": (f"Datasets disagree: TerraTrace's forest mask covers {fmt_share(tt_pct)} of the observed area in {y}, "
+                            f"ESA WorldCover v200 maps {fmt_share(wc['share_of_land_pct'])} of the land as tree cover in 2021 "
+                            f"(a gap of more than {DISAGREE_PTS:.0f} points). Results for this area are less reliable."
+                            + ("" if y == COMPARE_YEAR else f" {COMPARE_YEAR} is not analysable here, so {y} is compared.")),
+                "datasets": [f"TerraTrace forest mask {y}", "ESA WorldCover v200 2021"],
+            })
+    return out

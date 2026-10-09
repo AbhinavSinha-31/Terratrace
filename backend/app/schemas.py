@@ -105,6 +105,17 @@ class AreaContext(BaseModel):
     layers: list[ContextLayer] | None = None
 
 
+class Caution(BaseModel):
+    """A statement ('no forest to monitor') or reliability caution for a READY result; names the datasets + years."""
+    model_config = ConfigDict(extra="allow")
+    code: Literal["no_forest_to_monitor", "little_forest", "datasets_disagree"]
+    kind: Literal["statement", "caution"]
+    message: str
+    datasets: list[str]
+    applies_to: list[str] | None = None
+    gain_note: str | None = None
+
+
 class AnalysisEnvelope(BaseModel):
     model_config = ConfigDict(extra="allow")
     analysis_id: str
@@ -120,6 +131,7 @@ class AnalysisEnvelope(BaseModel):
     layers: dict[str, Any] | None = None
     # Reference context of the area (cached; null until measured). Present whatever the analysis status.
     context: AreaContext | None = None
+    cautions: list[Caution] = []
 
 
 class AoiPreviewRequest(BaseModel):
@@ -148,8 +160,6 @@ class AoiPreview(BaseModel):
     area_ha: float | None = None
     centroid: tuple[float, float] | None = None
     bbox: tuple[float, float, float, float] | None = None
-    forest_cover_pct: float | None = None
-    forest_source: str | None = None
 
 
 class ExplainRequest(BaseModel):

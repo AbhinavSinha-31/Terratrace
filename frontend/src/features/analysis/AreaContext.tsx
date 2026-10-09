@@ -1,8 +1,8 @@
-import { Mountain, Trees } from 'lucide-react';
+import { Layers3, Mountain, Trees } from 'lucide-react';
 import type { AreaContext, ContextSource } from '../../data/contracts';
 import { useAreaContext, useHealth } from '../../data/queries';
 import { useUi } from '../../state/store';
-import { fmtHa } from '../../lib/format';
+import { fmtHa, fmtShare } from '../../lib/format';
 
 /** "dataset · year" — printed under EVERY reference value (never a bare number). */
 function Src({ s, extra }: { s: ContextSource; extra?: string }) {
@@ -59,14 +59,20 @@ function Body({ ctx }: { ctx: AreaContext }) {
   const e = t.elevation_m;
   const tc = f.tree_cover_2000, loss = f.loss_by_year, gain = f.gain_2000_2012, wc = f.worldcover_2021;
   const tu = t.status === 'READY' ? null : t.reason ?? 'Not measured.';
+  const lc = ctx.land_cover_2021;
   return (
     <>
+      {ctx.surface?.message && (
+        <p className="rounded-md bg-white/[0.04] px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-2 shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="context-surface" data-kind={ctx.surface.kind}>
+          {ctx.surface.message}
+        </p>
+      )}
       <section className="overflow-hidden rounded-md shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="context-terrain">
         <div className="t-label flex items-center gap-1.5 border-b border-line px-3.5 py-2 text-ink-3"><Mountain size={11} />Terrain</div>
         <Row label="Elevation (mean)" value={e?.mean != null ? `${e.mean} m` : '—'} source={t.source} unavailable={tu}
           extra={e?.min != null && e.max != null ? `range ${e.min}–${e.max} m${e.p5 != null && e.p95 != null ? `, 5–95 %: ${e.p5}–${e.p95} m` : ''}` : undefined} />
         <Row label="Slope (mean)" value={t.slope_mean_deg != null ? `${t.slope_mean_deg}°` : '—'} source={t.source} unavailable={tu} />
-        <Row label={`Steeper than ${t.steep_threshold_deg}°`} value={t.steep_share_pct != null ? `${t.steep_share_pct} % of the area` : '—'} source={t.source} unavailable={tu} />
+        <Row label={`Steeper than ${t.steep_threshold_deg}°`} value={t.steep_share_pct != null ? `${fmtShare(t.steep_share_pct)} of the area` : '—'} source={t.source} unavailable={tu} />
         {t.source.note && <p className="border-t border-line px-3.5 py-2 text-[10px] leading-snug text-ink-4">{t.source.note}</p>}
       </section>
 
@@ -74,19 +80,43 @@ function Body({ ctx }: { ctx: AreaContext }) {
         <div className="t-label flex items-center gap-1.5 border-b border-line px-3.5 py-2 text-ink-3"><Trees size={11} />Forest cover · reference</div>
         <Row label="Tree cover · year-2000 baseline" source={tc.source} extra={`canopy ≥ ${tc.canopy_threshold_pct} %`}
           unavailable={tc.status === 'READY' ? null : tc.reason}
-          value={tc.share_of_land_pct != null && tc.area_ha != null ? `${tc.share_of_land_pct} % of land · ${fmtHa(tc.area_ha)} ha` : '—'} />
+          value={tc.share_of_land_pct != null && tc.area_ha != null ? `${fmtShare(tc.share_of_land_pct)} of land · ${fmtHa(tc.area_ha)} ha` : '—'} />
         <Row label="Tree cover loss · 2001–2025" source={loss.source} unavailable={loss.status === 'READY' ? null : loss.reason}
-          value={loss.total_ha != null ? `${fmtHa(loss.total_ha)} ha${loss.share_of_2000_tree_cover_pct != null ? ` · ${loss.share_of_2000_tree_cover_pct} % of the 2000 cover` : ''}` : '—'} />
+          value={loss.total_ha != null ? `${fmtHa(loss.total_ha)} ha${loss.share_of_2000_tree_cover_pct != null ? ` · ${fmtShare(loss.share_of_2000_tree_cover_pct)} of the 2000 cover` : ''}` : '—'} />
         {loss.status === 'READY' && loss.years && <LossBars years={loss.years} />}
         <Row label="Tree cover gain · 2000–2012 only" source={gain.source} unavailable={gain.status === 'READY' ? null : gain.reason}
           value={gain.area_ha != null ? `${fmtHa(gain.area_ha)} ha` : '—'} />
         <Row label="Tree cover class · 2021" source={wc.source} unavailable={wc.status === 'READY' ? null : wc.reason}
-          value={wc.share_of_land_pct != null && wc.area_ha != null ? `${wc.share_of_land_pct} % of land · ${fmtHa(wc.area_ha)} ha` : '—'} />
+          value={wc.share_of_land_pct != null && wc.area_ha != null ? `${fmtShare(wc.share_of_land_pct)} of land · ${fmtHa(wc.area_ha)} ha` : '—'} />
         <p className="border-t border-line px-3.5 py-2 text-[10px] leading-snug text-ink-4" data-testid="context-not-current">
           None of these is current forest cover. The datasets define trees differently (Hansen: canopy ≥ {tc.canopy_threshold_pct} % at 30 m;
           WorldCover: a land-cover class at 10 m) and are not comparable with each other or with TerraTrace's forest mask. {loss.source.note}
         </p>
       </section>
+
+      {lc && (
+        <section className="overflow-hidden rounded-md shadow-[0_0_0_1px_rgba(255,255,255,0.065)]" data-testid="context-land-cover">
+          <div className="t-label flex items-center gap-1.5 border-b border-line px-3.5 py-2 text-ink-3"><Layers3 size={11} />Land cover · reference</div>
+          {lc.status === 'READY' && lc.classes ? (
+            <ul className="px-3.5 py-2.5" data-testid="context-row">
+              {lc.classes.map((k) => (
+                <li key={k.class} className="flex items-center gap-2 py-0.5 text-[11.5px]" data-testid="land-cover-class">
+                  <span className="w-[46%] truncate text-ink-3">{k.name}</span>
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]"><span className="block h-full rounded-full bg-ink-3/70" style={{ width: `${Math.min(100, k.share_pct)}%` }} /></span>
+                  <span className="t-data w-[52px] text-right text-ink">{fmtShare(k.share_pct)}</span>
+                </li>
+              ))}
+              <Src s={lc.source} extra="share of the mapped area" />
+            </ul>
+          ) : (
+            <div className="px-3.5 py-2.5" data-testid="context-row">
+              <div className="text-[11px] text-warn" data-testid="context-unavailable">Unavailable</div>
+              <div className="mt-0.5 text-[10.5px] leading-snug text-ink-3">{lc.reason}</div>
+              <Src s={lc.source} />
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }

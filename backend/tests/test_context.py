@@ -82,8 +82,9 @@ def test_parse_reads_the_real_hasdeo_measurements():
     assert t["status"] == "READY" and t["elevation_m"] == {"min": 351, "p5": 410, "mean": 514, "p95": 626, "max": 987}
     assert t["slope_mean_deg"] == 6.2 and t["steep_share_pct"] == 0.7 and t["dem_coverage_pct"] == 100.0
     f = c["forest"]
-    assert f["tree_cover_2000"]["share_of_land_pct"] == 22.5 and f["tree_cover_2000"]["area_ha"] == 27007.6
-    assert f["worldcover_2021"]["share_of_land_pct"] == 61.0
+    # Shares keep 4 decimals; rounding happens once, at display (units.fmt_share / lib/format.ts fmtShare).
+    assert f["tree_cover_2000"]["share_of_land_pct"] == 22.4525 and f["tree_cover_2000"]["area_ha"] == 27007.6
+    assert f["worldcover_2021"]["share_of_land_pct"] == 61.0287
     assert f["gain_2000_2012"]["area_ha"] == 0.7
     years = f["loss_by_year"]["years"]
     assert [y["year"] for y in years] == list(range(2001, 2026))
@@ -146,7 +147,7 @@ def test_aoi_route_returns_context_only_when_asked_and_measures_once(ee_context)
     assert "context" not in plain and ee_context == []
     a = client.get("/api/aoi/hasdeo-arand", params={"include": "context"}).json()
     ctx = a["context"]
-    assert ctx["status"] == "READY" and ctx["label"] == context.LABEL and ctx["forest"]["worldcover_2021"]["share_of_land_pct"] == 61.0
+    assert ctx["status"] == "READY" and ctx["label"] == context.LABEL and ctx["forest"]["worldcover_2021"]["share_of_land_pct"] == 61.0287
     assert [l["id"] for l in ctx["layers"]] == ["hillshade", "slope", "treecover2000", "lossyear"]
     assert all(l["reference"] and l["tiles"][0].startswith("/api/tiles/hasdeo-arand/context/") for l in ctx["layers"])
     client.get("/api/aoi/hasdeo-arand", params={"include": "context"})
@@ -177,7 +178,7 @@ def test_context_cache_is_keyed_by_dataset_version(ee_context):
     client.get("/api/aoi/hasdeo-arand", params={"include": "context"})
     files = [f.name for f in context.CACHE.glob("*.json")]
     assert files == [f"hasdeo-arand-{context.CONTEXT_VERSION}.json"]
-    assert context.CONTEXT_VERSION.startswith("ctx-1-")
+    assert context.CONTEXT_VERSION.startswith("ctx-2-")   # 2: land-cover breakdown, Hansen mask, surface
 
 
 def test_analysis_envelopes_carry_cached_context_without_computing_it(monkeypatch):

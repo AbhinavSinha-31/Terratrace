@@ -148,7 +148,11 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
           <Tooltip content="Next composite"><IconButton label="Next composite" size="sm" onClick={() => ui().stepYear(1)} disabled={year >= years[years.length - 1]}><SkipForward size={14} /></IconButton></Tooltip>
         </div>
         {!compact && <div className="t-label !text-[9px] text-ink-3" data-testid="analysis-window-label">Analysis window</div>}
-        {!compact && (
+        {!compact && measured && windowYears.length === 0 && (
+          // Measured: no year can be analysed here (e.g. open ocean, no Sentinel-2 / Landsat imagery). Never empty menus.
+          <div className="text-[11px] text-ink-3" data-testid="no-analysable-years">No analysable years for this area</div>
+        )}
+        {!compact && !(measured && windowYears.length === 0) && (
           <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
             <Menu label="Start year" value={sel.start} options={yearOpts.filter((o) => o.value < sel.end)} onChange={(v) => ui().setWindow(Number(v), sel.end)} className="!h-7" />
             <span>→</span>

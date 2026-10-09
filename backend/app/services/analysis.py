@@ -142,12 +142,15 @@ def _envelope(aid: str, aoi: dict[str, Any], b: int, c: int, status: str, *, cod
         "quality": quality,
         # Reference context (terrain, forest cover) — whatever the analysis status; cached only, never computed here.
         "context": area_context.cached(aid),
+        "cautions": [],
     }
     if diag:
         env["diagnostics"] = diag
     if status == "READY" and result:
         env["source"] = {"landsat": True, "sentinel2": True, "dynamicWorld": True, "hansen": True}
         env.update(summary=result["summary"], events=result["events"], layers=result["layers"])
+        # Statements / reliability cautions (display only; thresholds in science.py) from the result + reference context.
+        env["cautions"] = sc.cautions(result["summary"], env["context"])
     elif quality is not None:
         env["source"] = {"landsat": True, "sentinel2": True, "dynamicWorld": True, "hansen": False}  # queried, not concluded
     return env
@@ -339,64 +342,36 @@ def _job_budget() -> float:
     return settings.ee_timeout_s + settings.ee_request_deadline_s
 
 
-# ----------------------------------------------------------------------------- pre-flight (custom areas)
+# ----------------------------------------------------------------------------- where no imagery can exist
+# Every area can be opened and analysed (2026-10-10: no forest-based refusal). Two cases have no satellite imagery at
+# all; the analysis completes at once with an explicit UNAVAILABLE result (no Earth Engine work), and the reference
+# context of the area is still shown.
 # Sentinel-2 MSI systematically acquires land between 56° S and 84° N (ESA mission specification); Dynamic World is
-# derived from it. Outside that band there is nothing to composite, so the area is refused before any work.
+# derived from it.
 S2_LAT_MIN, S2_LAT_MAX = -56.0, 84.0
-# Below this share of reference tree cover (Hansen 2000, >= 30 % canopy) an area has no forest to analyse. A gate on
-# WHETHER to run, never a result: an unmeasured tree cover does not block (the analysis then decides honestly).
-MIN_FOREST_PCT = 1.0
-_preflight_cache: LRUDict = LRUDict(settings.memory_cache_entries)
 
 
-def coverage_refusal(bbox: Any) -> tuple[str, str] | None:
-    """Refusal if any part of the area lies outside Sentinel-2's systematic acquisition band."""
+def outside_sentinel2_band(bbox: Any) -> str | None:
+    """Public reason if any part of the area lies outside Sentinel-2's systematic acquisition band, else None."""
     _, s, _, n = bbox
     if s >= S2_LAT_MIN and n <= S2_LAT_MAX:
         return None
     lat = (s + n) / 2
-    return "outside_sentinel2_coverage", (
-        f"This area is at {abs(lat):.2f}° {'S' if lat < 0 else 'N'}, outside Sentinel-2 coverage (land between 56° S and 84° N), "
-        "so there is no imagery to analyse. Choose an area within that range.")
+    return (f"No Sentinel-2 imagery at this latitude ({abs(lat):.2f}° {'S' if lat < 0 else 'N'}): Sentinel-2 systematically images "
+            "land between 56° S and 84° N, so there is nothing to analyse here. The reference context of the area is still shown.")
 
 
-def forest_refusal(tree_cover_pct: float | None) -> tuple[str, str] | None:
-    """Refusal if the MEASURED reference tree cover is below MIN_FOREST_PCT (None = not measured: never refused)."""
-    if tree_cover_pct is None or tree_cover_pct >= MIN_FOREST_PCT:
-        return None
-    return "no_forest", (
-        f"Reference tree cover is {tree_cover_pct:.1f} % of this area (Hansen et al., year 2000, ≥ 30 % canopy), so there is "
-        "essentially no forest to analyse. Choose a forested area.")
-
-
-def preflight(aoi: dict[str, Any]) -> tuple[str, str] | None:
-    """(code, message) if a custom area cannot yield a forest-change analysis, else None. Featured investigations are
-    curated and skip it. Coverage is checked first (no network); tree cover is the Hansen reference preview."""
-    if not aoi.get("custom"):
-        return None
-    refused = coverage_refusal(aoi["bbox"])
-    if refused:
-        return refused
-    key = aoi["id"]
-    if key not in _preflight_cache:
-        from ..providers.reference import hansen
-        from .geometry import in_aoi
-        geom = aoi["geometry"]
-        _preflight_cache[key] = hansen.tree_cover_fraction(tuple(aoi["bbox"]), lambda lon, lat: in_aoi(lon, lat, geom))
-    return forest_refusal(_preflight_cache[key])
+OPEN_WATER_REASON = ("Sentinel-2 does not image the open ocean, so there is no imagery to analyse here. "
+                     "The reference context shows what is known about this area.")
 
 
 def create_job(aid: str, b: int, c: int, rid: str | None = None) -> Job:
     """Create (or join) the analysis job for an AOI and window. Returns immediately.
-    Raises AoiError for an invalid window or an area that cannot be analysed (pre-flight), and AnalysisNotFound for an
-    unknown AOI — all before any job exists."""
+    Raises AoiError for an invalid window and AnalysisNotFound for an unknown AOI (both before any job exists).
+    Every area can be analysed: an area without forest gets an honest result, never a refusal."""
     if not (1984 <= b < c <= 2100):
         raise AoiError("invalid_window", "The comparison year must be after the baseline year.")
     aoi = aoi_doc(aid)
-    refused = preflight(aoi)
-    if refused:
-        log.info("Pre-flight refused %s: %s", aid, refused[0])
-        raise AoiError(*refused)
     key = _key(aid, b, c)
     if rid:
         _rid_key[rid] = key
@@ -461,9 +436,18 @@ def _execute(job: Job) -> None:
             log.info("[%s] refused: %.0f km² > interactive limit %.0f km²", job.id, limit["selected_area_km2"], limit["maximum_area_km2"])
             job.finish(_too_large_envelope(aid, aoi, b, c, limit))
             return
+        # Reference context first (cached after the first measurement; never fails the job): it is shown with every
+        # result, and it tells open water apart from land before any analysis work.
+        ctx = area_context.ensure(aid, analysis_target(aoi)["geometry"])
+        off_band = outside_sentinel2_band(aoi["bbox"])
+        if off_band:
+            job.finish(_envelope(aid, aoi, b, c, "UNAVAILABLE", code="outside_sentinel2_coverage", user_message=off_band, retryable=False))
+            return
+        if (ctx.get("surface") or {}).get("kind") == "open_water":
+            job.finish(_envelope(aid, aoi, b, c, "UNAVAILABLE", code="open_water", user_message=OPEN_WATER_REASON, retryable=False))
+            return
         cached = _results.get(key) or _load_result(key)
         if cached:
-            area_context.ensure(aid, analysis_target(aoi)["geometry"])   # once per area; never fails the job
             job.finish(_from_result(aid, aoi, b, c, cached))
             return
         if _service_unavailable():
@@ -479,7 +463,6 @@ def _execute(job: Job) -> None:
         if result.get("status") in ("READY", "UNAVAILABLE", "INVALID_ANALYSIS") and not result.get("diagnostic"):
             _results[key] = result
             _save_result(key, result, analysis_target(aoi)["geometry"])
-        area_context.ensure(aid, analysis_target(aoi)["geometry"])   # reference context; never fails the job
         job.finish(_from_result(aid, aoi, b, c, result))
     except AnalysisCancelled:
         log.info("[%s] stopped after cancellation", job.id)
@@ -647,6 +630,13 @@ async def history(aid: str, b: int, c: int) -> dict[str, Any]:
     key = _history_key(aid, b, c)
     if _area_limit(aoi):
         raise HistoryUnavailable(422, "analysis_too_large")
+    # The historical forest proxy (Landsat NDVI >= 0.60) cannot tell green crops from forest (measured 2026-10-10: Nile
+    # delta cropland read as 52-63 % "forest" in 1990-2015). Where the window's own result has little or no forest, its
+    # 1984-2015 record would report change on non-forest pixels, so it is withheld — never shown as forest or change.
+    win = _results.get(_key(aid, b, c)) or _load_result(_key(aid, b, c))
+    if win and win.get("status") == "READY" and any(
+            x["code"] in ("no_forest_to_monitor", "little_forest") for x in sc.cautions(win.get("summary"), None)):
+        raise HistoryUnavailable(422, "history_withheld")
     cached = _load_history(key)
     if cached:
         return _describe_history(cached, aoi)
@@ -792,10 +782,8 @@ def purge_stale_results() -> int:
     return n
 
 def preview(geometry: dict[str, Any]) -> dict[str, Any]:
-    """Cheap, non-analytical AOI preview: validity, geodesic area, Hansen reference tree cover."""
-    from ..providers.reference import hansen
-    from .geometry import in_aoi
-
+    """Cheap, non-analytical AOI preview: validity and geodesic area only. Reference tree cover comes from the area's
+    Earth Engine context once it is registered (never from sampled map tiles)."""
     try:
         aoi = validate_aoi(geometry)
         valid, code, message = True, None, None
@@ -805,18 +793,10 @@ def preview(geometry: dict[str, Any]) -> dict[str, Any]:
         except AoiError:
             return {"valid": False, "code": e.code, "message": e.message}
         valid, code, message = False, e.code, e.message
-    forest = None
-    if aoi.area_km2 <= 50000:
-        forest = hansen.tree_cover_fraction(aoi.bbox, lambda lon, lat: in_aoi(lon, lat, aoi.geometry))
-    refused = valid and (coverage_refusal(aoi.bbox) or forest_refusal(forest))   # the analysis' own pre-flight, shown up front
-    if refused:
-        valid, (code, message) = False, refused
     return {
         "valid": valid, "code": code, "message": message,
         "area_km2": round(aoi.area_km2, 2), "area_ha": round(aoi.area_ha, 1),
         "centroid": aoi.centroid, "bbox": aoi.bbox,
-        "forest_cover_pct": forest,
-        "forest_source": "Hansen et al. tree cover 2000 (≥ 30 % canopy) — reference, not a TERRATRACE detection" if forest is not None else None,
     }
 
 

@@ -112,6 +112,7 @@ export function fromEnvelope(env: AnalysisEnvelope): AnalysisResult {
     diagnostics: import.meta.env.DEV ? env.diagnostics ?? null : null,
     quality: env.quality ?? null,
     bundle: ready ? { id: env.analysis_id, summary: env.summary!, events: env.events!, layers: normalizeLayers(env.layers!) } : null,
+    cautions: ready ? env.cautions ?? [] : [],
   };
 }
 
@@ -246,7 +247,7 @@ export const client = {
   async preview(geometry: AoiGeometry): Promise<AoiPreview> {
     const local = (): AoiPreview => ({
       valid: true, area_km2: geometryAreaKm2(geometry), area_ha: geometryAreaKm2(geometry) * 100,
-      centroid: geometryCentroid(geometry), bbox: geometryBbox(geometry), forest_cover_pct: null, forest_source: null,
+      centroid: geometryCentroid(geometry), bbox: geometryBbox(geometry),
     });
     if (backend === false) return local();
     try {

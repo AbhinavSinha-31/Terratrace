@@ -410,6 +410,49 @@ async function run(label, { offline }) {
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   }
 
+  // ---- I: every location (2026-10-10). No area is refused for lack of forest; the selection card shows the area's
+  // Earth Engine reference context (never a sampled or guessed number); the panel never overlaps the legend.
+  {
+    const select = async (coords) => {
+      await page.goto(`${BASE}#/explore`, { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => window.__tt?.loaded, null, { timeout: 60000 }).catch(() => {});
+      // Start from no selection, so the card read below can only belong to THIS area (never a previous one).
+      await page.evaluate(() => window.__ttUi.getState().setSelection(null));
+      await page.locator('[data-testid="reference-tree-cover"]').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+      const box = page.getByRole('combobox').or(page.getByPlaceholder(/search/i)).first();
+      await box.click(); await box.fill(coords); await box.press('Enter');
+      const [lat, lon] = coords.split(',').map((v) => Math.abs(Number(v)).toFixed(3));
+      await page.getByText(new RegExp(`${lat}°[NS], ${lon}°[EW]`)).first().waitFor({ timeout: 30000 }).catch(() => {});
+      await page.locator('[data-testid="reference-tree-cover"]').waitFor({ timeout: 30000 }).catch(() => {});
+      await page.waitForFunction(() => ['READY', 'UNAVAILABLE'].includes(document.querySelector('[data-testid="reference-tree-cover"]')?.getAttribute('data-status')), null, { timeout: 120000 }).catch(() => {});
+      return {
+        status: await page.locator('[data-testid="reference-tree-cover"]').getAttribute('data-status').catch(() => null),
+        card: (await page.locator('[data-testid="reference-tree-cover"]').innerText().catch(() => '')).replace(/\s+/g, ' '),
+        body: await page.locator('body').innerText(),
+        enabled: await page.getByRole('button', { name: /Analyze forest change|Open area/ }).first().isEnabled().catch(() => false),
+      };
+    };
+    const overlaps = async () => {
+      const [p, l, b] = await Promise.all(['[data-testid="selection-panel-wrap"]', '[data-testid="map-legend"]'].map((s) => page.locator(s).boundingBox().catch(() => null))
+        .concat(page.getByRole('button', { name: /Analyze forest change|Open area/ }).first().boundingBox().catch(() => null)));
+      const hit = (a, c) => !!a && !!c && !(a.y + a.height <= c.y || c.y + c.height <= a.y || a.x + a.width <= c.x || c.x + c.width <= a.x);
+      return { panelLegend: hit(p, l), buttonLegend: hit(b, l) };
+    };
+    const nile = await select('30.997, 30.849');
+    check(!/Area cannot be analysed|Choose a forested area/.test(nile.body), `${label}: a non-forest area (Nile delta cropland) is not refused`);
+    const ov = await overlaps();
+    check(!ov.panelLegend && !ov.buttonLegend, `${label}: selection panel and its action button never overlap the map legend`, JSON.stringify(ov));
+    if (offline) {
+      check(nile.status === 'UNAVAILABLE' && !/\d\s?%/.test(nile.card), `${label}: offline, the reference card says unavailable and shows no number`, nile.card);
+    } else {
+      check(nile.status === 'READY' && /Tree cover · 2000 < 1 %/.test(nile.card) && /Hansen GFC v1\.13 · 2000/.test(nile.card) && /ESA WorldCover v200 · 2021/.test(nile.card),
+        `${label}: reference card = the Earth Engine context, small values shown as "< 1 %", dataset + year on each value`, nile.card);
+      check(nile.enabled, `${label}: Analyze is offered for a non-forest area`);
+      const ocean = await select('-10, -30');
+      check(ocean.status === 'READY' && /Open water: there is no land here to measure/.test(ocean.card) && /Unavailable/.test(ocean.card), `${label}: open ocean says open water, values unavailable (no blank card)`, ocean.card);
+    }
+  }
+
   // ---- imagery URLs: every satellite tile comes from a backend-provided template
   {
     const cfg = offline ? await page.evaluate(async () => (await fetch('data/basemaps.json')).json()) : await page.evaluate(async () => (await fetch('/api/imagery/basemaps')).json());

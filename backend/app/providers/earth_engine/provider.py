@@ -62,6 +62,11 @@ DEM = "COPERNICUS/DEM/GLO30_2024_1"
 WORLDCOVER = "ESA/WorldCover/v200"
 WORLDCOVER_TREE = 10          # class "Tree cover" (mangroves are a separate class, 95)
 WORLDCOVER_WATER = 80         # "Permanent water bodies": excluded from the land denominator
+WORLDCOVER_SNOW = 70          # "Snow and ice"
+# ESA WorldCover v200 classes (the asset's own Map_class_values / Map_class_names).
+WORLDCOVER_CLASSES = {10: "Tree cover", 20: "Shrubland", 30: "Grassland", 40: "Cropland", 50: "Built-up",
+                      60: "Bare / sparse vegetation", 70: "Snow and ice", 80: "Permanent water bodies",
+                      90: "Herbaceous wetland", 95: "Mangroves", 100: "Moss and lichen"}
 HANSEN_CANOPY = 30            # tree cover 2000 / loss counted where year-2000 canopy >= 30 % (GFW convention)
 STEEP_SLOPE_DEG = 30
 CONTEXT_LAYERS = ("hillshade", "slope", "treecover2000", "lossyear")
@@ -646,6 +651,13 @@ class EarthEngineProvider:
             "worldcover": ee.Image.cat([area.updateMask(wc_land).rename("land_ha"),
                                         area.updateMask(wc.eq(WORLDCOVER_TREE)).rename("tree_ha")])
                             .reduceRegion(ee.Reducer.sum(), geometry=geom, scale=10, maxPixels=1e10, tileScale=TILE_SCALE),
+            # Area per WorldCover class (land-cover breakdown); pixels outside WorldCover's map are not counted.
+            "worldcover_classes": area.rename("area_ha").addBands(wc)
+                                    .reduceRegion(ee.Reducer.sum().group(groupField=1, groupName="class"),
+                                                  geometry=geom, scale=10, maxPixels=1e10, tileScale=TILE_SCALE),
+            # Hansen data mask: 1 = mapped land, 2 = permanent water, 0 = no data (e.g. ice sheets, open ocean).
+            "hansen_mask": area.rename("area_ha").addBands(h.select("datamask"))
+                             .reduceRegion(ee.Reducer.sum().group(groupField=1, groupName="mask"), **rr),
         })
         with EETimer("area-context")("area_context [getInfo]"):
             return req.getInfo()

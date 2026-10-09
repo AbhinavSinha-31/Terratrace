@@ -105,7 +105,7 @@ export function AnalysisProgressOverlay() {
       <Overlay>
         <StateView
           kind={refused ? 'error' : 'service-unavailable'}
-          title={refused ? 'Area cannot be analysed'
+          title={refused ? 'Area size or shape not accepted'
             : code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'}
           onRetry={canRetry ? () => useUi.getState().requestAnalysis() : undefined}
           action={<Button size="sm" variant="ghost" onClick={() => useUi.getState().resetAnalysis()}>Close</Button>}

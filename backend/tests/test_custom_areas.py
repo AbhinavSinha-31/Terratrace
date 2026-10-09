@@ -61,45 +61,22 @@ def test_the_reported_antarctic_area_is_really_at_85_south_not_swapped():
         validate_aoi(square(lat, lon))
 
 
-# ----------------------------------------------------------------------------- pre-flight: Sentinel-2 coverage
-@pytest.mark.parametrize("lon,lat", [ANTARCTICA, (10.0, -60.0), (40.0, 84.5)])
-def test_areas_outside_sentinel2_coverage_are_refused_before_any_job(no_earth_engine, lon, lat):
+# ----------------------------------------------------------------------------- no refusal at selection (2026-10-10)
+# Requirement change: TerraTrace works for every location. Nothing is refused for lack of forest or for latitude; areas
+# where no imagery can exist get an honest analysis RESULT (tests/test_everywhere.py), never a selection block.
+@pytest.mark.parametrize("lon,lat", [ANTARCTICA, (10.0, -60.0), (40.0, 84.5), HASDEO, (30.849, 30.997)])
+def test_no_area_is_refused_at_selection_or_job_creation(no_earth_engine, lon, lat):
     pv = client.post("/api/aoi/preview", json={"geometry": square(lon, lat)}).json()
-    assert pv["valid"] is False and pv["code"] == "outside_sentinel2_coverage"
-    assert "56° S and 84° N" in pv["message"]
+    assert pv["valid"] is True and pv["code"] is None and "forest_cover_pct" not in pv
     r = client.post("/api/analysis-jobs", json={"geometry": square(lon, lat), "baseline": 2019, "comparison": 2025})
-    d = r.json()["detail"]
-    assert r.status_code == 422 and d["code"] == "outside_sentinel2_coverage" and d["retryable"] is False
-    assert f"{abs(lat):.2f}°" in d["user_message"]
+    assert r.status_code == 200, r.text
 
 
-def test_areas_inside_the_coverage_band_pass_the_coverage_check():
+def test_the_sentinel2_band_check_only_names_areas_outside_it():
     for lat in (-55.9, 0.0, 83.9):
-        assert analysis.coverage_refusal((10.0, lat - 0.04, 10.1, lat + 0.04)) is None
-
-
-# ----------------------------------------------------------------------------- pre-flight: no forest
-def test_an_area_without_forest_is_refused_with_its_measured_tree_cover(no_earth_engine, tree_cover):
-    tree_cover.pct = 0.3
-    pv = client.post("/api/aoi/preview", json={"geometry": square(*HASDEO)}).json()
-    assert pv["valid"] is False and pv["code"] == "no_forest" and "0.3 %" in pv["message"]
-    r = client.post("/api/analysis-jobs", json={"geometry": square(*HASDEO), "baseline": 2019, "comparison": 2025})
-    d = r.json()["detail"]
-    assert r.status_code == 422 and d["code"] == "no_forest" and d["retryable"] is False
-
-
-def test_forested_or_unmeasured_areas_are_not_refused(tree_cover):
-    for pct in (1.0, 45.0, None):   # exactly at the gate, forested, and "could not be measured" (never blocks)
-        tree_cover.pct = pct
-        analysis._preflight_cache.clear()
-        assert analysis.forest_refusal(pct) is None
-        aid, doc = analysis.register_aoi(square(*HASDEO), None)
-        assert analysis.preflight(doc) is None
-
-
-def test_featured_investigations_skip_the_custom_area_preflight(tree_cover):
-    tree_cover.pct = 0.0
-    assert analysis.preflight(analysis.aoi_doc("hasdeo-arand")) is None and tree_cover.calls == 0
+        assert analysis.outside_sentinel2_band((10.0, lat - 0.04, 10.1, lat + 0.04)) is None
+    msg = analysis.outside_sentinel2_band((89.4, -84.995, 89.5, -84.905))   # centre 84.95° S
+    assert "84.95° S" in msg and "56° S and 84° N" in msg and "reference context" in msg
 
 
 def test_area_limits_are_enforced_by_the_backend():

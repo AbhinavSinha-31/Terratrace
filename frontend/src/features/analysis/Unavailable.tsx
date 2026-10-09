@@ -17,6 +17,9 @@ export function statusCopy(r: AnalysisResult) {
   if (code === 'earth_engine_throttled') return { title: 'Earth Engine is throttling requests', Icon: Clock, tone: 'text-warn' };
   if (code === 'analysis_too_large') return { title: 'Analysis area exceeds the interactive limit', Icon: Maximize2, tone: 'text-warn' };
   if (code === 'insufficient_imagery' || code === 'insufficient_clear_observations') return { title: 'Insufficient usable imagery', Icon: AlertTriangle, tone: 'text-warn' };
+  // Results (not failures) for areas where no satellite imagery can exist; the reference context is still shown.
+  if (code === 'open_water') return { title: 'Open water: no imagery to analyse', Icon: AlertTriangle, tone: 'text-ink-2' };
+  if (code === 'outside_sentinel2_coverage') return { title: 'No Sentinel-2 imagery at this latitude', Icon: AlertTriangle, tone: 'text-ink-2' };
   if (r.status === 'ERROR') return { title: 'Analysis could not be completed', Icon: AlertTriangle, tone: 'text-warn' };
   return { title: 'Live analysis unavailable', Icon: AlertTriangle, tone: 'text-warn' };
 }
@@ -30,7 +33,7 @@ export function statusCopy(r: AnalysisResult) {
  * error and study metadata — the frontend never constructs a result or any measurement.
  */
 /** Codes for an area that can never be analysed as drawn (pre-flight / limits): retrying cannot succeed. */
-export const AREA_REFUSALS = new Set(['outside_sentinel2_coverage', 'no_forest', 'aoi_too_large', 'aoi_too_small', 'invalid_geometry', 'invalid_coordinates', 'unsupported_geometry', 'antimeridian']);
+export const AREA_REFUSALS = new Set(['aoi_too_large', 'aoi_too_small', 'invalid_geometry', 'invalid_coordinates', 'unsupported_geometry', 'antimeridian']);
 
 export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string; message: string; retryable?: boolean }; onRetry(): void }) {
   const ui = useUi.getState;
@@ -40,7 +43,7 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
     : error.code === 'earth_engine_throttled' ? 'Earth Engine is throttling requests'
     : error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
     : error.code === 'analysis_too_large' ? 'Analysis area exceeds the interactive limit'
-    : error.code && AREA_REFUSALS.has(error.code) ? 'Area cannot be analysed' : 'Live analysis unavailable';
+    : error.code && AREA_REFUSALS.has(error.code) ? 'Area size or shape not accepted' : 'Live analysis unavailable';
   // Retry only when it can succeed: the backend says so (retryable), or a refusal code says it cannot.
   const canRetry = error.retryable !== false && !(error.code && AREA_REFUSALS.has(error.code));
   return (

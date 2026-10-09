@@ -30,11 +30,12 @@ from typing import Any
 from ..config import settings
 from ..lru import LRUDict
 from ..providers.earth_engine import provider as P
+from .units import fmt_share
 
 log = logging.getLogger("terratrace.context")
 
 LABEL = "Reference context, not a TerraTrace result"
-CONTEXT_VERSION = "ctx-1-" + hashlib.sha256("|".join([P.DEM, P.HANSEN, P.WORLDCOVER, str(P.HANSEN_CANOPY),
+CONTEXT_VERSION = "ctx-2-" + hashlib.sha256("|".join([P.DEM, P.HANSEN, P.WORLDCOVER, str(P.HANSEN_CANOPY),
                                                       str(P.STEEP_SLOPE_DEG)]).encode()).hexdigest()[:8]
 CACHE = settings.cache_dir / "context"
 HANSEN_LOSS_YEARS = list(range(2001, 2026))   # v1.13: lossyear 1..25
@@ -72,17 +73,57 @@ def unavailable(reason: str) -> dict[str, Any]:
             "terrain": None, "forest": None}
 
 
+def _groups(raw: dict[str, Any], key: str, field: str) -> dict[int, float] | None:
+    """{group value: area ha} of a grouped sum, or None when not measured. An empty list is a measured nothing."""
+    groups = (raw.get(key) or {}).get("groups")
+    if groups is None:
+        return None
+    out: dict[int, float] = {}
+    for g in groups:
+        out[int(g[field])] = out.get(int(g[field]), 0.0) + float(g["sum"])
+    return out
+
+
+def surface_of(aoi_ha: float | None, dem_ha: float | None, mask: dict[int, float] | None,
+               classes: dict[int, float] | None) -> dict[str, Any]:
+    """What kind of surface the area is, from MEASURED reference data only (never guessed):
+    open_water   no Copernicus land elevation AND nothing in ESA WorldCover's map (open ocean is outside both);
+    mostly_water ESA WorldCover permanent water >= half of the mapped area;
+    snow_ice     ESA WorldCover snow and ice >= half of the mapped area;
+    land         otherwise. `hansen_no_data` = Hansen's data mask is 'no data' over >= half the area (ice sheets, ocean)."""
+    mapped = sum(classes.values()) if classes is not None else None
+    hansen_no_data = bool(aoi_ha and mask is not None and mask.get(0, 0.0) >= 0.5 * aoi_ha)
+    if aoi_ha and dem_ha is not None and dem_ha < 0.01 * aoi_ha and mapped is not None and mapped < 0.01 * aoi_ha:
+        kind, msg = "open_water", ("Open water: there is no land here to measure. Copernicus DEM GLO-30 has no land elevation "
+                                   "and ESA WorldCover v200 (2021) does not map this area.")
+    elif mapped and classes.get(P.WORLDCOVER_WATER, 0.0) >= 0.5 * mapped:
+        kind, msg = "mostly_water", (f"Mostly water: ESA WorldCover v200 (2021) maps {fmt_share(100 * classes[P.WORLDCOVER_WATER] / mapped)} "
+                                     "of this area as permanent water.")
+    elif mapped and classes.get(P.WORLDCOVER_SNOW, 0.0) >= 0.5 * mapped:
+        kind, msg = "snow_ice", (f"Mostly snow and ice: ESA WorldCover v200 (2021) maps {fmt_share(100 * classes[P.WORLDCOVER_SNOW] / mapped)} "
+                                 "of this area as snow and ice.")
+    else:
+        kind, msg = "land", None
+    return {"kind": kind, "message": msg, "hansen_no_data": hansen_no_data}
+
+
 def parse(raw: dict[str, Any]) -> dict[str, Any]:
     """Interpret provider.area_context's raw measurements. Pure function; never fills a gap."""
     aoi_ha = _num((raw.get("aoi") or {}).get("aoi_ha"))
     el = raw.get("elevation") or {}
     dem_ha = _num((raw.get("dem_cover") or {}).get("dem_ha"))
     sl = raw.get("slope") or {}
+    mask = _groups(raw, "hansen_mask", "mask")
+    classes = _groups(raw, "worldcover_classes", "class")
+    surface = surface_of(aoi_ha, dem_ha, mask, classes)
+    water = surface["kind"] == "open_water"
+
     elevation = {k: _r(_num(el.get(f"elevation_{k}")), 0) for k in ("min", "p5", "mean", "p95", "max")}
     terrain_ok = elevation["mean"] is not None and _num(sl.get("slope")) is not None
     terrain = {
         "status": "READY" if terrain_ok else "UNAVAILABLE",
-        "reason": None if terrain_ok else "Elevation could not be measured for this area (no Copernicus DEM data).",
+        "reason": None if terrain_ok else ("No land elevation here: open water." if water else
+                                           "Elevation could not be measured for this area (no Copernicus DEM data)."),
         "source": SOURCES["dem"],
         "elevation_m": elevation if terrain_ok else None,
         "slope_mean_deg": _r(_num(sl.get("slope"))) if terrain_ok else None,
@@ -101,13 +142,20 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
             y = 2000 + int(g["lossyear"])
             by_year[y] = by_year.get(y, 0.0) + float(g["sum"])
     src_h = SOURCES["hansen"]
-    hansen_reason = None if hansen_ok else "Hansen Global Forest Change could not be measured for this area."
+    if hansen_ok:
+        hansen_reason = None
+    elif surface["hansen_no_data"]:
+        hansen_reason = "Hansen Global Forest Change v1.13 has no data for this area (its data mask excludes it)."
+    elif land_ha == 0 and mask is not None and mask.get(2, 0.0) > 0:
+        hansen_reason = "Hansen Global Forest Change v1.13 maps this area as water: there is no land tree cover to measure."
+    else:
+        hansen_reason = "Hansen Global Forest Change could not be measured for this area."
     tree_2000 = {
         "status": "READY" if hansen_ok else "UNAVAILABLE", "reason": hansen_reason,
         "source": {**src_h, "year": "2000", "year_label": "year-2000 baseline"},
         "canopy_threshold_pct": P.HANSEN_CANOPY,
         "area_ha": _r(f2000_ha) if hansen_ok else None,
-        "share_of_land_pct": _r(_pct(f2000_ha, land_ha), 1) if hansen_ok else None,
+        "share_of_land_pct": _r(_pct(f2000_ha, land_ha), 4) if hansen_ok else None,
         "land_ha": _r(land_ha) if hansen_ok else None,
     }
     loss = {
@@ -116,11 +164,11 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
         # Every year 2001–2025 of the dataset; a year with no loss pixel over the measured area is a measured 0.
         "years": [{"year": y, "loss_ha": round(by_year.get(y, 0.0), 1)} for y in HANSEN_LOSS_YEARS] if hansen_ok else None,
         "total_ha": round(sum(by_year.values()), 1) if hansen_ok else None,
-        "share_of_2000_tree_cover_pct": _r(_pct(sum(by_year.values()), f2000_ha), 1) if hansen_ok else None,
+        "share_of_2000_tree_cover_pct": _r(_pct(sum(by_year.values()), f2000_ha), 4) if hansen_ok else None,
     }
     gain = {
         "status": "READY" if hansen_ok and gain_ha is not None else "UNAVAILABLE",
-        "reason": None if hansen_ok and gain_ha is not None else "Hansen gain could not be measured for this area.",
+        "reason": None if hansen_ok and gain_ha is not None else (hansen_reason or "Hansen gain could not be measured for this area."),
         "source": {**src_h, "year": "2000–2012", "year_label": "gain 2000–2012 only (not updated after 2012)"},
         "area_ha": _r(gain_ha) if hansen_ok else None,
     }
@@ -128,22 +176,49 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
     wc = raw.get("worldcover") or {}
     wc_land, wc_tree = _num(wc.get("land_ha")), _num(wc.get("tree_ha"))
     wc_ok = wc_land is not None and wc_land > 0 and wc_tree is not None
+    mapped = sum(classes.values()) if classes is not None else None
+    if wc_ok:
+        wc_reason = None
+    elif water or (classes is not None and not mapped):
+        wc_reason = "Not mapped by ESA WorldCover v200 (2021): it maps land and coastal waters, not the open ocean."
+    elif wc_land == 0 and mapped:
+        wc_reason = "ESA WorldCover v200 (2021) maps this area as permanent water: there is no land to measure."
+    else:
+        wc_reason = "ESA WorldCover could not be measured for this area."
     worldcover = {
         "status": "READY" if wc_ok else "UNAVAILABLE",
-        "reason": None if wc_ok else "ESA WorldCover could not be measured for this area.",
+        "reason": wc_reason,
         "source": SOURCES["worldcover"],
         "area_ha": _r(wc_tree) if wc_ok else None,
-        "share_of_land_pct": _r(_pct(wc_tree, wc_land), 1) if wc_ok else None,
+        "share_of_land_pct": _r(_pct(wc_tree, wc_land), 4) if wc_ok else None,
     }
-    any_ok = terrain_ok or hansen_ok or wc_ok
+    # Land-cover breakdown: every WorldCover class present, share of the MAPPED area (water included), largest first.
+    land_cover = {
+        "status": "READY" if mapped else "UNAVAILABLE",
+        "reason": None if mapped else wc_reason,
+        "source": {**SOURCES["worldcover"], "note": "Share of the area mapped by ESA WorldCover (permanent water included)."},
+        "mapped_ha": _r(mapped) if mapped else None,
+        "classes": sorted(({"class": c, "name": P.WORLDCOVER_CLASSES.get(c, f"Class {c}"), "area_ha": _r(a),
+                            "share_pct": _r(_pct(a, mapped), 4)} for c, a in classes.items() if a > 0),
+                          key=lambda x: -x["area_ha"]) if mapped else None,
+    }
+    any_ok = terrain_ok or hansen_ok or wc_ok or bool(mapped)
+    if any_ok:
+        status, reason = "READY", None
+    elif water:
+        status, reason = "READY", None   # measured: open water (no land dataset applies) — an answer, not a failure
+    else:
+        status, reason = "UNAVAILABLE", "No reference dataset could be measured for this area."
     return {
-        "status": "READY" if any_ok else "UNAVAILABLE",
-        "reason": None if any_ok else "No reference dataset could be measured for this area.",
+        "status": status, "reason": reason,
         "label": LABEL, "context_version": CONTEXT_VERSION,
         "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "area_ha": _r(aoi_ha),
+        "surface": surface,
+        "hansen_mask_ha": None if mask is None else {"land": _r(mask.get(1, 0.0)), "water": _r(mask.get(2, 0.0)), "no_data": _r(mask.get(0, 0.0))},
         "terrain": terrain,
         "forest": {"tree_cover_2000": tree_2000, "loss_by_year": loss, "gain_2000_2012": gain, "worldcover_2021": worldcover},
+        "land_cover_2021": land_cover,
         "layers": None,   # filled per area by layers_for()
     }
 

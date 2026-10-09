@@ -332,11 +332,16 @@ export function Landing() {
               </div>
               <div className="flex justify-center"><DrawHint /></div>
             </div>
-            <AnimatePresence>
-              {selection && !drawTool && (
-                <div className="absolute right-6 top-[160px] w-[360px]"><div className="pointer-events-auto"><SelectionPanel /></div></div>
-              )}
-            </AnimatePresence>
+            {/* ONE right-hand column: the selection panel (scrolls when tall) above the legend — they can never overlap.
+                The column itself lets clicks through to the map; only its panels take pointer events. */}
+            <div className="pointer-events-none absolute bottom-6 right-6 top-[160px] flex w-[360px] flex-col items-end gap-3" data-testid="explore-right-column">
+              <AnimatePresence>
+                {selection && !drawTool && (
+                  <div className="scroll-thin pointer-events-auto min-h-0 w-full shrink overflow-y-auto rounded-lg" data-testid="selection-panel-wrap"><SelectionPanel /></div>
+                )}
+              </AnimatePresence>
+              <div className="mt-auto shrink-0"><MapLegendChip /></div>
+            </div>
             {!selection && !drawTool && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
                 className="tt-panel pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-4 px-5 py-3.5">
@@ -344,7 +349,6 @@ export function Landing() {
                 <span className="text-[12.5px] text-ink-2">Search a place, click the map at regional zoom, or use <b className="font-medium text-ink">Draw Area</b> to define an area of interest.</span>
               </motion.div>
             )}
-            <MapLegendChip />
             {health && !health.backend && <div className="absolute bottom-6 left-6"><Badge tone="warn">Live analysis unavailable</Badge></div>}
           </motion.div>
         )}
@@ -399,7 +403,7 @@ function LandingMapControls() {
 /** Distinguishes reference forest cover from TERRATRACE-detected change. */
 function MapLegendChip() {
   return (
-    <div className="tt-panel pointer-events-auto absolute bottom-6 right-6 space-y-1.5 px-3.5 py-3 text-[11px] text-ink-2">
+    <div className="tt-panel pointer-events-auto space-y-1.5 px-3.5 py-3 text-[11px] text-ink-2" data-testid="map-legend">
       <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-[2px] bg-[#1f9d57]" /> Forest cover · reference (Hansen 2000)</div>
       <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ff6b52] shadow-[0_0_8px_#ff6b52]" /> Detected change · completed live analyses only</div>
     </div>

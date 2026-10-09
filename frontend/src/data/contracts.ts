@@ -389,6 +389,9 @@ export interface ForestCoverContext {
   gain_2000_2012: ContextValue & { area_ha: number | null };
   worldcover_2021: ContextValue & { area_ha: number | null; share_of_land_pct: number | null };
 }
+export interface LandCoverClass { class: number; name: string; area_ha: number; share_pct: number }
+/** What kind of surface the area is, from measured reference data (open water / mostly water / snow and ice / land). */
+export interface ContextSurface { kind: 'open_water' | 'mostly_water' | 'snow_ice' | 'land'; message: string | null; hansen_no_data: boolean }
 export interface ContextLayer { id: string; label: string; dataset: string; year_label: string; reference: true; tiles: string[] }
 /** Terrain + forest cover from REFERENCE datasets — "Reference context, not a TerraTrace result". */
 export interface AreaContext {
@@ -400,7 +403,20 @@ export interface AreaContext {
   area_ha?: number | null;
   terrain: TerrainContext | null;
   forest: ForestCoverContext | null;
+  /** ESA WorldCover v200 (2021) land-cover breakdown, share of the mapped area (water included). */
+  land_cover_2021?: (ContextValue & { mapped_ha: number | null; classes: LandCoverClass[] | null }) | null;
+  surface?: ContextSurface | null;
   layers: ContextLayer[] | null;
+}
+
+/** Statement ("no forest to monitor") or reliability caution of a READY result; names the datasets and years. */
+export interface Caution {
+  code: 'no_forest_to_monitor' | 'little_forest' | 'datasets_disagree';
+  kind: 'statement' | 'caution';
+  message: string;
+  datasets: string[];
+  applies_to?: string[] | null;
+  gain_note?: string | null;
 }
 
 export interface AnalysisEnvelope {
@@ -422,6 +438,8 @@ export interface AnalysisEnvelope {
   layers?: LayerCatalog;
   /** Reference context of the area (null until measured) — present whatever the analysis status. */
   context?: AreaContext | null;
+  /** READY results only: statements / reliability cautions (display only; never change a number). */
+  cautions?: Caution[];
 }
 
 /** What the UI holds for an open area. `bundle` is non-null only when status === 'READY'. */
@@ -437,6 +455,7 @@ export interface AnalysisResult {
   diagnostics: Record<string, unknown> | null;
   quality: AnalysisQuality | null;
   bundle: AnalysisBundle | null;
+  cautions: Caution[];
 }
 
 /** The only information the explanation module may use. */
@@ -512,8 +531,6 @@ export interface AoiPreview {
   area_ha?: number | null;
   centroid?: [number, number] | null;
   bbox?: [number, number, number, number] | null;
-  forest_cover_pct?: number | null;
-  forest_source?: string | null;
 }
 
 // ----------------------------------------------------------------------------- imagery (backend-owned; never an analysis)

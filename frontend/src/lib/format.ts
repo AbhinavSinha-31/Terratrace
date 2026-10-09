@@ -5,6 +5,12 @@ const nf1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
 
 /** Escape text for interpolation into an HTML string (map popups, chart tooltips). */
 export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/**
+ * ONE display rule for shares (identical to backend app/services/units.py fmt_share), used everywhere:
+ * null -> "—" (not measured) · 0 -> "0 %" (a measured zero) · 0 < v < 1 -> "< 1 %" · v >= 1 -> one decimal ("22.5 %").
+ */
+export const fmtShare = (v: number | null | undefined): string =>
+  v == null ? '—' : v === 0 ? '0 %' : v > 0 && v < 1 ? '< 1 %' : `${v.toFixed(1)} %`;
 export const fmtHa = (v: number) => (Math.abs(v) >= 100 ? nf0.format(v) : nf1.format(v));
 export const fmtKm2 = (v: number) => (Math.abs(v) >= 100 ? nf0.format(v) : v.toFixed(2));
 export const haToKm2 = (ha: number) => ha / 100;
