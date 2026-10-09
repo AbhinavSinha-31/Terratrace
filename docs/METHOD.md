@@ -149,11 +149,30 @@ is measured metadata — not a forest or change measurement.
 
 ## 8. Known limitations
 
-* Dynamic World is a **probability**, not a measured forest percentage. The leaf-on `trees ≥ 0.50`
+* Dynamic World is a **probability**, not a measured forest percentage. The upper-quartile `trees ≥ 0.50`
   rule depends on enough Dynamic World observations; in persistently cloudy regions Dynamic World may
   observe pixels only 0–3 times a year, and those years are then not analysable.
 * The Landsat NDVI ≥ 0.60 proxy saturates in dense tropical vegetation and is sensitive to Landsat 7
   SLC-off gaps and phenology; the gain-stability rule is what exposes this.
+* **The Landsat-era (1984–2015) forest proxy cannot tell green non-forest from forest.** NDVI ≥ 0.60 is a
+  greenness test: irrigated crops, green pasture and grassland pass it. Interim measure (2026-10-10): where
+  the window's own result has little or no forest, the 1984–2015 record is withheld (`history_withheld`)
+  and never shown as forest or change. Measured 2026-10-10 at the featured sites (proxy forest that
+  independent data call non-forest; the closer in time, the more meaningful):
+
+  | Site | Proxy 2000 vs Hansen 2000 (same year): canopy < 30 % | Proxy 2015 vs Dynamic World 2016: not trees | Proxy vs WorldCover 2021: not tree cover |
+  |---|---|---|---|
+  | Rondônia | 19.3 % | 26.6 % (grass 17.9, shrub 8.4) | 38.8–57.7 % (mostly real clearing since then) |
+  | Hasdeo Arand | 50.8 % — Hansen under-counts this dry forest (22 % vs WorldCover 61 %) | 0.0 % | 0.1–3.3 % |
+  | Similipal | 3.8 % | 0.0 % | 0.0–0.2 % |
+  | Silent Valley | 14.0 % | 3.4 % (shrub 1.8, grass 0.9) | 2.1–5.0 % |
+
+  So the problem is material at the pasture frontier (Rondônia: roughly a fifth to a quarter of the proxy's
+  "forest" around 2000–2015 is likely pasture or regrowth), modest at Silent Valley (montane grassland) and
+  negligible at Similipal. Hasdeo shows a different weakness — the proxy is unstable (2,930 ha "forest" in
+  1990, 53,268 ha in 2000, 5,224 ha in 2010: missed forest, not crops). Historical periods and per-year
+  figures for these sites are still shown, labelled as the Landsat proxy; fix options are in
+  [notes/landsat-proxy-options.md](notes/landsat-proxy-options.md) (none implemented yet).
 * An event polygon consists only of pixels that passed the change rule, so its converted share is 1 by
   construction (it is not an independent measurement).
 
