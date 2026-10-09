@@ -24,6 +24,9 @@ const NON_READY = ['UNAVAILABLE', 'INVALID_ANALYSIS', 'ERROR'];
 const ANALYSIS_TIMEOUT = 260000;
 // Developer / infrastructure text that must never appear in the public UI.
 const DEV_TEXT = /uvicorn|\.venv|EE_PROJECT|EE_SERVICE_ACCOUNT|GOOGLE_APPLICATION_CREDENTIALS|earthengine authenticate|localhost|127\.0\.0\.1|backend\/|\.env\b|service[- ]account|Traceback|python -m|Configure Live Data|app\.main|API key|credentials/i;
+// Exact names of the reference datasets shown in the area context (backend app/services/context.py SOURCES). These
+// strings — and only these — are exempt from METRIC_TEXT ("…Forest Change…" is a dataset name, not a measurement).
+const REFERENCE_DATASET_NAMES = ['Hansen Global Forest Change v1.13', 'Copernicus DEM GLO-30', 'ESA WorldCover v200'];
 const METRIC_TEXT = /\b(ha lost|forest change\b|change events|Detected change \d|Forest cover 20\d\d|high \/ critical)\b|−\d[\d,]* ha/i;
 const FORBIDDEN = /Demonstration data|demo mode|\bsimulated (events|statistics|change)\b/i;
 
@@ -383,13 +386,14 @@ async function run(label, { offline }) {
     const s = await imgState();
     check(s.imagery === 'READY' && s.liveLayers.some((l) => l.id === `img-s2-live-${AOI}-2020` && l.visible), `${label}: READY imagery decision drawn as a raster layer from the backend tile template`, JSON.stringify(s.liveLayers));
     check(s.analysis === 'idle' && !s.hasResult && /no analysis/.test(s.text), `${label}: imagery READY while analysis stays idle — imagery-only never appears as analysis`, JSON.stringify({ a: s.analysis, t: s.text }));
-    // The labelled reference context (dataset names such as "Hansen Global Forest Change") is not a TerraTrace
-    // measurement and is shown whatever the analysis status: excluded from this scan, nothing else is.
-    const body = await page.evaluate(() => {
-      const clone = document.body.cloneNode(true);
-      clone.querySelectorAll('[data-testid="area-context"], [data-testid="context-layers"]').forEach((n) => n.remove());
-      return clone.innerText ?? clone.textContent ?? '';
-    });
+    // The WHOLE page is scanned, including the reference-context panel. Only the exact names of the reference datasets
+    // are exempt — "Hansen Global Forest Change v1.13" is a dataset's name, not a TerraTrace "forest change" figure —
+    // and only where they actually appear (each exempted name must be present, so no exemption is silently unused).
+    const rawBody = await page.locator('body').innerText();
+    const exempt = REFERENCE_DATASET_NAMES.filter((n) => rawBody.includes(n));
+    const body = exempt.reduce((t, n) => t.split(n).join(' '), rawBody);
+    const ctxReady = (await page.locator('[data-testid="area-context"]').getAttribute('data-status').catch(() => null)) === 'READY';
+    if (ctxReady) check(exempt.includes('Hansen Global Forest Change v1.13'), `${label}: reference dataset names found on the page (exempted from the scan: ${exempt.join(', ') || 'none'})`);
     check(!METRIC_TEXT.test(body) && (await page.evaluate(() => window.__tt.state.events.length)) === 0, `${label}: imagery-only view renders no measurements or events`, (body.match(METRIC_TEXT) ?? [''])[0]);
     // A year without usable imagery draws NOTHING (no substitution with another year) and says so.
     await page.evaluate(() => window.__ttUi.getState().setYear(1995));
