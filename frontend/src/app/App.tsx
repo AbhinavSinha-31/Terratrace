@@ -11,6 +11,7 @@ import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
 import { useAnalysisRunner } from '../data/analysisRunner';
 import { useImagerySync } from '../data/imagerySync';
+import { useBackendRecovery } from '../data/queries';
 import { useBreakpoint, CHROME } from '../lib/useLayout';
 
 function useShortcuts() {
@@ -43,6 +44,7 @@ export function App() {
   useUrlSync();
   useAnalysisRunner();   // the only executor of analysis requests
   useImagerySync();      // imagery status (independent of analysis)
+  useBackendRecovery();  // a backend that comes back after an outage is used again without a reload
   const view = useUi((s) => s.view);
   const hasStudy = useUi((s) => !!s.investigation.study);
   const drawerOpen = useUi((s) => s.drawerOpen);

@@ -1,12 +1,33 @@
-import { useMemo } from 'react';
-import { skipToken, useQueries, useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef } from 'react';
+import { skipToken, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, client } from './client';
 import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, StudyArea } from './contracts';
 import { selectCandidate, useUi } from '../state/store';
 import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
 import { fmtKm2 } from '../lib/format';
 
-export const useHealth = () => useQuery({ queryKey: ['health'], queryFn: () => client.health(), staleTime: 20000, refetchInterval: 30000 });
+// While the backend is unreachable, re-check every 5 s — also in a background tab — so the UI notices it is back.
+export const useHealth = () => useQuery({
+  queryKey: ['health'], queryFn: () => client.health(), staleTime: 20000,
+  refetchInterval: (q) => (q.state.data?.backend === false ? 5000 : 30000),
+  refetchIntervalInBackground: true,
+});
+
+/**
+ * Regression (2026-10-09): after a backend outage the UI stayed in UI-preview mode until a manual reload — data
+ * loaded through the offline fallback (featured list, basemaps) is cached forever and error states (imagery "could
+ * not be reached") were never re-requested. When health flips from unreachable to reachable, refetch everything once
+ * from the live backend. Nothing is substituted in between: offline states stay explicit until real data arrives.
+ */
+export function useBackendRecovery(): void {
+  const qc = useQueryClient();
+  const up = useHealth().data?.backend;
+  const prev = useRef(up);
+  useEffect(() => {
+    if (prev.current === false && up === true) void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'health' });
+    prev.current = up;
+  }, [up, qc]);
+}
 
 export const useBasemaps = () => useQuery({ queryKey: ['basemaps'], queryFn: () => client.basemaps(), staleTime: Infinity, retry: false });
 
