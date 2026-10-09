@@ -71,6 +71,8 @@ but imagery and analysis show as unavailable, and nothing is substituted.
 
 ## Deploy
 
+**Before going public, resolve every open item in [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md).**
+
 The frontend is a static build and runs on Vercel (`vercel.json` at the repo root builds `frontend/`
 and publishes `frontend/dist`; `.vercelignore` keeps `backend/` and every secret out of the upload).
 
