@@ -1,0 +1,303 @@
+{
+  "_comment": "Method and dataset facts the AI chat may cite in `reference` segments. Each entry is verified against docs/METHOD.md (TerraTrace's own rules), the dataset's own Earth Engine catalogue page, or ESA's SentiWiki (re-checked 2026-10-10). No global forest statistics. Left out because they could not be verified: ESA WorldCover's tree-cover percentage definition (not stated on its catalogue page); the DEM's radar acquisition years (not stated on its catalogue page). R14 uses ESA SentiWiki's 82.8° N (older ESA documents say 83° N or 84° N; docs/METHOD.md §10). `values` are the only numbers a reference segment may state; `years` the only years.",
+  "checked": "2026-10-10 (re-checked entry by entry)",
+  "facts": [
+    {
+      "id": "R1",
+      "text": "From 2016 onward TerraTrace counts a pixel as forest when its Dynamic World tree probability is at least 0.50 in at least a quarter of the year's observations (per-pixel 75th percentile) and its leaf-on NDVI (per-pixel 90th percentile of clear observations) is at least 0.60.",
+      "values": [
+        {
+          "v": 0.5,
+          "unit": null
+        },
+        {
+          "v": 0.6,
+          "unit": null
+        },
+        {
+          "v": 75,
+          "unit": null
+        },
+        {
+          "v": 90,
+          "unit": null
+        }
+      ],
+      "years": [
+        2016
+      ],
+      "source": "docs/METHOD.md §1 (forest definition) and §4 (upper-quartile tree probability)",
+      "kind": "method"
+    },
+    {
+      "id": "R2",
+      "text": "Before 2016 TerraTrace shows Landsat imagery only: forest and forest-change figures for 1984–2015 are withheld because the only forest measure available (NDVI ≥ 0.60) cannot tell green crops or pasture from forest.",
+      "values": [
+        {
+          "v": 0.6,
+          "unit": null
+        }
+      ],
+      "years": [
+        1984,
+        2015,
+        2016
+      ],
+      "source": "docs/METHOD.md §1a",
+      "kind": "method"
+    },
+    {
+      "id": "R3",
+      "text": "A TerraTrace change event needs forest in the baseline year, no forest in the comparison year, an NDVI drop of at least 0.20 or an NBR drop of at least 0.25, and a Dynamic World tree-probability drop of at least 0.30; the minimum mapping unit is 2 ha.",
+      "values": [
+        {
+          "v": 0.2,
+          "unit": null
+        },
+        {
+          "v": 0.25,
+          "unit": null
+        },
+        {
+          "v": 0.3,
+          "unit": null
+        },
+        {
+          "v": 2,
+          "unit": "ha"
+        }
+      ],
+      "years": [],
+      "source": "docs/METHOD.md §6",
+      "kind": "method"
+    },
+    {
+      "id": "R4",
+      "text": "A year is analysable only if at least 80 % of the area is observed, and a pixel counts as observed only with at least 3 clear observations (and, from 2016, at least 3 Dynamic World observations).",
+      "values": [
+        {
+          "v": 80,
+          "unit": "%"
+        },
+        {
+          "v": 3,
+          "unit": null
+        }
+      ],
+      "years": [
+        2016
+      ],
+      "source": "docs/METHOD.md §3 and §4",
+      "kind": "method"
+    },
+    {
+      "id": "R5",
+      "text": "A TerraTrace result is withheld as an invalid analysis when forest gain exceeds 5 % of the compared area per year, because tree canopy cannot establish over large areas within a year.",
+      "values": [
+        {
+          "v": 5,
+          "unit": "%"
+        }
+      ],
+      "years": [],
+      "source": "docs/METHOD.md §7",
+      "kind": "method"
+    },
+    {
+      "id": "R6",
+      "text": "TerraTrace states 'little or no forest to monitor' when its forest mask holds less than 2 ha in the baseline year, and adds a 'little forest' caution below 10 % of the observed area or below 100 ha; these are chosen heuristics, not a standard definition.",
+      "values": [
+        {
+          "v": 2,
+          "unit": "ha"
+        },
+        {
+          "v": 10,
+          "unit": "%"
+        },
+        {
+          "v": 100,
+          "unit": "ha"
+        }
+      ],
+      "years": [],
+      "source": "docs/METHOD.md §10",
+      "kind": "method"
+    },
+    {
+      "id": "R7",
+      "text": "TerraTrace adds a 'datasets disagree' caution when its forest share and ESA WorldCover v200's 2021 tree-cover share differ by more than 10 percentage points in the same year (2021, or the nearest analysable year, which is named).",
+      "values": [
+        {
+          "v": 10,
+          "unit": "%"
+        },
+        {
+          "v": 200,
+          "unit": null
+        }
+      ],
+      "years": [
+        2021
+      ],
+      "source": "docs/METHOD.md §10",
+      "kind": "method"
+    },
+    {
+      "id": "R8",
+      "text": "In TerraTrace's reference context, Hansen Global Forest Change v1.13 tree cover counts pixels with at least 30 % canopy cover in the year 2000.",
+      "values": [
+        {
+          "v": 30,
+          "unit": "%"
+        },
+        {
+          "v": 1.13,
+          "unit": null
+        }
+      ],
+      "years": [
+        2000
+      ],
+      "source": "docs/METHOD.md §9",
+      "kind": "method"
+    },
+    {
+      "id": "R9",
+      "text": "Hansen Global Forest Change v1.13 (2000–2025) defines year-2000 tree canopy cover as canopy closure for all vegetation taller than 5 m; its lossyear band records loss detected primarily in 2001–2025; its gain band covers 2000–2012 only and has not been updated since; its pixel size is 30.92 m.",
+      "values": [
+        {
+          "v": 5,
+          "unit": "m"
+        },
+        {
+          "v": 30.92,
+          "unit": "m"
+        },
+        {
+          "v": 1.13,
+          "unit": null
+        }
+      ],
+      "years": [
+        2000,
+        2001,
+        2012,
+        2025
+      ],
+      "source": "Earth Engine catalogue, UMD/hansen/global_forest_change_2025_v1_13 (https://developers.google.com/earth-engine/datasets/catalog/UMD_hansen_global_forest_change_2025_v1_13)",
+      "kind": "dataset"
+    },
+    {
+      "id": "R10",
+      "text": "ESA WorldCover v200 is a 10 m land-cover map for 2021; 'Tree cover' is its class 10.",
+      "values": [
+        {
+          "v": 10,
+          "unit": "m"
+        },
+        {
+          "v": 10,
+          "unit": null
+        },
+        {
+          "v": 200,
+          "unit": null
+        }
+      ],
+      "years": [
+        2021
+      ],
+      "source": "Earth Engine catalogue, ESA/WorldCover/v200 (https://developers.google.com/earth-engine/datasets/catalog/ESA_WorldCover_v200)",
+      "kind": "dataset"
+    },
+    {
+      "id": "R11",
+      "text": "Google Dynamic World V1 has a 10 m pixel size and label information for nine classes; its 'trees' band is the estimated probability of complete coverage by trees, the class probabilities sum to 1, and the dataset starts on 2015-06-27.",
+      "values": [
+        {
+          "v": 10,
+          "unit": "m"
+        },
+        {
+          "v": 9,
+          "unit": null
+        },
+        {
+          "v": 1,
+          "unit": null
+        }
+      ],
+      "years": [
+        2015
+      ],
+      "source": "Earth Engine catalogue, GOOGLE/DYNAMICWORLD/V1 (https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1)",
+      "kind": "dataset"
+    },
+    {
+      "id": "R12",
+      "text": "Sentinel-2 surface reflectance (SR Harmonized) in Earth Engine starts on 2017-03-28, and its 2017–2018 coverage is not yet global; its blue, green, red and near-infrared bands have a 10 m pixel size; the catalogue gives a revisit interval of 5 days.",
+      "values": [
+        {
+          "v": 10,
+          "unit": "m"
+        },
+        {
+          "v": 5,
+          "unit": null
+        }
+      ],
+      "years": [
+        2017,
+        2018
+      ],
+      "source": "Earth Engine catalogue, COPERNICUS/S2_SR_HARMONIZED (https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED)",
+      "kind": "dataset"
+    },
+    {
+      "id": "R13",
+      "text": "Landsat 8 Collection 2 Level-2 surface reflectance bands have a 30 m pixel size.",
+      "values": [
+        {
+          "v": 30,
+          "unit": "m"
+        }
+      ],
+      "years": [],
+      "source": "Earth Engine catalogue, LANDSAT/LC08/C02/T1_L2 (https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C02_T1_L2)",
+      "kind": "dataset"
+    },
+    {
+      "id": "R14",
+      "text": "Sentinel-2 systematically images all continental land surfaces between latitudes 56° South and 82.8° North; outside that band TerraTrace has no imagery to analyse.",
+      "values": [
+        {
+          "v": 56,
+          "unit": "deg"
+        },
+        {
+          "v": 82.8,
+          "unit": "deg"
+        }
+      ],
+      "years": [],
+      "source": "ESA SentiWiki, S2 Mission (https://sentiwiki.copernicus.eu/web/s2-mission); docs/METHOD.md §10",
+      "kind": "dataset"
+    },
+    {
+      "id": "R15",
+      "text": "Copernicus DEM GLO-30 (2024_1) is a 30 m Digital Surface Model: it represents the surface of the Earth including buildings, infrastructure and vegetation, so over forest its elevation includes the canopy.",
+      "values": [
+        {
+          "v": 30,
+          "unit": "m"
+        }
+      ],
+      "years": [
+        2024
+      ],
+      "source": "Earth Engine catalogue, COPERNICUS/DEM/GLO30_2024_1 (https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_DEM_GLO30_2024_1)",
+      "kind": "dataset"
+    }
+  ]
+}

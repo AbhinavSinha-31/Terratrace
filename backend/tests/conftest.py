@@ -18,6 +18,10 @@ os.environ["EARTHENGINE_CREDENTIALS"] = str(Path(_tmp) / "no-ee")
 os.environ["TT_CACHE_DIR"] = _tmp
 os.environ["TT_GEOCODER"] = "off"
 os.environ["TT_PRECOMPUTE_FEATURED"] = "false"
+# AI chat: never a real key or a real Gemini call in tests. Set (empty) BEFORE app.config runs load_dotenv, which
+# does not override variables that already exist — so a key in backend/.env never reaches the test run.
+os.environ["GEMINI_API_KEY"] = ""
+os.environ["TT_CHAT_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 

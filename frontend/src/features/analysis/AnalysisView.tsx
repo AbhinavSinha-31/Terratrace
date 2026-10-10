@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Hourglass, Layers, LayoutDashboard, ListTree, ScanSearch } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Hourglass, Layers, LayoutDashboard, ListTree, MessagesSquare, ScanSearch } from 'lucide-react';
 import { useCurrentAnalysis, useSelectedAoi, useSelectedEvent, useStudyAreas } from '../../data/queries';
 import { DEFAULT_YEARS } from '../../lib/time';
 import { fmtKm2 } from '../../lib/format';
@@ -16,6 +16,7 @@ import { EventInspector } from './EventInspector';
 import { LayerPanel } from './LayerPanel';
 import { ReportModal } from './ReportModal';
 import { AreaContextPanel } from './AreaContext';
+import { AreaChat } from '../chat/AreaChat';
 
 function DrawerBody() {
   const tab = useUi((s) => s.tab);
@@ -34,7 +35,7 @@ function DrawerBody() {
           <div className="t-label text-ink-3">No analysis result</div>
           <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? 'Selected area'}</div>
         </div>
-        <div className="scroll-thin min-h-0 flex-1 space-y-6 overflow-y-auto p-5"><AnalysisErrorPanel error={q.error} onRetry={() => q.refetch()} /><AreaContextPanel /></div>
+        <div className="scroll-thin min-h-0 flex-1 space-y-6 overflow-y-auto p-5"><AnalysisErrorPanel error={q.error} onRetry={() => q.refetch()} /><AreaContextPanel /><AreaChat inline /></div>
       </div>
     );
   }
@@ -50,6 +51,7 @@ function DrawerBody() {
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5">
           <AnalysisUnavailable result={q.data} onRetry={() => q.refetch()} />
           <div className="mt-6"><AreaContextPanel /></div>
+          <div className="mt-6"><AreaChat inline /></div>
         </div>
       </div>
     );
@@ -61,7 +63,7 @@ function DrawerBody() {
           <div className="t-label text-ink-3">Intelligence</div>
           <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? '—'}</div>
           <div className="mt-3 flex gap-1" role="tablist">
-            {([['overview', 'Overview', LayoutDashboard], ['events', 'Events', ListTree]] as const).map(([k, label, Icon]) => (
+            {([['overview', 'Overview', LayoutDashboard], ['events', 'Events', ListTree], ['ask', 'Ask', MessagesSquare]] as const).map(([k, label, Icon]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
                 className={`tt-press relative flex h-9 items-center gap-2 px-3 text-[12.5px] font-medium ${tab === k ? 'text-ink' : 'text-ink-3 hover:text-ink-2'}`}>
                 <Icon size={14} />{label}
@@ -72,13 +74,17 @@ function DrawerBody() {
           </div>
         </div>
       )}
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5" id="tt-drawer-scroll">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={selected ? `ev-${selected.id}` : tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-            {selected ? <EventInspector event={selected} /> : tab === 'overview' ? <><Overview /><div className="mt-6"><AreaContextPanel /></div></> : <EventList />}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      {!selected && tab === 'ask' ? (
+        <div className="min-h-0 flex-1 p-5"><AreaChat /></div>
+      ) : (
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5" id="tt-drawer-scroll">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div key={selected ? `ev-${selected.id}` : tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+              {selected ? <EventInspector event={selected} /> : tab === 'overview' ? <><Overview /><div className="mt-6"><AreaContextPanel /></div></> : <EventList />}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }

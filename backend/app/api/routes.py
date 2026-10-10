@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import Response
 
 from ..config import settings
@@ -15,8 +15,9 @@ from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
-from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, Explanation, ExplainRequest, Health
+from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health
 from ..services import analysis, context as area_context, featured, imagery, search, science as sc, tiles as tile_cache
+from ..services.chat import counters as chat_counters, service as chat
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
 
@@ -108,6 +109,7 @@ def health() -> Health:
         explainer_model=settings.llm_model if claude.configured() else None,
         geocoder={"status": "ready" if settings.geocoder_enabled else "offline", "detail": "OpenStreetMap Nominatim + offline gazetteer"},
         limits={"max_aoi_km2": settings.max_aoi_km2, "min_aoi_km2": settings.min_aoi_km2, "interactive_max_km2": settings.interactive_max_km2},
+        chat=dict(zip(("status", "detail"), chat.status())),
     )
 
 
@@ -270,6 +272,36 @@ async def explain(req: ExplainRequest, provider: str = Query("auto", pattern="^(
     except (KeyError, TypeError) as e:
         log.warning("Explain: incomplete facts (%s)", e)
         raise _err(422, "invalid_request", "This explanation request is incomplete.") from None
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_answer(req: ChatRequest, request: Request) -> ChatResponse:
+    """AI chat (additive; /api/explain is unchanged). Answers are checked deterministically (services/chat/validator.py)
+    and withheld whole when a check fails. Chat text is never logged; only outcome/reason codes are counted."""
+    window = None
+    if req.aoi_id:
+        if req.baseline is not None or req.comparison is not None:
+            window = _window(req.baseline, req.comparison)
+        else:
+            window = featured.default_window(req.aoi_id) if req.aoi_id in featured.featured_ids() else (DEFAULT_B, DEFAULT_C)
+    try:
+        out = await chat.answer([t.model_dump() for t in req.messages], req.aoi_id, window,
+                                request.client.host if request.client else "unknown")
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except chat.ChatRefused as e:
+        raise _err(e.status, e.code) from None
+    return ChatResponse(**out)
+
+
+@router.get("/chat/stats")
+def chat_stats() -> dict[str, Any]:
+    """How often answers were answered, declined, withheld (by reason code) or unavailable. Counts only.
+    There is no admin authentication: OFF (404, as if absent) unless TT_CHAT_STATS_ENABLED=true — for a local machine
+    only. The same counts are always in cache_dir/chat_counters.json on the server."""
+    if not settings.chat_stats_enabled:
+        raise _err(404, "not_found")
+    return chat_counters.snapshot()
 
 
 @router.get("/search")

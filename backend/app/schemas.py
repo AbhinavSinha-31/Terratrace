@@ -203,3 +203,56 @@ class Health(BaseModel):
     explainer_model: str | None = None
     geocoder: ProviderStatus
     limits: dict[str, float]
+    chat: ProviderStatus | None = None
+
+
+# ----------------------------------------------------------------------------- AI chat (POST /api/chat)
+class ChatTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    text: str = Field(..., min_length=1, max_length=1000)
+
+
+class ChatRequest(BaseModel):
+    """The conversation so far (untrusted; capped), optionally with the area and window the user is looking at."""
+    model_config = ConfigDict(extra="forbid")
+    messages: list[ChatTurn] = Field(..., min_length=1, max_length=8)
+    aoi_id: str | None = Field(None, min_length=1, max_length=80)
+    baseline: int | None = Field(None, ge=1984, le=2100)
+    comparison: int | None = Field(None, ge=1984, le=2100)
+
+    @field_validator("messages")
+    @classmethod
+    def _shape(cls, v: list[ChatTurn]) -> list[ChatTurn]:
+        if v[-1].role != "user":
+            raise ValueError("the last message must be the user's question")
+        if sum(len(t.text) for t in v) > 4000:
+            raise ValueError("the conversation is too long")
+        return v
+
+
+class ChatCitation(BaseModel):
+    id: str
+    label: str
+    value: str | None = None
+    dataset: str | None = None
+    year: str | None = None
+    kind: Literal["terratrace_result", "reference_context", "method", "dataset"]
+    source: str | None = None
+
+
+class ChatSegment(BaseModel):
+    kind: Literal["general", "place", "reference"]
+    text: str
+    citations: list[ChatCitation] = []
+
+
+class ChatResponse(BaseModel):
+    status: Literal["answered", "withheld", "declined", "unavailable"]
+    segments: list[ChatSegment] = []
+    message: str | None = None
+    reason_code: str | None = None
+    error: dict[str, Any] | None = None
+    notice: str
+    model: str | None = None
+    prompt_version: str | None = None

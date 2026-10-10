@@ -44,6 +44,11 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "outside_sentinel2_coverage": ("No Sentinel-2 imagery at this latitude: Sentinel-2 systematically images land between 56° S "
                                    "and 82.8° N, so there is nothing to analyse here.", False),
     "open_water": ("Sentinel-2 does not image the open ocean, so there is no imagery to analyse here.", False),
+    # AI chat (POST /api/chat). Never contains chat text, model output or provider error text.
+    "chat_disabled": ("The AI chat is switched off on this server.", False),
+    "chat_unavailable": ("The AI chat is not available right now. Try again later.", True),
+    "chat_busy": ("The AI chat is busy right now. Try again in a minute.", True),
+    "chat_daily_limit": ("The AI chat has reached its limit for today. Try again tomorrow.", False),
     # Per-client request limit reached (app/ratelimit.py). Explicit, retryable — the request was not processed.
     "rate_limited": ("Too many requests in a short time. Wait a moment and try again.", True),
 }

@@ -515,6 +515,8 @@ export interface SystemHealth {
   explainer_model?: string | null;
   geocoder: { status: ProviderState; detail?: string | null };
   limits: { max_aoi_km2: number; min_aoi_km2: number; interactive_max_km2?: number };
+  /** AI chat (POST /api/chat): 'offline' = switched off on the server. */
+  chat?: { status: ProviderState; detail?: string | null } | null;
 }
 
 export interface SearchResult {
@@ -636,4 +638,28 @@ export interface AnalysisHistory {
   periods: ChangePeriod[];
   history: AoiSummary['history'] | null;
   historical_statement?: string;
+}
+
+/* ---------------------------------------------------------------- AI chat (POST /api/chat) */
+export interface ChatTurn { role: 'user' | 'assistant'; text: string }
+export interface ChatCitation {
+  id: string;
+  label: string;
+  value: string | null;
+  dataset: string | null;
+  year: string | null;
+  /** terratrace_result / reference_context: this area's data; method / dataset: the curated reference library. */
+  kind: 'terratrace_result' | 'reference_context' | 'method' | 'dataset';
+  source: string | null;
+}
+/** general = AI explanation (no forest figures); place = this area, from TerraTrace data; reference = method/dataset fact. */
+export interface ChatSegment { kind: 'general' | 'place' | 'reference'; text: string; citations: ChatCitation[] }
+export interface ChatReply {
+  status: 'answered' | 'withheld' | 'declined' | 'unavailable';
+  segments: ChatSegment[];
+  /** Withheld: why (never the withheld text). Declined / unavailable: TerraTrace's own message. */
+  message: string | null;
+  reason_code: string | null;
+  notice: string;
+  model?: string | null;
 }

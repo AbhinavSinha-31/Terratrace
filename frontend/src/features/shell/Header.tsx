@@ -8,18 +8,22 @@ import { useImageryState } from '../../data/viewState';
 import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
+import { useChat } from '../../state/chat';
 
-type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'about';
+type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'ask' | 'about';
 const NAV: { key: NavKey; label: string }[] = [
   { key: 'explore', label: 'Explore' },
   { key: 'analysis', label: 'Analysis' },
   { key: 'timemachine', label: 'Time Machine' },
   { key: 'featured', label: 'Featured' },
+  { key: 'ask', label: 'Ask me anything' },
   { key: 'about', label: 'About' },
 ];
 
 export function navigate(key: NavKey) {
   const ui = useUi.getState();
+  if (key === 'ask') return useChat.getState().openAsk();
+  useChat.getState().closeAsk();
   if (key === 'about') return ui.setAboutOpen(true);
   if (key === 'featured') {
     ui.goExplore('intro');
@@ -219,7 +223,8 @@ export function Header() {
   const { data: health } = useHealth();
   const bp = useBreakpoint();
   const [menu, setMenu] = useState(false);
-  const active: NavKey = aboutOpen ? 'about' : view;
+  const askOpen = useChat((s) => s.askOpen);
+  const active: NavKey = aboutOpen ? 'about' : askOpen ? 'ask' : view;
 
   return (
     <header className="tt-header relative z-50 flex h-16 items-center gap-6 px-4 sm:px-6">

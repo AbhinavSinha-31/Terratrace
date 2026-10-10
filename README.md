@@ -95,6 +95,7 @@ file, uploaded as a secret file), since `earthengine authenticate` user credenti
 | Backend | `TT_CORS_ORIGINS` | your Vercel production origin, e.g. `https://<project>.vercel.app` |
 | Backend | `EE_PROJECT`, `EE_SERVICE_ACCOUNT_KEY` | Earth Engine (secret) |
 | Backend | `ANTHROPIC_API_KEY` | optional AI briefings (secret) |
+| Backend | `TT_CHAT_ENABLED`, `GEMINI_API_KEY`, `TT_LLM_MODEL` | optional AI chat, off by default; the key is a secret. Read docs/PRE_DEPLOYMENT.md items 4–7 first |
 
 ## Method (tt-ee-2.1)
 

@@ -123,5 +123,27 @@ class Settings:
     rate_search_per_min: int = _bounded_int("TT_RATE_SEARCH_PER_MIN", 60, 0, 10_000)
     rate_explain_per_min: int = _bounded_int("TT_RATE_EXPLAIN_PER_MIN", 20, 0, 10_000)
 
+    # AI chat (POST /api/chat). Off by default: Gemini API users must be 18+ and the free tier may not serve EEA / UK /
+    # Swiss users (docs/PRE_DEPLOYMENT.md). The key is read from GEMINI_API_KEY at call time and never stored here.
+    chat_enabled: bool = os.environ.get("TT_CHAT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+    chat_provider: str = os.environ.get("TT_LLM_PROVIDER", "gemini").strip().lower()
+    chat_model: str = os.environ.get("TT_LLM_MODEL", "gemini-3.8-flash").strip()
+    chat_timeout_s: int = _bounded_int("TT_CHAT_TIMEOUT_S", 60, 5, 120)
+    # Model thinking level (minimal | low | medium | high | default) and output budget (thinking tokens count against it).
+    chat_thinking: str = (os.environ.get("TT_LLM_THINKING", "low").strip().lower()
+                          if os.environ.get("TT_LLM_THINKING", "low").strip().lower() in ("minimal", "low", "medium", "high", "default")
+                          else "low")
+    chat_max_output_tokens: int = _bounded_int("TT_LLM_MAX_OUTPUT_TOKENS", 8192, 1024, 65_536)
+    # After Gemini answers 429 (quota), no request is sent to Gemini for this many seconds (answers "busy" at once).
+    chat_cooldown_s: int = _bounded_int("TT_CHAT_COOLDOWN_S", 60, 0, 3600)
+    # GET /api/chat/stats (counts by reason code). There is no admin authentication, so it is OFF unless enabled; the
+    # same counts are always in cache_dir/chat_counters.json on the server.
+    chat_stats_enabled: bool = os.environ.get("TT_CHAT_STATS_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+    # Conservative defaults (Google publishes no fixed free-tier figures; read the project's limits in AI Studio).
+    rate_chat_per_min: int = _bounded_int("TT_RATE_CHAT_PER_MIN", 6, 0, 10_000)            # per client
+    chat_per_client_per_day: int = _bounded_int("TT_CHAT_PER_CLIENT_PER_DAY", 60, 0, 100_000)
+    chat_global_per_min: int = _bounded_int("TT_CHAT_GLOBAL_PER_MIN", 8, 0, 100_000)        # whole backend
+    chat_global_per_day: int = _bounded_int("TT_CHAT_GLOBAL_PER_DAY", 200, 0, 1_000_000)    # whole backend (UTC day)
+
 
 settings = Settings()

@@ -8,7 +8,7 @@
  */
 import type {
   AnalysisEnvelope, AnalysisResult, AreaContext, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
-  AnalysisHistory, AnalysisJob, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
+  AnalysisHistory, AnalysisJob, ChatReply, ChatTurn, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -275,6 +275,11 @@ export const client = {
       return { results, notice: 'Search is offline — featured investigations and coordinates only.' };
     };
     return withFallback(() => request(`${API}/search?q=${encodeURIComponent(q)}`, { timeoutMs: 9000 }), offline);
+  },
+
+  /** AI chat: answered, declined or withheld by the backend's deterministic checks (the key never leaves the server). */
+  async chat(body: { messages: ChatTurn[]; aoi_id?: string; baseline?: number; comparison?: number }): Promise<ChatReply> {
+    return request<ChatReply>(`${API}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 75000 });   // backend chat timeout is 60 s
   },
 
   /** Explanations exist only for READY live facts, and only server-side. */

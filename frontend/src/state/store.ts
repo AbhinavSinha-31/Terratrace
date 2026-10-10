@@ -7,7 +7,7 @@ import { DEFAULT_ANALYSIS_WINDOW, DEFAULT_YEARS } from '../lib/time';
 export type View = 'explore' | 'analysis' | 'timemachine';
 export type ExplorePhase = 'intro' | 'explore';
 export type ImageryMode = 'sentinel' | 'hires';
-export type PanelTab = 'overview' | 'events';
+export type PanelTab = 'overview' | 'events' | 'ask';
 export type SheetSnap = 'peek' | 'half' | 'full';
 export type DrawTool = 'rect' | 'polygon' | null;
 

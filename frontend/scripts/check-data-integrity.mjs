@@ -531,8 +531,141 @@ async function run(label, { offline }) {
   await ctx.close();
 }
 
+// ---- J: AI chat (2026-10-10). Part 1 against the real backend (chat off by default). Part 2 renders FIXTURE replies
+// (route-intercepted /api/chat and a health flag) to check labels, citations and the withheld message — rendering only;
+// the answer checks themselves are tested in backend/tests/test_chat_*.py.
+async function runChat() {
+  const label = 'chat';
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${BASE}#/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.__tt?.loaded, null, { timeout: 45000 });
+  const health = await page.evaluate(async () => (await fetch('/api/health')).json());
+  console.log(`\n# ${label}: server chat status = ${health?.chat?.status}`);
+  if (health?.chat?.status !== 'ready') {
+    const direct = await page.evaluate(async () => (await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', text: 'What is NDVI?' }] }) })).json());
+    check(direct.status === 'unavailable' && direct.reason_code === 'chat_disabled', `${label}: chat is off by default (server answers chat_disabled, no model call)`, JSON.stringify({ s: direct.status, c: direct.reason_code }));
+    await page.getByTestId('chat-launcher').click();
+    const popup = page.getByTestId('chat-popup');
+    await popup.waitFor({ timeout: 5000 });
+    const pt = await popup.innerText();
+    check(/TerraTrace's guide/.test(pt) && (await page.getByTestId('chat-popup-starter').count()) === 3, `${label}: front-page pop-up has a greeting and starter questions`);
+    check(/personal information/.test(pt) && /switched off/.test(pt) && await page.getByTestId('chat-popup-input').isDisabled(), `${label}: pop-up shows the notice and the switched-off state, input disabled`);
+    await page.getByTestId('chat-launcher').click();
+  } else {
+    // Chat on: check the pop-up WITHOUT sending anything (no real model call from this suite).
+    await page.getByTestId('chat-launcher').click();
+    const popup = page.getByTestId('chat-popup');
+    await popup.waitFor({ timeout: 5000 });
+    const pt = await popup.innerText();
+    check(/TerraTrace's guide/.test(pt) && (await page.getByTestId('chat-popup-starter').count()) === 3, `${label}: front-page pop-up has a greeting and starter questions`);
+    check(/personal information/.test(pt) && await page.getByTestId('chat-popup-input').isEnabled(), `${label}: pop-up shows the notice; input enabled while the chat is on`);
+    await page.keyboard.press('Escape');
+  }
+  await page.getByRole('button', { name: 'Ask me anything' }).first().click();
+  const ask = page.getByTestId('ask-page');
+  await ask.waitFor({ timeout: 5000 });
+  const at = await ask.innerText();
+  check(/Ask me anything/.test(at) && (await ask.getByTestId('chat-starters').locator('button').count()) === 4, `${label}: Ask page in the top nav with starter questions`);
+  check(/Don't enter personal information/.test(at), `${label}: Ask page shows the personal-information notice`);
+  if (health?.chat?.status !== 'ready') check(await ask.getByTestId('chat-input').isDisabled() && /switched off/.test(at), `${label}: Ask page shows the switched-off state`);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  // Analysis view: an Ask tab (or an inline chat when there is no READY result) bound to the area.
+  await page.evaluate(() => { window.location.hash = '#/analysis/hasdeo-arand'; });
+  await page.waitForFunction(() => window.__ttUi.getState().investigation.study?.id === 'hasdeo-arand', null, { timeout: 30000 });
+  await page.waitForTimeout(2500);
+  const askTab = page.getByRole('tab', { name: 'Ask' });
+  if (await askTab.count()) await askTab.click();
+  const areaPanel = page.locator('[data-testid="chat-panel"][data-thread^="area:hasdeo-arand:"]');
+  check(await areaPanel.count() === 1, `${label}: analysis view has a chat bound to the selected area and window`);
+  await ctx.close();
+
+  // The front-page chat button never covers a featured card (desktop, laptop, tablet and phone widths).
+  for (const [w, h] of [[1440, 900], [1280, 720], [1024, 768], [390, 844]]) {
+    const lctx = await browser.newContext({ viewport: { width: w, height: h } });
+    const lp = await lctx.newPage();
+    await lp.goto(`${BASE}#/`, { waitUntil: 'domcontentloaded' });
+    await lp.waitForFunction(() => window.__tt?.loaded && document.querySelectorAll('button.tt-card').length >= 4, null, { timeout: 45000 });
+    await lp.waitForTimeout(800);
+    const geo = await lp.evaluate(() => {
+      const r = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+      const btn = document.querySelector('[data-testid="chat-launcher"]');
+      return { btn: btn ? r(btn) : null, cards: [...document.querySelectorAll('button.tt-card')].map(r) };
+    });
+    const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const overlaps = geo.btn ? geo.cards.filter((c) => hit(geo.btn, c)).length : -1;
+    const inside = geo.btn && geo.btn.x >= 0 && geo.btn.x + geo.btn.w <= w;   // fully on screen horizontally
+    check(geo.btn && geo.btn.w > 0 && inside && overlaps === 0, `${label}: chat button fully on screen and over no featured card at ${w}×${h}`, JSON.stringify({ btn: geo.btn, overlaps }));
+    await lctx.close();
+  }
+
+  // Part 2 — fixture replies (rendering only).
+  const fctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const sent = [];
+  await fctx.route('**/api/health', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    await route.fulfill({ response: res, json: { ...body, chat: { status: 'ready', detail: null } } });
+  });
+  let n = 0;
+  const ANSWER = { status: 'answered', reason_code: null, message: null, notice: 'n', model: 'fixture', segments: [
+    { kind: 'general', text: 'FIXTURE general teaching text.', citations: [] },
+    { kind: 'place', text: 'FIXTURE place text.', citations: [
+      { id: 'P1', label: 'Gross forest-loss transitions 2019–2025', value: '3,140.0 ha', dataset: 'TerraTrace forest mask (Sentinel-2 + Dynamic World)', year: '2019–2025', kind: 'terratrace_result', source: null },
+      { id: 'P2', label: 'ESA WorldCover tree cover in 2021, share of land', value: '61.0 %', dataset: 'ESA WorldCover v200', year: '2021', kind: 'reference_context', source: null }] },
+    { kind: 'reference', text: 'FIXTURE reference text.', citations: [{ id: 'R3', label: 'Change rule', value: null, dataset: null, year: null, kind: 'method', source: 'docs/METHOD.md §6' }] }] };
+  const WITHHELD = { status: 'withheld', reason_code: 'forest_figure_in_general', message: 'Answer withheld: it gave a forest figure that does not come from TerraTrace\'s data.', notice: 'n', segments: [] };
+  await fctx.route('**/api/chat', async (route) => {
+    sent.push(JSON.parse(route.request().postData() ?? '{}'));
+    await route.fulfill({ json: n++ === 0 ? ANSWER : WITHHELD });
+  });
+  const fp = await fctx.newPage();
+  fp.on('pageerror', (e) => errors.push(e.message));
+  await fp.goto(`${BASE}#/`, { waitUntil: 'domcontentloaded' });
+  await fp.waitForFunction(() => window.__tt?.loaded, null, { timeout: 45000 });
+  // Pop-up -> Ask page with the conversation carried over.
+  await fp.getByTestId('chat-launcher').click();
+  await fp.getByTestId('chat-popup-input').fill('What did TerraTrace find?');
+  await fp.getByTestId('chat-popup-input').press('Enter');
+  const fask = fp.getByTestId('ask-page');
+  await fask.waitFor({ timeout: 5000 });
+  await fask.getByTestId('chat-reply').first().waitFor({ timeout: 10000 });
+  check(/What did TerraTrace find\?/.test(await fask.getByTestId('chat-user').first().innerText()), `${label}: sending from the pop-up opens the Ask page with the conversation`);
+  const reply = await fask.getByTestId('chat-reply').first().innerText();
+  check(/AI explanation · general knowledge, not TerraTrace data/i.test(reply), `${label}: general segments are labelled as AI explanation`);
+  check(/From TerraTrace's data for this area/i.test(reply) && /TerraTrace result/i.test(reply) && /Reference context, not a TerraTrace result/i.test(reply), `${label}: place segments show their citations, results and reference context apart`);
+  check(/ESA WorldCover v200 · 2021/.test(reply) && /2019–2025/.test(reply), `${label}: every place citation names its dataset and year`);
+  check(/Method \/ dataset reference/i.test(reply) && /Source: docs\/METHOD\.md/.test(reply), `${label}: reference segments show their source`);
+  check(sent[0] && !('aoi_id' in sent[0]) && sent[0].messages.length === 1, `${label}: the Ask page sends no area`, JSON.stringify(sent[0]));
+  await fask.getByTestId('chat-input').fill('Tell me a forest figure');
+  await fask.getByTestId('chat-input').press('Enter');
+  await fask.getByTestId('chat-withheld').waitFor({ timeout: 10000 });
+  const wh = await fask.getByTestId('chat-withheld').innerText();
+  check(/^Answer withheld: /.test(wh.trim()), `${label}: a withheld answer shows a short message saying why`, wh.trim());
+  check(sent[1]?.messages?.map((m) => m.role).join(',') === 'user,assistant,user', `${label}: follow-up questions carry the conversation (answered replies only)`, JSON.stringify(sent[1]?.messages?.map((m) => m.role)));
+  // The analysis-view chat sends the selected area and window (the backend then uses only that area's data).
+  await fp.keyboard.press('Escape');
+  await fp.evaluate(() => { window.location.hash = '#/analysis/hasdeo-arand'; });
+  await fp.waitForFunction(() => window.__ttUi.getState().investigation.study?.id === 'hasdeo-arand', null, { timeout: 30000 });
+  await fp.waitForTimeout(2500);
+  if (await fp.getByRole('tab', { name: 'Ask' }).count()) await fp.getByRole('tab', { name: 'Ask' }).click();
+  const areaInput = fp.locator('[data-testid="chat-panel"][data-thread^="area:hasdeo-arand:"] [data-testid="chat-input"]');
+  await areaInput.fill('What did TerraTrace measure here?');
+  await areaInput.press('Enter');
+  await fp.waitForTimeout(1500);
+  const win = await fp.evaluate(() => { const i = window.__ttUi.getState().investigation; return [i.baselineYear, i.comparisonYear]; });
+  check(sent[2]?.aoi_id === 'hasdeo-arand' && sent[2]?.baseline === win[0] && sent[2]?.comparison === win[1] && sent[2]?.messages?.length === 1,
+    `${label}: the analysis-view chat sends the selected area and window, in its own conversation`, JSON.stringify(sent[2]));
+  check(errors.length === 0, `${label}: no uncaught page errors`, errors.slice(0, 2).join(' | '));
+  await fctx.close();
+}
+
 await run('backend', { offline: false });
 await run('ui-preview', { offline: true });
+await runChat();
 await browser.close();
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll integrity checks passed');
 process.exit(failed ? 1 : 0);

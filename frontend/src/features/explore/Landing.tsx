@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
 import { useFeaturedSummary, useHealth, useStudyAreas, useStudyCard } from '../../data/queries';
+import { ChatLauncher } from '../chat/ChatLauncher';
 import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
 import { fmtHa, fmtKm2, shortBiome } from '../../lib/format';
@@ -240,6 +241,7 @@ const LiveAnalysisLabel = () => <span className="ml-auto shrink-0 text-[10.5px] 
 function Featured() {
   const { data, isLoading, isError, error, refetch } = useStudyAreas();
   const setPhase = useUi((s) => s.setPhase);
+  const frontPage = useUi((s) => s.view === 'explore' && s.phase === 'intro');
   const [highlight, setHighlight] = useState(false);
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -253,7 +255,7 @@ function Featured() {
   }, []);
   return (
     <section ref={ref} className="pointer-events-auto" aria-labelledby="fi" data-map-occluder>
-      <div className="mb-3 flex items-end justify-between gap-4">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
           <div className="flex items-center gap-2.5">
             <TerratraceMark size={18} />
@@ -261,9 +263,13 @@ function Featured() {
           </div>
           <p className="mt-1.5 text-[12px] text-ink-3">Real-world examples to explore. You can also select any area on Earth.</p>
         </div>
-        <button onClick={() => setPhase('explore')} className="tt-press flex shrink-0 items-center gap-1.5 text-[12px] text-accent hover:underline">
-          Explore anywhere <ArrowRight size={14} />
-        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          <button onClick={() => setPhase('explore')} className="tt-press flex shrink-0 items-center gap-1.5 text-[12px] text-accent hover:underline">
+            Explore anywhere <ArrowRight size={14} />
+          </button>
+          {/* In the header row (normal flow): never over a card, at any width. */}
+          {frontPage && <ChatLauncher />}
+        </div>
       </div>
       {isError ? (
         <div className="tt-panel"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>

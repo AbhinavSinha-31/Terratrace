@@ -263,3 +263,120 @@ Since 2026-10-10 every area on Earth can be opened and analysed; nothing is refu
 * **One rounding rule for shares** (`services/units.py` / `lib/format.ts`): not measured "—"; a measured 0 "0 %";
   more than 0 but less than 1 "< 1 %"; otherwise one decimal (e.g. "22.5 %"). Shares are stored with four decimals and
   rounded once, at display.
+
+## 11. AI chat — what it may say, and how that is checked
+
+The chat (`POST /api/chat`; "Ask me anything" page, front-page pop-up, Ask tab in the analysis view) is **off by
+default** (`TT_CHAT_ENABLED=false`): Gemini API users must be 18+, and the free tier may not serve EEA / UK / Swiss
+users (`docs/PRE_DEPLOYMENT.md`). Model `gemini-3.8-flash` (`TT_LLM_MODEL`), Google Gen AI SDK `google-genai==2.29.0`,
+one stateless `generate_content` call per question (the Interactions API, which stores conversations by default, is
+not used). The key lives only in `backend/.env` (`GEMINI_API_KEY`). Tone: a teacher, plain language for non-experts,
+deeper when asked. Scope: forests, Earth observation and TerraTrace; anything else gets a fixed polite decline (the
+model's own text is never shown for an out-of-scope request).
+
+**No second model call: every answer is checked deterministically** ([`services/chat/validator.py`](../backend/app/services/chat/validator.py)).
+The model must answer in segments, and **one failing segment withholds the whole answer**; the user sees
+"Answer withheld: …" with the reason, never the withheld text.
+
+| Segment | May contain | Checked |
+|---|---|---|
+| `general` — labelled "AI explanation · general knowledge, not TerraTrace data" | Teaching true anywhere; numbers about sensors and indices (10 m pixels, 5-day revisit, NDVI −1…1, launch years) | **No forest-cover or forest-change figure about any place**, and no claim that forest changed in a named place, a possessed place ("my village") or the selected area (rules 1–3) |
+| `place` — "From TerraTrace's data for this area" | Only the selected area, only from its facts (TerraTrace result, its cautions, or reference context — each labelled, with dataset and year) | Must cite this area's facts; every number must equal a cited value; no other place (rules 4–6) |
+| `reference` — "Method / dataset reference" | A fact from the curated library (`app/data/reference_facts.json`) | Must cite it; numbers must equal its values; no place at all (rule 7) |
+
+1. **Forest figure in a general segment** (`forest_figure_in_general`). Places are **never looked up in a list**: a
+   general segment that contains a forest term (forest, deforestation, trees, canopy, woodland, mangrove, logging,
+   plantation, vegetation, green cover, biomass, woody, carbon stock, …) **and anywhere in the same segment** a
+   quantity is withheld. Quantities: a number (digits or words, "thirty-five") with an area or share unit (%, percent,
+   ha, hectares, km², acres, square miles, football fields); "N … of forest" with any unit word ("40 bigha of
+   forest"); a count of trees; proportion words (half, halved, a third, a quarter, doubled, tripled, twice, N-fold,
+   N times); "most / nearly all / much of" together with a change word; or any other bare number together with a
+   change word (except years, values ≤ 1, and numbers followed by a non-area unit: m, km, days, years, °, bands,
+   scenes, observations, pixels, percentile).
+2. **Place claim in a general segment** (`place_change_claim_in_general`): within a sentence and the one before it,
+   a forest term together with (a) a reference to the selected area ("this area", "the selected site", "your area"),
+   or (b) a change word and a possessed place ("my village", "our town") or a capitalised name. A capitalised word
+   counts as a possible name unless it is a dataset / sensor / organisation word (Sentinel, Landsat, Hansen, ESA,
+   NASA, Earth, …) or, **at the start of a sentence only**, an ordinary English word: a short curated list, or the
+   vetted vocabulary `app/data/english_vocabulary.txt` — 37,367 words derived from SCOWL 2020.12.07 (the word lists
+   behind GNU Aspell/Hunspell; licence in `app/data/SCOWL_COPYRIGHT.txt`): the common-word lists up to size 35, minus
+   every word SCOWL also lists capitalised, so homographs of names ("China", "Turkey", "Reading") stay possible names.
+   A possessive ("Delhi's") or a following capitalised word ("Western Ghats") is always a possible name. This is not a
+   list of places: a word that is not known to be ordinary is treated as a possible name. "That area" refers to the
+   selected area unless the same sentence first introduces an indefinite area it points back to ("how much forest a
+   specific area has lost … select that area on the map"); "this area", "the selected area" and "your area" always do.
+   (Both refinements, 2026-10-10, fix false positives seen in real Gemini answers; regression tests use those answers
+   verbatim.)
+3. **A figure in text with no English word** (`non_english`), e.g. "Bosque perdido: 40 %".
+4. **Citations** (`uncited_place_claim`): a place segment must cite at least one fact of **this** area. Fact ids are
+   rebuilt from the selected area's stored data for every request; another area's facts are never in the list.
+5. **Numbers** (`unsupported_number`): every number must equal a cited value after correct rounding (half-up) to the
+   decimals written — 22.4525 % may be "22.45 %", "22.5 %" or "22 %", never "23 %". No conversions, sums or
+   estimates beyond the km² equivalent provided for each area figure. The unit must match (a "%" is never a hectare
+   figure). Years must be a cited fact's years. **Direction:** a loss, gain or signed figure must be stated with its
+   direction — a loss / gain word in its own clause, or its sign — so a loss cannot be passed off as a forest area or
+   as a gain, and a segment may not say forest increased while citing a negative net change. Unverifiable words
+   ("half", "most of", "doubled") are withheld in place segments, and in reference segments unless the cited entry
+   itself uses them.
+6. **Another place** (`other_place_in_place_segment`): any capitalised name that is not the area's own name, region
+   or country (or an allowed dataset word), any possessed place, or "neighbouring / nearby / other districts, areas,
+   forests …". **A figure from this area can therefore never be attached to another place, and a figure about
+   another place can never be attached to this area's facts.**
+7. **Reference segments** (`uncited_reference`, `place_in_reference`): cite library entries only, contain no place,
+   and state only those entries' numbers.
+8. `malformed` (not the required JSON, too long, unknown kinds) and `prompt_leak` (a random per-process marker or the
+   instruction headers appear in the answer) are withheld too.
+
+**Reference library** (15 entries, re-checked one by one 2026-10-10): TerraTrace's own rules from this document (§1,
+§1a, §3, §4, §6, §7, §9, §10), dataset facts from each dataset's Earth Engine catalogue page (Hansen GFC v1.13, ESA
+WorldCover v200, Dynamic World V1, Sentinel-2 SR Harmonized, Landsat 8 C2 L2, Copernicus DEM GLO-30 2024_1), and
+Sentinel-2's coverage band from ESA SentiWiki (56° S – 82.8° N, §10). Left out because they could not be verified: the
+DEM's radar acquisition years and WorldCover's tree-cover percentage definition (neither is on its catalogue page). **No global forest statistics.** An entry that
+could not be verified is left out — e.g. ESA WorldCover's tree-cover percentage definition is not stated on its
+catalogue page.
+
+**English only.** The patterns are English. The model is told to answer in English; an answer in another script, or
+Latin-script text dominated by non-English function words, is withheld (`non_english`). Questions may be asked in any
+language, but answers are checked and shown only in English — a real limitation for non-English users.
+
+**Counters and logs.** Outcomes are counted by **code only** (`answered`, `declined`, `withheld` by reason,
+`unavailable` by code, e.g. `chat_quota_429`, `chat_cooldown`, `chat_timeout`, `chat_truncated`) in
+`cache_dir/chat_counters.json` on the server. `GET /api/chat/stats` serves the same counts but is **off (404) unless
+`TT_CHAT_STATS_ENABLED=true`** — there is no admin authentication, so it is for a local machine only. No question,
+answer or model text is ever logged, counted or put in an error message; provider errors are reduced to a code, and
+only the finish reason and token counts of an answer are logged.
+
+**Provider behaviour.** One request per question: the SDK is set to a single attempt, so a 429 (quota) or a timeout
+is never retried. After a 429, no request is sent to Gemini for `TT_CHAT_COOLDOWN_S` (60 s): questions get "busy" at
+once. An answer cut off by the output limit (`finish_reason` MAX_TOKENS) is a provider failure ("not available right
+now"), not a withheld answer. Thinking level `low` (`TT_LLM_THINKING`; "minimal" is rejected by gemini-3.8-flash),
+output budget 8,192 tokens, timeout 60 s (`TT_CHAT_TIMEOUT_S`).
+
+**Limits** (conservative defaults until the project's real Gemini limits are read from AI Studio): 6 questions per
+minute and 60 per day per client; 8 per minute and 200 per UTC day for the whole backend (Google's day ends at midnight
+Pacific — `docs/PRE_DEPLOYMENT.md` item 7); at most 8 messages of 1,000 characters, 4,000 in all. The counters are in-process (`docs/PRE_DEPLOYMENT.md` item 3: behind a proxy they
+count per proxy, not per user).
+
+**Live validation status (2026-10-10, gemini-3.8-flash, free tier).** 20 real requests: 5 answers reached the
+validator (2 answered, 3 withheld: two false positives — since fixed, above — and one answer cut off by the output
+limit, now treated as a provider failure); 8 timed out; 2 got 429 (quota); 5 were refused during the cool-down. **Not
+yet validated live: questions about a selected featured area (place segments) and reference questions (reference
+segments)** — every attempt timed out or hit the quota. The live test (`backend/tests_live/`, opt-in only) must be
+re-run before the chat is enabled for anyone.
+
+**Known ways something could still get through** (pinned by `test_known_gaps_still_pass_as_documented`):
+
+* **General teaching is labelled, not fact-checked.** "Sentinel-2 has 20 m resolution" (wrong) passes as an AI
+  explanation.
+* **Figures about a place that are not about forest** pass in general segments ("Delhi has 10 million people").
+* **Claims without a figure** about a place written in lower case ("the amazon rainforest is shrinking"), or about
+  "Earth", pass: name detection relies on capitals, and "Earth" is allowed for global teaching.
+* **Wording outside the patterns:** a forest figure that uses no listed forest term (e.g. "green belt", "orchards"),
+  a quantity form not covered (Roman numerals, digits split by letters, an unlisted unit word without "of forest" and
+  without a change word), a figure in a short non-English phrase that still contains an English function word, or a
+  sentence-initial place name that SCOWL does not list capitalised (a small place whose name is an ordinary English
+  word) in a claim without a figure.
+* **Meaning inside a place segment is checked only for value, unit, year and direction.** A correct cited number can
+  still be described loosely (gross loss transitions called "deforestation"), and qualitative statements ("the forest
+  is healthy") must cite a fact but are not verified against it.
+* **Reference segments** may paraphrase a cited entry inaccurately if they state no number.
