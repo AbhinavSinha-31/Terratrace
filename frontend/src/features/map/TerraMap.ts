@@ -670,8 +670,11 @@ export class TerraMap {
       const id = `ov-${ov.kind}`;
       if (!this.map.getLayer(id)) continue;
       const on = ov.kind === 'forest' ? layers.forest : layers.ndvi;
+      // A year without its own layer (before 2016: imagery only; or not analysable) shows NO overlay — never the
+      // previously loaded year's mask over this year's imagery.
+      const has = ov.source === 'raster-tiles' ? !!ov.tiles_by_year?.[String(year)] : !!ov.by_year?.[String(year)];
       this.map.setLayoutProperty(id, 'visibility', 'visible');
-      this.map.setPaintProperty(id, 'raster-opacity', on ? (ov.kind === 'forest' ? layers.forestOpacity : 0.72) : 0);
+      this.map.setPaintProperty(id, 'raster-opacity', on && has ? (ov.kind === 'forest' ? layers.forestOpacity : 0.72) : 0);
       const key = `${id}:${year}`;
       if (this.applied[`ovyear-${id}`] !== key) {
         this.applied[`ovyear-${id}`] = key;
