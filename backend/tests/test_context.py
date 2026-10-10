@@ -103,7 +103,7 @@ def test_a_loss_year_absent_from_the_grouped_sum_is_a_measured_zero():
 def test_every_value_carries_its_dataset_and_year():
     c = context.parse(RAW)
     t, f = c["terrain"], c["forest"]
-    assert t["source"]["dataset"] == "Copernicus DEM GLO-30" and t["source"]["year"] == "2011–2015"
+    assert t["source"]["dataset"] == "Copernicus DEM GLO-30" and t["source"]["year"] == "2024_1"
     assert f["tree_cover_2000"]["source"]["year"] == "2000" and "year-2000 baseline" in f["tree_cover_2000"]["source"]["year_label"]
     assert f["loss_by_year"]["source"]["year"] == "2001–2025"
     assert f["gain_2000_2012"]["source"]["year"] == "2000–2012" and "only" in f["gain_2000_2012"]["source"]["year_label"]
@@ -242,3 +242,19 @@ def test_context_reads_are_rate_limited_as_compute():
     from app import ratelimit
     assert ratelimit.group_of("GET", "/api/aoi/hasdeo-arand") == "compute"
     assert ratelimit.group_of("GET", "/api/tiles/hasdeo-arand/context/slope/3/1/1") is None, "tiles: same policy as the other tile routes"
+
+
+def test_terrain_card_shows_only_catalogue_backed_dem_labels():
+    """2026-10-10: "acquired 2011–2015" is not stated on the DEM's Earth Engine catalogue page and is no longer shown —
+    also for context files stored before the change (labels are applied when served; measured values are untouched)."""
+    stored = context.parse(RAW)
+    stored["terrain"]["source"] = {**stored["terrain"]["source"], "year": "2011–2015", "year_label": "acquired 2011–2015 (2024 release)"}
+    context._memory["hasdeo-arand"] = stored
+    try:
+        served = context.cached("hasdeo-arand")
+    finally:
+        context._memory.pop("hasdeo-arand", None)
+    src = served["terrain"]["source"]
+    assert "2011" not in json.dumps(src) and src["year"] == "2024_1" and "2010-12-01 – 2020-11-13" in src["year_label"]
+    assert served["terrain"]["elevation_m"] == stored["terrain"]["elevation_m"]
+    assert all("2011" not in l["year_label"] for l in served["layers"])

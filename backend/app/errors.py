@@ -42,7 +42,7 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "not_run": ("This analysis has not been run yet.", False),
     # Analysis RESULTS (not refusals) for areas where no satellite imagery can exist; retrying cannot change them.
     "outside_sentinel2_coverage": ("No Sentinel-2 imagery at this latitude: Sentinel-2 systematically images land between 56° S "
-                                   "and 84° N, so there is nothing to analyse here.", False),
+                                   "and 82.8° N, so there is nothing to analyse here.", False),
     "open_water": ("Sentinel-2 does not image the open ocean, so there is no imagery to analyse here.", False),
     # Per-client request limit reached (app/ratelimit.py). Explicit, retryable — the request was not processed.
     "rate_limited": ("Too many requests in a short time. Wait a moment and try again.", True),

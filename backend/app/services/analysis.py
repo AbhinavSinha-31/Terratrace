@@ -356,9 +356,10 @@ def _job_budget() -> float:
 # Every area can be opened and analysed (2026-10-10: no forest-based refusal). Two cases have no satellite imagery at
 # all; the analysis completes at once with an explicit UNAVAILABLE result (no Earth Engine work), and the reference
 # context of the area is still shown.
-# Sentinel-2 MSI systematically acquires land between 56° S and 84° N (ESA mission specification); Dynamic World is
-# derived from it.
-S2_LAT_MIN, S2_LAT_MAX = -56.0, 84.0
+# Sentinel-2 MSI systematically acquires land between 56° S and 82.8° N: ESA SentiWiki, S2 Mission
+# (https://sentiwiki.copernicus.eu/web/s2-mission, checked 2026-10-10). Older ESA documents say 83° N or 84° N; the
+# most conservative current statement is used (docs/METHOD.md section 10). Dynamic World is derived from Sentinel-2.
+S2_LAT_MIN, S2_LAT_MAX = -56.0, 82.8
 
 
 def outside_sentinel2_band(bbox: Any) -> str | None:
@@ -368,7 +369,7 @@ def outside_sentinel2_band(bbox: Any) -> str | None:
         return None
     lat = (s + n) / 2
     return (f"No Sentinel-2 imagery at this latitude ({abs(lat):.2f}° {'S' if lat < 0 else 'N'}): Sentinel-2 systematically images "
-            "land between 56° S and 84° N, so there is nothing to analyse here. The reference context of the area is still shown.")
+            "land between 56° S and 82.8° N, so there is nothing to analyse here. The reference context of the area is still shown.")
 
 
 OPEN_WATER_REASON = ("Sentinel-2 does not image the open ocean, so there is no imagery to analyse here. "

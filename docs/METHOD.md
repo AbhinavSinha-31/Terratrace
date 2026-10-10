@@ -199,7 +199,7 @@ reported as unavailable (never estimated) and measured again later.
 
 | Value | Dataset (Earth Engine ID) | Date | Notes |
 |---|---|---|---|
-| Elevation (min, 5–95 %, mean, max), mean slope, share steeper than 30° | Copernicus DEM GLO-30, 30 m (`COPERNICUS/DEM/GLO30_2024_1`) | radar acquired 2011–2015, 2024 release | Surface model: over forest, elevation includes the canopy. The tiles are mosaicked with their own projection before computing slope. `COPERNICUS/DEM/GLO30` is deprecated in the catalogue in favour of this ID. |
+| Elevation (min, 5–95 %, mean, max), mean slope, share steeper than 30° | Copernicus DEM GLO-30, 30 m (`COPERNICUS/DEM/GLO30_2024_1`) | Earth Engine catalogue: version 2024_1, dataset availability 2010-12-01 – 2020-11-13 | Digital Surface Model — "the surface of the Earth including buildings, infrastructure and vegetation" (catalogue), so over forest the elevation includes the canopy. (The radar acquisition years are not stated in the catalogue and are not shown.) The tiles are mosaicked with their own projection before computing slope. `COPERNICUS/DEM/GLO30` is deprecated in the catalogue in favour of this ID. |
 | Tree cover, share of land | Hansen Global Forest Change v1.13 (`UMD/hansen/global_forest_change_2025_v1_13`) | **year-2000 baseline** | Canopy ≥ 30 % at 30 m; land = Hansen `datamask` 1. |
 | Tree cover loss per year | Hansen GFC v1.13 | **each year 2001–2025** | Within the year-2000 tree cover. Stand-replacing canopy removal (incl. logging, fire, plantation harvest) — not necessarily deforestation; method updates make years not strictly comparable. A year with no loss pixel over the measured area is a measured 0. |
 | Tree cover gain | Hansen GFC v1.13 | **2000–2012 only** | Not updated after 2012. |
@@ -251,8 +251,15 @@ Since 2026-10-10 every area on Earth can be opened and analysed; nothing is refu
     trigger: it is twenty years older and uses a canopy-density definition (e.g. Rondônia 73.3 % in 2000 vs 40.6 % in
     2021 is real forest loss, not disagreement).
 * **No imagery.** Open ocean (Sentinel-2 does not image it) and areas outside Sentinel-2's systematic band (56° S –
-  84° N) complete at once as UNAVAILABLE with that reason — no Earth Engine analysis work — and the reference context
+  82.8° N) complete at once as UNAVAILABLE with that reason — no Earth Engine analysis work — and the reference context
   is still shown. Areas with too few clear observations are reported as before (insufficient usable imagery).
+  **Northern limit 82.8° N** (checked 2026-10-10). ESA's own documents disagree, so the most conservative current
+  statement is used: ESA SentiWiki, *S2 Mission* (https://sentiwiki.copernicus.eu/web/s2-mission): "all continental
+  land surfaces (including inland waters) between latitudes 56° South and 82.8° North". Other ESA documents give
+  84° N (Sentinel-2 User Handbook, ESA Standard Document, Issue 1 Rev 2, 24/07/2015, p. 8; Sentinel Online success
+  story "Sentinel-2 images the globe every 5 days", 09/03/2018; ESA *Facts and figures*, which says "between 84°N and
+  84°S", contradicting the 56° S limit) or 83° N (the same User Handbook, p. 18). Until 2026-10-10 TerraTrace used
+  84° N.
 * **One rounding rule for shares** (`services/units.py` / `lib/format.ts`): not measured "—"; a measured 0 "0 %";
   more than 0 but less than 1 "< 1 %"; otherwise one decimal (e.g. "22.5 %"). Shares are stored with four decimals and
   rounded once, at display.

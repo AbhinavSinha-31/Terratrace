@@ -3,8 +3,8 @@
 Shown for every area whatever the state of its TerraTrace analysis, labelled as reference context, with the dataset
 and year on every value:
 
-  Terrain      Copernicus DEM GLO-30 (2024 release; radar acquired 2011–2015). A surface model: over forest the
-               elevation includes the canopy.
+  Terrain      Copernicus DEM GLO-30, version 2024_1 (Earth Engine catalogue: dataset availability 2010-12-01 –
+               2020-11-13). A Digital Surface Model: over forest the elevation includes the canopy.
   Tree cover   Hansen Global Forest Change v1.13 — the YEAR-2000 BASELINE (canopy >= 30 %), loss PER YEAR 2001–2025
                within that baseline, gain 2000–2012 only. Loss = stand-replacing canopy removal (incl. logging, fire,
                plantation harvest), not necessarily deforestation; method changes across versions make years not
@@ -41,8 +41,11 @@ CACHE = settings.cache_dir / "context"
 HANSEN_LOSS_YEARS = list(range(2001, 2026))   # v1.13: lossyear 1..25
 
 SOURCES = {
-    "dem": {"dataset": "Copernicus DEM GLO-30", "id": P.DEM, "year": "2011–2015", "year_label": "acquired 2011–2015 (2024 release)",
-            "resolution_m": 30, "note": "Surface model: over forest, elevation includes the canopy."},
+    # Labels from the Earth Engine catalogue page of COPERNICUS/DEM/GLO30_2024_1 (checked 2026-10-10). The radar
+    # acquisition years are NOT stated there, so none are shown.
+    "dem": {"dataset": "Copernicus DEM GLO-30", "id": P.DEM, "year": "2024_1",
+            "year_label": "version 2024_1 · catalogue availability 2010-12-01 – 2020-11-13", "resolution_m": 30,
+            "note": "Digital Surface Model (includes buildings, infrastructure and vegetation): over forest, elevation includes the canopy."},
     "hansen": {"dataset": "Hansen Global Forest Change v1.13", "id": P.HANSEN, "resolution_m": 30,
                "note": "Loss is stand-replacing canopy removal (incl. logging, fire, plantation harvest), not necessarily "
                        "deforestation; method updates make years not strictly comparable."},
@@ -226,8 +229,8 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
 def layers_for(aid: str) -> list[dict[str, Any]]:
     """Reference map layers served by GET /api/tiles/{aid}/context/{layer}/... (never TerraTrace results)."""
     meta = {
-        "hillshade": ("Hillshade", SOURCES["dem"]["dataset"], "acquired 2011–2015"),
-        "slope": ("Slope (0–45°)", SOURCES["dem"]["dataset"], "acquired 2011–2015"),
+        "hillshade": ("Hillshade", SOURCES["dem"]["dataset"], "version 2024_1"),
+        "slope": ("Slope (0–45°)", SOURCES["dem"]["dataset"], "version 2024_1"),
         "treecover2000": (f"Tree cover ≥ {P.HANSEN_CANOPY} % canopy · year 2000", SOURCES["hansen"]["dataset"], "2000 baseline"),
         "lossyear": ("Tree cover loss year · 2001–2025", SOURCES["hansen"]["dataset"], "2001–2025"),
     }
@@ -237,6 +240,15 @@ def layers_for(aid: str) -> list[dict[str, Any]]:
 
 def _path(aid: str):
     return CACHE / f"{aid}-{CONTEXT_VERSION}.json"
+
+
+def _current_labels(doc: dict[str, Any]) -> dict[str, Any]:
+    """A stored context with today's dataset labels (presentation only; the measured values are untouched). Stored
+    files keep the labels they were written with — e.g. the unverified DEM "acquired 2011–2015" (removed 2026-10-10)."""
+    terrain = doc.get("terrain")
+    if isinstance(terrain, dict) and isinstance(terrain.get("source"), dict):
+        return {**doc, "terrain": {**terrain, "source": dict(SOURCES["dem"])}}
+    return doc
 
 
 def cached(aid: str) -> dict[str, Any] | None:
@@ -252,7 +264,7 @@ def cached(aid: str) -> dict[str, Any] | None:
         else:
             doc = None
     if doc is not None:
-        return {**doc, "layers": layers_for(aid)}
+        return {**_current_labels(doc), "layers": layers_for(aid)}
     fail = _failures.get(aid)
     if fail and time.monotonic() - fail[1] < FAILURE_TTL_S:
         return unavailable(fail[0])

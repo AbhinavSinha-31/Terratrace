@@ -73,10 +73,21 @@ def test_no_area_is_refused_at_selection_or_job_creation(no_earth_engine, lon, l
 
 
 def test_the_sentinel2_band_check_only_names_areas_outside_it():
-    for lat in (-55.9, 0.0, 83.9):
+    for lat in (-55.9, 0.0, 82.7):
         assert analysis.outside_sentinel2_band((10.0, lat - 0.04, 10.1, lat + 0.04)) is None
     msg = analysis.outside_sentinel2_band((89.4, -84.995, 89.5, -84.905))   # centre 84.95° S
-    assert "84.95° S" in msg and "56° S and 84° N" in msg and "reference context" in msg
+    assert "84.95° S" in msg and "56° S and 82.8° N" in msg and "reference context" in msg
+
+
+def test_the_northern_limit_is_esas_82_8_degrees():
+    """ESA SentiWiki (S2 Mission): land between 56° South and 82.8° North. Older ESA documents say 83° / 84° N; the
+    conservative current limit is used (docs/METHOD.md section 10). 82.8–84° N was analysed before 2026-10-10."""
+    assert analysis.S2_LAT_MAX == 82.8
+    assert analysis.outside_sentinel2_band((-40.0, 82.70, -39.9, 82.79)) is None
+    assert analysis.outside_sentinel2_band((-40.0, 82.75, -39.9, 82.85)) is not None    # straddles the limit
+    assert analysis.outside_sentinel2_band((-40.0, 83.20, -39.9, 83.30)) is not None    # was "inside" at 84° N
+    from app.errors import public_error
+    assert "56° S and 82.8° N" in public_error("outside_sentinel2_coverage")["user_message"]
 
 
 def test_area_limits_are_enforced_by_the_backend():
