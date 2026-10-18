@@ -47,7 +47,7 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     # AI chat (POST /api/chat). Never contains chat text, model output or provider error text.
     "chat_disabled": ("The AI chat is switched off on this server.", False),
     "chat_unavailable": ("The AI chat is not available right now. Try again later.", True),
-    "chat_busy": ("The AI chat is busy right now. Try again in a minute.", True),
+    "chat_busy": ("The AI chat is busy right now. Please try again shortly.", True),
     "chat_daily_limit": ("The AI chat has reached its limit for today. Try again tomorrow.", False),
     # Per-client request limit reached (app/ratelimit.py). Explicit, retryable — the request was not processed.
     "rate_limited": ("Too many requests in a short time. Wait a moment and try again.", True),

@@ -44,12 +44,16 @@ class FakeModel:
         self.answer = {"in_scope": True, "segments": [{"kind": "general", "text": "Sentinel-2 has 10 m resolution.", "fact_ids": []}]}
         self.calls = []
         self.error = None
+        self.error_for: dict[str, str] = {}     # per-model error (e.g. primary overloaded, fallback fine)
+        self.answer_for: dict[str, object] = {}  # per-model answer
 
     def __call__(self, model, system, turns, schema, timeout_s, *extra):
         self.calls.append({"model": model, "system": system, "turns": turns, "schema": schema})
-        if self.error:
-            raise gemini.ChatProviderError(self.error)
-        return self.answer if isinstance(self.answer, str) else json.dumps(self.answer)
+        err = self.error_for.get(model, self.error)
+        if err:
+            raise gemini.ChatProviderError(err)
+        ans = self.answer_for.get(model, self.answer)
+        return ans if isinstance(ans, str) else json.dumps(ans)
 
 
 @pytest.fixture
@@ -105,7 +109,7 @@ def test_enabled_without_a_key_is_unavailable(monkeypatch):
 def test_general_answer_is_labelled_general_without_citations(model):
     d = ask("What resolution does Sentinel-2 have?").json()
     assert d["status"] == "answered" and d["segments"] == [{"kind": "general", "text": "Sentinel-2 has 10 m resolution.", "citations": []}]
-    assert d["model"] == "gemini-3.8-flash"
+    assert d["model"] == service.settings.chat_model   # the configured model (backend/.env may override the default)
 
 
 def test_place_answer_cites_this_areas_terratrace_data(model):
@@ -190,7 +194,8 @@ def test_prompt_leak_is_withheld(model):
     assert d["status"] == "withheld" and d["reason_code"] == "prompt_leak"
 
 
-@pytest.mark.parametrize("code,expected", [("busy", "chat_busy"), ("failed", "chat_unavailable"), ("unconfigured", "chat_unavailable")])
+@pytest.mark.parametrize("code,expected", [("busy", "chat_busy"), ("overloaded", "chat_busy"), ("failed", "chat_unavailable"),
+                                           ("unconfigured", "chat_unavailable"), ("timeout", "chat_unavailable")])
 def test_provider_errors_are_generic(model, code, expected):
     model.error = code
     d = ask().json()
@@ -345,3 +350,82 @@ def test_env_template_keeps_the_chat_off_and_the_key_empty():
     values = {l.split("=", 1)[0].strip(): l.split("=", 1)[1].split("#", 1)[0].strip() for l in lines if "=" in l and not l.startswith("#")}
     assert values["TT_CHAT_ENABLED"] == "false" and values["TT_CHAT_STATS_ENABLED"] == "false"
     assert "GEMINI_API_KEY" in values and values["GEMINI_API_KEY"] == ""
+    assert values["TT_LLM_FALLBACK_MODEL"] == "gemini-3.5-flash-lite"
+
+
+# ----------------------------------------------------------------------------- 503 (overloaded): one fallback attempt
+PRIMARY, FALLBACK = "primary-model", "fallback-model"
+BUSY_TEXT = "The AI chat is busy right now. Please try again shortly."
+
+
+@pytest.fixture
+def two_models(model, monkeypatch):
+    monkeypatch.setattr(service, "settings", dataclasses.replace(settings, chat_enabled=True, chat_model=PRIMARY,
+                                                                  chat_fallback_model=FALLBACK))
+    return model
+
+
+def test_503_on_the_primary_tries_the_fallback_once_and_answers(two_models):
+    two_models.error_for = {PRIMARY: "overloaded"}
+    d = ask("What is NDVI?").json()
+    assert [c["model"] for c in two_models.calls] == [PRIMARY, FALLBACK]
+    assert d["status"] == "answered" and d["model"] == FALLBACK
+    assert two_models.calls[0]["system"] == two_models.calls[1]["system"] and two_models.calls[0]["turns"] == two_models.calls[1]["turns"]
+
+
+def test_the_fallbacks_answer_goes_through_the_same_checks(two_models):
+    two_models.error_for = {PRIMARY: "overloaded"}
+    two_models.answer_for = {FALLBACK: {"in_scope": True, "segments": [
+        {"kind": "general", "text": "India lost 40 % of its forests in the last decade.", "fact_ids": []}]}}
+    d = ask("Tell me about forests").json()
+    assert d["status"] == "withheld" and d["reason_code"] == "forest_figure_in_general" and d["segments"] == []
+
+
+def test_503_on_both_models_says_busy_try_again_shortly(two_models):
+    two_models.error = "overloaded"
+    d = ask().json()
+    assert len(two_models.calls) == 2
+    assert d["status"] == "unavailable" and d["reason_code"] == "chat_busy" and d["message"] == BUSY_TEXT
+    assert d["error"]["retryable"] is True and counters.snapshot()["unavailable"] == {"chat_overloaded_503": 1}
+    assert not service.cooldown.active(), "a 503 is temporary overload, not quota: no cool-down"
+
+
+def test_429_says_busy_try_again_shortly_and_never_tries_the_fallback(two_models):
+    two_models.error_for = {PRIMARY: "busy"}
+    d = ask().json()
+    assert [c["model"] for c in two_models.calls] == [PRIMARY]
+    assert d["reason_code"] == "chat_busy" and d["message"] == BUSY_TEXT and service.cooldown.active()
+
+
+def test_a_429_from_the_fallback_also_starts_the_cool_down(two_models):
+    two_models.error_for = {PRIMARY: "overloaded", FALLBACK: "busy"}
+    d = ask().json()
+    assert len(two_models.calls) == 2 and d["reason_code"] == "chat_busy" and service.cooldown.active()
+
+
+@pytest.mark.parametrize("code", ["failed", "timeout", "truncated", "unconfigured"])
+def test_other_errors_never_try_the_fallback(two_models, code):
+    two_models.error_for = {PRIMARY: code}
+    d = ask().json()
+    assert [c["model"] for c in two_models.calls] == [PRIMARY] and d["reason_code"] == "chat_unavailable"
+
+
+@pytest.mark.parametrize("fallback", ["", PRIMARY])
+def test_no_fallback_when_none_is_configured_or_it_is_the_same_model(model, monkeypatch, fallback):
+    monkeypatch.setattr(service, "settings", dataclasses.replace(settings, chat_enabled=True, chat_model=PRIMARY,
+                                                                  chat_fallback_model=fallback))
+    model.error = "overloaded"
+    d = ask().json()
+    assert len(model.calls) == 1 and d["reason_code"] == "chat_busy" and d["message"] == BUSY_TEXT
+
+
+def test_sdk_503_is_one_request_and_maps_to_overloaded(monkeypatch):
+    from google import genai
+    from google.genai import errors
+    fake = _FakeSdk(raise_exc=errors.ServerError(503, {"error": {"code": 503, "message": "This model is currently experiencing "
+                                                                 "high demand.", "status": "UNAVAILABLE"}}))
+    monkeypatch.setattr(genai, "Client", fake.Client)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-not-a-key")
+    with pytest.raises(gemini.ChatProviderError) as e:
+        gemini.generate("m", "s", [{"role": "user", "text": "q"}], {}, 5)
+    assert e.value.code == "overloaded" and fake.requests == 1

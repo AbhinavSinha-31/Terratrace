@@ -347,8 +347,11 @@ answer or model text is ever logged, counted or put in an error message; provide
 only the finish reason and token counts of an answer are logged.
 
 **Provider behaviour.** One request per question: the SDK is set to a single attempt, so a 429 (quota) or a timeout
-is never retried. After a 429, no request is sent to Gemini for `TT_CHAT_COOLDOWN_S` (60 s): questions get "busy" at
-once. An answer cut off by the output limit (`finish_reason` MAX_TOKENS) is a provider failure ("not available right
+is never retried. After a 429, no request is sent to Gemini for `TT_CHAT_COOLDOWN_S` (60 s): questions get "busy, try
+again shortly" at once. The one exception is a 503 ("this model is experiencing high demand", seen for every full Flash
+model on 2026-10-15): the question is sent once more to `TT_LLM_FALLBACK_MODEL` (default `gemini-3.5-flash-lite`;
+empty = none), and its answer goes through exactly the same checks. If the fallback is also overloaded the user sees
+"busy, try again shortly", not "not available". An answer cut off by the output limit (`finish_reason` MAX_TOKENS) is a provider failure ("not available right
 now"), not a withheld answer. Thinking level `low` (`TT_LLM_THINKING`; "minimal" is rejected by gemini-3.8-flash),
 output budget 8,192 tokens, timeout 60 s (`TT_CHAT_TIMEOUT_S`).
 

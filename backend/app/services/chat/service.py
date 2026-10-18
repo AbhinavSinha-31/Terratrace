@@ -1,4 +1,5 @@
-"""AI chat orchestration: limits -> facts -> one model call -> deterministic checks -> answer, decline or withhold.
+"""AI chat orchestration: limits -> facts -> model call (+ one fallback call on 503) -> deterministic checks ->
+answer, decline or withhold.
 
 Nothing the user or the model wrote is logged, counted or put in an error message: only outcome and reason codes.
 """
@@ -7,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from collections import deque
@@ -19,6 +21,8 @@ from ...providers.ai import gemini
 from . import counters, facts as chat_facts
 from .prompt import LEAK_MARKERS, PROMPT_VERSION, RESPONSE_SCHEMA, system_instruction
 from .validator import validate
+
+log = logging.getLogger("terratrace.chat")
 
 NOTICE = ("Don't enter personal information. AI explanations can be wrong; figures come from TerraTrace data with "
           "their dataset and year.")
@@ -86,7 +90,8 @@ caps = _Caps()
 
 class _Cooldown:
     """After Gemini answers 429 (quota exhausted), nothing is sent to Gemini for chat_cooldown_s: requests answer
-    "busy" at once instead of hammering the quota. One provider request per question, never retried."""
+    "busy" at once instead of hammering the quota. A question costs one provider request — two only when the primary
+    model answers 503 and the fallback model is tried once; a 429 is never retried."""
 
     def __init__(self) -> None:
         self._until = 0.0
@@ -125,6 +130,22 @@ def _unavailable(code: str, counted: str | None = None) -> dict[str, Any]:
             "notice": NOTICE, "model": None}
 
 
+async def _generate(system: str, messages: list[dict[str, str]]) -> tuple[str, str]:
+    """(raw answer, model that produced it). The primary model first; if it answers 503 (overloaded) and a different
+    fallback model is configured, that model is tried ONCE. Its error, if any, is the one the caller sees."""
+    def call(model: str):
+        return asyncio.to_thread(gemini.generate, model, system, messages, RESPONSE_SCHEMA, settings.chat_timeout_s,
+                                 settings.chat_thinking, settings.chat_max_output_tokens)
+    try:
+        return await call(settings.chat_model), settings.chat_model
+    except gemini.ChatProviderError as e:
+        fallback = settings.chat_fallback_model
+        if e.code != "overloaded" or not fallback or fallback == settings.chat_model:
+            raise
+        log.info("chat: primary model overloaded (503); one attempt on the fallback model")
+        return await call(fallback), fallback
+
+
 def _render(answer: dict[str, Any], public: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for s in answer["segments"]:
@@ -152,19 +173,20 @@ async def answer(messages: list[dict[str, str]], aoi_id: str | None, window: tup
     ref_prompt, ref_index, ref_public = chat_facts.reference_facts()
     system = system_instruction(area_name, place, ref_prompt)
     try:
-        raw = await asyncio.to_thread(gemini.generate, settings.chat_model, system, messages, RESPONSE_SCHEMA,
-                                      settings.chat_timeout_s, settings.chat_thinking, settings.chat_max_output_tokens)
+        raw, used_model = await _generate(system, messages)
     except gemini.ChatProviderError as e:
-        if e.code == "busy":
+        if e.code == "busy":          # 429: quota — cool down, then "busy, try again shortly"
             cooldown.start(settings.chat_cooldown_s)
             return _unavailable("chat_busy", "chat_quota_429")
+        if e.code == "overloaded":    # 503 on the primary (and the fallback, if any): temporary — "busy, try again shortly"
+            return _unavailable("chat_busy", "chat_overloaded_503")
         return _unavailable("chat_unavailable", f"chat_{e.code}")
     try:
         parsed = json.loads(raw)
     except ValueError:
         parsed = None
     verdict = validate(parsed, place_index, ref_index, area_names, LEAK_MARKERS)
-    base = {"notice": NOTICE, "model": settings.chat_model, "prompt_version": PROMPT_VERSION, "error": None}
+    base = {"notice": NOTICE, "model": used_model, "prompt_version": PROMPT_VERSION, "error": None}
     if not verdict.ok:
         counters.record("withheld", verdict.reason)
         return {**base, "status": "withheld", "segments": [], "reason_code": verdict.reason,

@@ -128,6 +128,9 @@ class Settings:
     chat_enabled: bool = os.environ.get("TT_CHAT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
     chat_provider: str = os.environ.get("TT_LLM_PROVIDER", "gemini").strip().lower()
     chat_model: str = os.environ.get("TT_LLM_MODEL", "gemini-3.8-flash").strip()
+    # Tried ONCE when the primary model answers 503 ("high demand"; seen for every full Flash model on 2026-10-15 while
+    # gemini-3.5-flash-lite answered). Empty = no fallback. Never used after a 429 (quota) or any other error.
+    chat_fallback_model: str = os.environ.get("TT_LLM_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip()
     chat_timeout_s: int = _bounded_int("TT_CHAT_TIMEOUT_S", 60, 5, 120)
     # Model thinking level (minimal | low | medium | high | default) and output budget (thinking tokens count against it).
     chat_thinking: str = (os.environ.get("TT_LLM_THINKING", "low").strip().lower()

@@ -17,7 +17,8 @@ KEY_ENV = "GEMINI_API_KEY"
 
 
 class ChatProviderError(Exception):
-    """code: "busy" (429 / quota), "unconfigured" (missing or rejected key), "failed" (anything else)."""
+    """code: "busy" (429 / quota), "overloaded" (503: the model has no capacity right now), "unconfigured" (missing or
+    rejected key), "timeout", "truncated", "failed" (anything else)."""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -33,7 +34,8 @@ def generate(model: str, system: str, turns: list[dict[str, str]], schema: dict[
     """One answer as JSON text. `turns` = [{"role": "user"|"assistant", "text": ...}] (already validated and capped).
 
     Exactly ONE request: the SDK's retry is set to a single attempt (HttpRetryOptions.attempts counts the original
-    request), so a 429 or a timeout is never retried here — the caller decides (services/chat/service.py cools down).
+    request), so a 429, a 503 or a timeout is never retried here — the caller decides (services/chat/service.py cools
+    down after a 429 and tries the fallback model once after a 503).
     `thinking`: the model's thinking level ("minimal" | "low" | "medium" | "high"; "default" = the model's own). Measured
     2026-10-10 with gemini-3.8-flash: the default thinking used most of a 2,048-token output budget (one answer was cut
     off mid-JSON) and two calls exceeded 30 s.
@@ -59,7 +61,8 @@ def generate(model: str, system: str, turns: list[dict[str, str]], schema: dict[
     except errors.APIError as e:
         log.warning("Gemini error %s %s", type(e).__name__, getattr(e, "code", "?"))
         code = getattr(e, "code", None)
-        raise ChatProviderError("busy" if code == 429 else "unconfigured" if code in (401, 403) else "failed") from None
+        raise ChatProviderError("busy" if code == 429 else "overloaded" if code == 503
+                                else "unconfigured" if code in (401, 403) else "failed") from None
     except Exception as e:  # noqa: BLE001 — transport errors / timeouts; only the type is logged
         log.warning("Gemini request failed: %s", type(e).__name__)
         raise ChatProviderError("timeout" if "timeout" in type(e).__name__.lower() else "failed") from None
