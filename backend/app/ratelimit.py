@@ -32,7 +32,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/api/aoi/preview$"), "compute"),
     ("GET", re.compile(r"^/api/search$"), "search"),
     ("POST", re.compile(r"^/api/explain$"), "explain"),
-    ("POST", re.compile(r"^/api/chat$"), "chat"),
+    ("POST", re.compile(r"^/api/chat(?:/stream)?$"), "chat"),   # the streaming route shares the chat limit
 ]
 
 

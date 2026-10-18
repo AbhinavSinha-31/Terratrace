@@ -8,7 +8,7 @@
  */
 import type {
   AnalysisEnvelope, AnalysisResult, AreaContext, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
-  AnalysisHistory, AnalysisJob, ChatReply, ChatTurn, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
+  AnalysisHistory, AnalysisJob, ChatReply, ChatStage, ChatTurn, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -121,6 +121,9 @@ export const newRid = () => globalThis.crypto?.randomUUID?.() ?? `r${Date.now().
 
 let featuredCache: StudyAreaIndex | null = null;
 const offlineFeatured = async () => (featuredCache ??= await request<StudyAreaIndex>(`${BASE}data/featured.json`));
+
+type ChatBody = { messages: ChatTurn[]; aoi_id?: string; baseline?: number; comparison?: number };
+const CHAT_UNAVAILABLE = 'The AI chat is not available right now. Try again later.';
 
 export const client = {
   isBackendUp: () => backend,
@@ -278,8 +281,54 @@ export const client = {
   },
 
   /** AI chat: answered, declined or withheld by the backend's deterministic checks (the key never leaves the server). */
-  async chat(body: { messages: ChatTurn[]; aoi_id?: string; baseline?: number; comparison?: number }): Promise<ChatReply> {
+  async chat(body: ChatBody): Promise<ChatReply> {
     return request<ChatReply>(`${API}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 75000 });   // backend chat timeout is 60 s
+  },
+
+  /**
+   * The same answer as chat(), streamed: `onStage` hears "asking" / "fallback" / "checking" while the model works, then
+   * the checked reply is returned. No model text arrives before the backend's checks have passed. A backend without
+   * the stream route (404/405) is answered by chat() instead.
+   */
+  async chatStream(body: ChatBody, onStage: (stage: ChatStage) => void): Promise<ChatReply> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);   // up to two model calls (fallback) of 60 s are capped server-side
+    try {
+      const res = await fetch(`${API}/chat/stream`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body), signal: ctrl.signal,
+      });
+      const type = res.headers.get('content-type') ?? '';
+      if (res.status === 404 || res.status === 405 || (res.ok && !type.includes('text/event-stream'))) return await client.chat(body);
+      if (!res.ok || !res.body) {
+        const d = type.includes('json') ? (await res.json().catch(() => null))?.detail : null;
+        throw new ApiError(d?.user_message ?? CHAT_UNAVAILABLE, res.status, d?.code, d?.retryable);
+      }
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value.replace(/\r\n/g, '\n');   // a proxy may rewrite line endings
+        let cut: number;
+        while ((cut = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          const event = /^event: (.*)$/m.exec(block)?.[1];
+          const data = /^data: (.*)$/m.exec(block)?.[1];
+          if (!event || data === undefined) continue;
+          const d = JSON.parse(data);
+          if (event === 'stage') onStage(d.stage as ChatStage);
+          else if (event === 'reply') return d as ChatReply;
+          else if (event === 'error') throw new ApiError(d.user_message ?? CHAT_UNAVAILABLE, d.status, d.code, d.retryable);
+        }
+      }
+      throw new ApiError(CHAT_UNAVAILABLE, 503, 'chat_unavailable', true);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(CHAT_UNAVAILABLE, undefined, 'chat_unavailable', true);
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   /** Explanations exist only for READY live facts, and only server-side. */

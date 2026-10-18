@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { ApiError, client } from '../data/client';
-import type { ChatReply, ChatTurn } from '../data/contracts';
+import type { ChatReply, ChatStage, ChatTurn } from '../data/contracts';
 
 /**
  * AI chat state: one conversation per thread ('general' for the Ask page and the front-page pop-up; one per area and
@@ -35,6 +35,11 @@ export function turnsFor(history: ChatMessage[], question: string): ChatTurn[] {
 interface ChatState {
   threads: Record<string, ChatMessage[]>;
   pending: Record<string, boolean>;
+  /** What the backend is doing for a pending question (streamed stages; no model text). */
+  stage: Record<string, ChatStage>;
+  /** Id of the reply that just arrived: its checked segments are revealed one by one, once. */
+  fresh: number | null;
+  markRevealed(): void;
   askOpen: boolean;
   launcherOpen: boolean;
   openAsk(): void;
@@ -49,6 +54,9 @@ let nextId = 1;
 export const useChat = create<ChatState>((set, get) => ({
   threads: {},
   pending: {},
+  stage: {},
+  fresh: null,
+  markRevealed: () => set({ fresh: null }),
   askOpen: false,
   launcherOpen: false,
   openAsk: () => set({ askOpen: true, launcherOpen: false }),
@@ -60,16 +68,20 @@ export const useChat = create<ChatState>((set, get) => ({
     if (!text || get().pending[thread]) return;
     const history = get().threads[thread] ?? [];
     const messages = turnsFor(history, text);
-    set((s) => ({ threads: { ...s.threads, [thread]: [...history, { id: nextId++, role: 'user', text }] }, pending: { ...s.pending, [thread]: true } }));
+    set((s) => ({ threads: { ...s.threads, [thread]: [...history, { id: nextId++, role: 'user', text }] }, pending: { ...s.pending, [thread]: true },
+      stage: { ...s.stage, [thread]: 'sending' } }));
     let reply: ChatReply;
     try {
-      reply = await client.chat({ messages, ...(area ? { aoi_id: area.aoiId, baseline: area.baseline, comparison: area.comparison } : {}) });
+      const body = { messages, ...(area ? { aoi_id: area.aoiId, baseline: area.baseline, comparison: area.comparison } : {}) };
+      reply = await client.chatStream(body, (st) => set((s) => ({ stage: { ...s.stage, [thread]: st } })));
     } catch (e) {
       // Only TerraTrace's own public message is shown (ApiError carries the backend's user_message).
       const message = e instanceof ApiError ? e.message : 'The AI chat is not available right now. Try again later.';
       reply = { status: 'unavailable', segments: [], message, reason_code: e instanceof ApiError ? e.code ?? null : null, notice: '' };
     }
-    set((s) => ({ threads: { ...s.threads, [thread]: [...(s.threads[thread] ?? []), { id: nextId++, role: 'assistant', reply }] }, pending: { ...s.pending, [thread]: false } }));
+    const id = nextId++;
+    set((s) => ({ threads: { ...s.threads, [thread]: [...(s.threads[thread] ?? []), { id, role: 'assistant', reply }] }, pending: { ...s.pending, [thread]: false },
+      fresh: reply.status === 'answered' && reply.segments.length > 1 ? id : s.fresh }));
   },
 }));
 

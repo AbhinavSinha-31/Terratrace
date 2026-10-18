@@ -271,8 +271,10 @@ default** (`TT_CHAT_ENABLED=false`): Gemini API users must be 18+, and the free 
 users (`docs/PRE_DEPLOYMENT.md`). Model `gemini-3.8-flash` (`TT_LLM_MODEL`), Google Gen AI SDK `google-genai==2.29.0`,
 one stateless `generate_content` call per question (the Interactions API, which stores conversations by default, is
 not used). The key lives only in `backend/.env` (`GEMINI_API_KEY`). Tone: a teacher, plain language for non-experts,
-deeper when asked. Scope: forests, Earth observation and TerraTrace; anything else gets a fixed polite decline (the
-model's own text is never shown for an out-of-scope request).
+deeper when asked. Scope (prompt `chat-2`, 2026-10-19): forests and forest cover change, Earth observation, land use /
+land cover (LULC), NDVI, NDBI and other indices, land surface temperature (LST), urban heat islands (UHI) and TerraTrace;
+scope is judged by topic, never by the question's language. Anything else gets a fixed polite decline, in English,
+Hindi or Hinglish to match the user (the model's own text is never shown for an out-of-scope request).
 
 **No second model call: every answer is checked deterministically** ([`services/chat/validator.py`](../backend/app/services/chat/validator.py)).
 The model must answer in segments, and **one failing segment withholds the whole answer**; the user sees
@@ -335,9 +337,22 @@ DEM's radar acquisition years and WorldCover's tree-cover percentage definition 
 could not be verified is left out — e.g. ESA WorldCover's tree-cover percentage definition is not stated on its
 catalogue page.
 
-**English only.** The patterns are English. The model is told to answer in English; an answer in another script, or
-Latin-script text dominated by non-English function words, is withheld (`non_english`). Questions may be asked in any
-language, but answers are checked and shown only in English — a real limitation for non-English users.
+**Checked in English; shown in Hindi or Hinglish too (decided 2026-10-19).** The patterns are English, so every
+segment's `text` is still written and checked in English exactly as before (an English text in another script or
+dominated by non-English words is still withheld, `non_english`). When the user's own message is Hindi (Devanagari) or
+Hinglish (Hindi in Latin letters) — detected deterministically from their words, not by the model — the model also
+returns each segment in that language (`text_local`). `services/chat/translation.py` shows the translations only if
+EVERY segment's translation has exactly the same numbers as its checked English segment (Devanagari digits normalised),
+adds no capitalised Latin-script word (an added "Delhi"), is in the right script, is not much longer, and carries no
+internal marker; otherwise all translations are dropped and the checked English answer is shown with a note. The
+English stays one click away under each translated segment. **Accepted limit:** a place name or a quantity written as
+a *word* in Devanagari ("दिल्ली", "आधा") cannot be detected in a translation; the English segment it must mirror has
+been checked.
+
+**Streaming (progress, not text).** `POST /api/chat/stream` returns the same answer as `POST /api/chat` as
+Server-Sent Events: stage events while the model works ("asking", "fallback", "checking"), then one event with the
+checked reply. Stage events carry no model text, so nothing unchecked is ever shown; the frontend then reveals the
+checked segments one after another. Same request shape, limits and counters as `/api/chat`, which is unchanged.
 
 **Counters and logs.** Outcomes are counted by **code only** (`answered`, `declined`, `withheld` by reason,
 `unavailable` by code, e.g. `chat_quota_429`, `chat_cooldown`, `chat_timeout`, `chat_truncated`) in

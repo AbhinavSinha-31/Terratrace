@@ -243,8 +243,9 @@ class ChatCitation(BaseModel):
 
 class ChatSegment(BaseModel):
     kind: Literal["general", "place", "reference"]
-    text: str
+    text: str                       # English: the text TerraTrace checks
     citations: list[ChatCitation] = []
+    text_local: str | None = None   # the same segment in the user's language (Hindi / Hinglish), shown only when checked
 
 
 class ChatResponse(BaseModel):
@@ -256,3 +257,5 @@ class ChatResponse(BaseModel):
     notice: str
     model: str | None = None
     prompt_version: str | None = None
+    language: Literal["en", "hi", "hinglish"] | None = None   # the user's language, detected from their own message
+    translation: Literal["shown", "dropped", "none"] | None = None

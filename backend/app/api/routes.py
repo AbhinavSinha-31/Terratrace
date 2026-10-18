@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from ..config import settings
 from ..errors import public_error
@@ -274,16 +274,19 @@ async def explain(req: ExplainRequest, provider: str = Query("auto", pattern="^(
         raise _err(422, "invalid_request", "This explanation request is incomplete.") from None
 
 
+def _chat_window(req: ChatRequest) -> tuple[int, int] | None:
+    if not req.aoi_id:
+        return None
+    if req.baseline is not None or req.comparison is not None:
+        return _window(req.baseline, req.comparison)
+    return featured.default_window(req.aoi_id) if req.aoi_id in featured.featured_ids() else (DEFAULT_B, DEFAULT_C)
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_answer(req: ChatRequest, request: Request) -> ChatResponse:
     """AI chat (additive; /api/explain is unchanged). Answers are checked deterministically (services/chat/validator.py)
     and withheld whole when a check fails. Chat text is never logged; only outcome/reason codes are counted."""
-    window = None
-    if req.aoi_id:
-        if req.baseline is not None or req.comparison is not None:
-            window = _window(req.baseline, req.comparison)
-        else:
-            window = featured.default_window(req.aoi_id) if req.aoi_id in featured.featured_ids() else (DEFAULT_B, DEFAULT_C)
+    window = _chat_window(req)
     try:
         out = await chat.answer([t.model_dump() for t in req.messages], req.aoi_id, window,
                                 request.client.host if request.client else "unknown")
@@ -292,6 +295,50 @@ async def chat_answer(req: ChatRequest, request: Request) -> ChatResponse:
     except chat.ChatRefused as e:
         raise _err(e.status, e.code) from None
     return ChatResponse(**out)
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/stream")
+async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
+    """The same answer as POST /api/chat, as Server-Sent Events: "stage" events while the model works
+    ({"stage": "asking" | "fallback" | "checking"}), then ONE "reply" event whose data is exactly /api/chat's body,
+    or ONE "error" event ({status, code, user_message, retryable}). Stage events carry no model text: nothing the model
+    wrote is sent before every check has passed. Same request shape, limits and counters as /api/chat."""
+    window = _chat_window(req)    # invalid windows are refused before the stream starts
+    host = request.client.host if request.client else "unknown"
+    queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+
+    async def progress(stage: str) -> None:
+        await queue.put(("stage", {"stage": stage}))
+
+    async def run() -> None:
+        try:
+            out = await chat.answer([t.model_dump() for t in req.messages], req.aoi_id, window, host, progress)
+            await queue.put(("reply", ChatResponse(**out).model_dump()))
+        except analysis.AnalysisNotFound:
+            await queue.put(("error", {"status": 404, **public_error("not_found")}))
+        except chat.ChatRefused as e:
+            await queue.put(("error", {"status": e.status, **public_error(e.code)}))
+        except Exception as e:  # noqa: BLE001 — never leak internals into the stream
+            log.warning("chat stream failed: %s", type(e).__name__)
+            await queue.put(("error", {"status": 503, **public_error("chat_unavailable")}))
+        finally:
+            await queue.put(None)
+
+    async def events():
+        task = asyncio.create_task(run())
+        try:
+            while (item := await queue.get()) is not None:
+                yield _sse(*item)
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/chat/stats")

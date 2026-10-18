@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Database, Loader2, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import { useHealth } from '../../data/queries';
-import type { ChatCitation, ChatReply, ChatSegment } from '../../data/contracts';
+import type { ChatCitation, ChatReply, ChatSegment, ChatStage } from '../../data/contracts';
 import { useChat, type AreaContextRef, type ChatMessage } from '../../state/chat';
 
 // A stable empty list: a new [] per render would make the store selector loop forever.
 const NO_MESSAGES: ChatMessage[] = [];
+const NOOP = () => {};
 
 export const CHAT_NOTICE = "Don't enter personal information. AI explanations can be wrong; figures come from TerraTrace data with their dataset and year.";
 
@@ -42,7 +43,15 @@ function Citation({ c }: { c: ChatCitation }) {
   );
 }
 
-function Segment({ s }: { s: ChatSegment }) {
+const STAGE_TEXT: Record<ChatStage, string> = {
+  sending: 'Sending your question…',
+  asking: 'Asking the AI model…',
+  fallback: 'The main AI model is busy — trying the backup model…',
+  checking: "Checking the answer against TerraTrace's data…",
+};
+
+function Segment({ s, lang }: { s: ChatSegment; lang?: ChatReply['language'] }) {
+  const local = s.text_local ?? null;
   return (
     <div data-testid="chat-segment" data-kind={s.kind}>
       {s.kind === 'general' && (
@@ -50,14 +59,45 @@ function Segment({ s }: { s: ChatSegment }) {
       )}
       {s.kind === 'place' && <div className="t-label mb-1 !text-[8.5px] text-forest">From TerraTrace's data for this area</div>}
       {s.kind === 'reference' && <div className="t-label mb-1 !text-[8.5px] text-ink-3">Method / dataset reference</div>}
-      <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink">{s.text}</p>
+      {local ? (
+        <>
+          <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink" lang={lang === 'hi' ? 'hi' : 'hi-Latn'} data-testid="chat-segment-local">{local}</p>
+          <details className="mt-1 text-[11px] text-ink-3" data-testid="chat-segment-english">
+            <summary className="cursor-pointer select-none">English (checked) · AI translation above; its numbers match the checked English</summary>
+            <p className="mt-1 whitespace-pre-line leading-relaxed text-ink-2" lang="en">{s.text}</p>
+          </details>
+        </>
+      ) : (
+        <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink">{s.text}</p>
+      )}
       {s.citations.length > 0 && <ul className="mt-1.5 space-y-1">{s.citations.map((c) => <Citation key={c.id} c={c} />)}</ul>}
     </div>
   );
 }
 
-function Reply({ r }: { r: ChatReply }) {
-  if (r.status === 'answered') return <div className="space-y-3">{r.segments.map((s, i) => <Segment key={i} s={s} />)}</div>;
+/** Reveals an answer's checked segments one after another (all of them already passed every check). */
+function useReveal(total: number, animate: boolean, onDone: () => void): number {
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const [shown, setShown] = useState(animate && !reduced ? 1 : total);
+  useEffect(() => {
+    if (shown >= total) { if (animate) onDone(); return; }
+    const t = window.setTimeout(() => setShown((n) => n + 1), 450);
+    return () => window.clearTimeout(t);
+  }, [shown, total, animate, onDone]);
+  return shown;
+}
+
+function Reply({ r, animate = false, onRevealed }: { r: ChatReply; animate?: boolean; onRevealed?: () => void }) {
+  const done = onRevealed ?? NOOP;
+  const shown = useReveal(r.status === 'answered' ? r.segments.length : 0, animate, done);
+  if (r.status === 'answered') {
+    return (
+      <div className="space-y-3">
+        {r.message && <p className="text-[12px] leading-relaxed text-ink-3" data-testid="chat-translation-note">{r.message}</p>}
+        {r.segments.slice(0, shown).map((s, i) => <Segment key={i} s={s} lang={r.language} />)}
+      </div>
+    );
+  }
   const tone = r.status === 'withheld' ? 'text-warn' : 'text-ink-2';
   return (
     <div className={`flex gap-2 text-[12.5px] leading-relaxed ${tone}`} data-testid={`chat-${r.status}`}>
@@ -72,6 +112,9 @@ export function ChatPanel({ thread, area, starters, greeting, compact = false, a
 }) {
   const messages = useChat((s) => s.threads[thread] ?? NO_MESSAGES);
   const pending = useChat((s) => !!s.pending[thread]);
+  const stage = useChat((s) => s.stage[thread]);
+  const fresh = useChat((s) => s.fresh);
+  const markRevealed = useChat((s) => s.markRevealed);
   const send = useChat((s) => s.send);
   const { ready, message } = useChatAvailability();
   const [draft, setDraft] = useState('');
@@ -99,8 +142,8 @@ export function ChatPanel({ thread, area, starters, greeting, compact = false, a
         )}
         {messages.map((m) => m.role === 'user'
           ? <div key={m.id} className="ml-auto max-w-[85%] rounded-md bg-accent/12 px-3 py-2 text-[13px] text-ink shadow-[0_0_0_1px_rgba(69,208,196,0.25)]" data-testid="chat-user">{m.text}</div>
-          : <div key={m.id} className="max-w-[95%]" data-testid="chat-reply"><Reply r={m.reply} /></div>)}
-        {pending && <div className="flex items-center gap-2 text-[12px] text-ink-3"><Loader2 size={14} className="animate-spin" />Checking the answer…</div>}
+          : <div key={m.id} className="max-w-[95%]" data-testid="chat-reply"><Reply r={m.reply} animate={m.id === fresh} onRevealed={markRevealed} /></div>)}
+        {pending && <div className="flex items-center gap-2 text-[12px] text-ink-3" data-testid="chat-stage" data-stage={stage ?? 'sending'}><Loader2 size={14} className="animate-spin" />{STAGE_TEXT[stage ?? 'sending']}</div>}
         <div ref={end} />
       </div>
       <div className="shrink-0 border-t border-line pt-3">

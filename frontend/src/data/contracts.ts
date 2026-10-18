@@ -653,7 +653,16 @@ export interface ChatCitation {
   source: string | null;
 }
 /** general = AI explanation (no forest figures); place = this area, from TerraTrace data; reference = method/dataset fact. */
-export interface ChatSegment { kind: 'general' | 'place' | 'reference'; text: string; citations: ChatCitation[] }
+export interface ChatSegment {
+  kind: 'general' | 'place' | 'reference';
+  /** English: the text TerraTrace's checks ran on. */
+  text: string;
+  citations: ChatCitation[];
+  /** The same segment in the user's language (Hindi / Hinglish) — present only when it passed the translation checks. */
+  text_local?: string | null;
+}
+/** Progress while the answer is made (POST /api/chat/stream). Stages carry no model text. */
+export type ChatStage = 'sending' | 'asking' | 'fallback' | 'checking';
 export interface ChatReply {
   status: 'answered' | 'withheld' | 'declined' | 'unavailable';
   segments: ChatSegment[];
@@ -662,4 +671,8 @@ export interface ChatReply {
   reason_code: string | null;
   notice: string;
   model?: string | null;
+  /** The user's language, detected by the backend from their own message. */
+  language?: 'en' | 'hi' | 'hinglish' | null;
+  /** shown = every translation passed its checks; dropped = the checked English answer is shown instead. */
+  translation?: 'shown' | 'dropped' | 'none' | null;
 }
