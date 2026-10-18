@@ -1,0 +1,264 @@
+{
+  "pipeline_version": "1.0.0",
+  "run_utc": "2026-10-18T20:08:24+00:00",
+  "years": [
+    2015,
+    2025
+  ],
+  "steps": [
+    "report"
+  ],
+  "config_file": "config.toml",
+  "config": {
+    "study_area": {
+      "name": "Noida, Greater Noida and Ghaziabad (Delhi NCR)",
+      "short_name": "Noida\u2013Ghaziabad",
+      "boundary_file": "boundaries/noida_ghaziabad.geojson",
+      "gaul_collection": "FAO/GAUL/2025/level2",
+      "gaul_country": "India",
+      "gaul_state": "Uttar Pradesh",
+      "gaul_districts": [
+        "Gautambudhnagar",
+        "Ghaziabad"
+      ],
+      "crs": "EPSG:32643",
+      "scale_m": 30
+    },
+    "years": [
+      {
+        "year": 2015,
+        "sensors": [
+          "LC08"
+        ],
+        "window": 0,
+        "note": "Landsat 8 OLI/TIRS"
+      },
+      {
+        "year": 2025,
+        "sensors": [
+          "LC08",
+          "LC09"
+        ],
+        "window": 0,
+        "note": "Landsat 8 + 9 OLI/TIRS"
+      },
+      {
+        "year": 2005,
+        "sensors": [
+          "LE07"
+        ],
+        "window": 1,
+        "note": "Landsat 7 ETM+ 2004\u20132006: Landsat 5 has no Collection 2 scenes over this area in 2002\u20132007; the multi-date median fills most SLC-off stripes"
+      }
+    ],
+    "seasons": {
+      "summer": {
+        "start": "04-01",
+        "end": "07-01",
+        "start_year_offset": 0,
+        "end_year_offset": 0
+      },
+      "winter": {
+        "start": "11-01",
+        "end": "03-01",
+        "start_year_offset": -1,
+        "end_year_offset": 0
+      },
+      "annual": {
+        "start": "01-01",
+        "end": "01-01",
+        "start_year_offset": 0,
+        "end_year_offset": 1
+      }
+    },
+    "scenes": {
+      "max_cloud_cover": 60,
+      "max_st_uncertainty_k": 5.0,
+      "min_st_emissivity": 0.9
+    },
+    "classes": [
+      {
+        "code": 1,
+        "name": "Built-up (incl. bare land)",
+        "color": "#d6336c"
+      },
+      {
+        "code": 2,
+        "name": "Vegetation/Trees",
+        "color": "#00704a"
+      },
+      {
+        "code": 3,
+        "name": "Agriculture/Cropland",
+        "color": "#e3a600"
+      },
+      {
+        "code": 4,
+        "name": "Water",
+        "color": "#1f5fbf"
+      }
+    ],
+    "labels": {
+      "glc_collection": "projects/sat-io/open-datasets/GLC-FCS30D/annual",
+      "glc_first_year": 2000,
+      "glc_last_year": 2022,
+      "stable_years": 2,
+      "glc_map": {
+        "1": [
+          190,
+          150,
+          152,
+          153,
+          200,
+          201,
+          202
+        ],
+        "2": [
+          51,
+          52,
+          61,
+          62,
+          71,
+          72,
+          81,
+          82,
+          91,
+          92,
+          120,
+          121,
+          122,
+          130,
+          181,
+          182
+        ],
+        "3": [
+          10,
+          11,
+          12,
+          20
+        ],
+        "4": [
+          210
+        ]
+      },
+      "worldcover_map": {
+        "1": [
+          50,
+          60
+        ],
+        "2": [
+          10,
+          20,
+          30,
+          90,
+          95
+        ],
+        "3": [
+          40
+        ],
+        "4": [
+          80
+        ]
+      },
+      "dynamic_world_map": {
+        "1": [
+          6,
+          7
+        ],
+        "2": [
+          1,
+          2,
+          3,
+          5
+        ],
+        "3": [
+          4
+        ],
+        "4": [
+          0
+        ]
+      },
+      "agreement": {
+        "2015": [
+          {
+            "product": "dynamic_world",
+            "year": 2016
+          }
+        ],
+        "2025": [
+          {
+            "product": "worldcover"
+          },
+          {
+            "product": "dynamic_world",
+            "year": 2025
+          }
+        ],
+        "2005": []
+      }
+    },
+    "random_forest": {
+      "trees": 200,
+      "seed": 42,
+      "points_per_class": 600,
+      "train_fraction": 0.7
+    },
+    "uhi": {
+      "core_radius_m": 500,
+      "core_threshold": 0.5,
+      "core_min_km2": 1.0,
+      "ring_max_km": 10,
+      "correlation_thin": 10
+    },
+    "population": {
+      "collection": "JRC/GHSL/P2023A/GHS_POP",
+      "built_collection": "JRC/GHSL/P2023A/GHS_BUILT_S",
+      "epochs": [
+        2000,
+        2005,
+        2010,
+        2015,
+        2020,
+        2025
+      ],
+      "projected_from": 2025
+    },
+    "validation": {
+      "points_per_class": 50,
+      "seed": 7
+    },
+    "checks": {
+      "min_overall_accuracy": 0.8,
+      "min_kappa": 0.7,
+      "min_class_accuracy": 0.6,
+      "min_test_points_per_class": 30,
+      "min_points_per_class": 200,
+      "min_scenes": 5,
+      "min_valid_fraction": 0.95,
+      "lst_summer_mean_range": [
+        20.0,
+        60.0
+      ],
+      "lst_winter_mean_range": [
+        5.0,
+        35.0
+      ],
+      "lst_pixel_range": [
+        -5.0,
+        75.0
+      ]
+    }
+  },
+  "software": {
+    "python": "3.14.7",
+    "earthengine-api": "1.7.48",
+    "numpy": "2.5.4",
+    "pandas": "3.0.6",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2"
+  },
+  "per_year_cache_meta": {
+    "2015": "outputs/cache/2015/meta.json",
+    "2025": "outputs/cache/2025/meta.json"
+  }
+}

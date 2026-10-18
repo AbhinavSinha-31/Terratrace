@@ -1,0 +1,5 @@
+reference \ predicted,Built-up (incl. bare land),Vegetation/Trees,Agriculture/Cropland,Water
+Built-up (incl. bare land),170,2,6,2
+Vegetation/Trees,7,152,11,10
+Agriculture/Cropland,8,4,168,0
+Water,0,10,2,168

@@ -1,0 +1,11 @@
+year,class_code,class,pixels,area_km2,percent_of_classified
+2015,1,Built-up (incl. bare land),684808,616.3272,26.39093192275039
+2015,2,Vegetation/Trees,154817,139.3353,5.9662926068101525
+2015,3,Agriculture/Cropland,1716523,1544.8707,66.1508651137768
+2015,4,Water,38713,34.8417,1.4919103566626497
+2015,0,Not classified (no clear observation),0,0.0,
+2025,1,Built-up (incl. bare land),743630,669.267,28.65779708431396
+2025,2,Vegetation/Trees,185339,166.8051,7.142540583098671
+2025,3,Agriculture/Cropland,1635577,1472.0193,63.03139166221235
+2025,4,Water,30315,27.2835,1.168270670375022
+2025,0,Not classified (no clear observation),0,0.0,

@@ -1,0 +1,159 @@
+# TerraTrace LULC + Urban Heat Island case-study pipeline — every methodological choice lives here.
+# Change the city by replacing the boundary GeoJSON (and the names below); nothing else in the code is city-specific.
+
+[study_area]
+name = "Noida, Greater Noida and Ghaziabad (Delhi NCR)"
+short_name = "Noida–Ghaziabad"
+boundary_file = "boundaries/noida_ghaziabad.geojson"
+# Only used by `run_pipeline.py --steps boundary`, which (re)creates boundary_file from FAO GAUL 2025.
+# GAUL 2025 spells the district "Gautambudhnagar" (Noida + Greater Noida); Hapur is a separate district since 2011.
+gaul_collection = "FAO/GAUL/2025/level2"
+gaul_country = "India"
+gaul_state = "Uttar Pradesh"
+gaul_districts = ["Gautambudhnagar", "Ghaziabad"]
+# Working grid: UTM zone 43N (metres), 30 m Landsat pixels. Areas are pixel counts × 900 m².
+crs = "EPSG:32643"
+scale_m = 30
+
+# Study years. `window` = years either side pooled into the composite (0 = that calendar year only).
+[[years]]
+year = 2015
+sensors = ["LC08"]
+window = 0
+note = "Landsat 8 OLI/TIRS"
+
+[[years]]
+year = 2025
+sensors = ["LC08", "LC09"]
+window = 0
+note = "Landsat 8 + 9 OLI/TIRS"
+
+[[years]]
+year = 2005
+sensors = ["LE07"]
+window = 1
+note = "Landsat 7 ETM+ 2004–2006: Landsat 5 has no Collection 2 scenes over this area in 2002–2007; the multi-date median fills most SLC-off stripes"
+
+# Seasons: dates are [start, end) — end exclusive. `*_year_offset` is added to each study year.
+[seasons.summer]           # primary LST season (pre-monsoon), also the spectral features for LULC
+start = "04-01"
+end = "07-01"
+start_year_offset = 0
+end_year_offset = 0
+
+[seasons.winter]           # secondary LST season: November of the previous year to February of the study year
+start = "11-01"
+end = "03-01"
+start_year_offset = -1
+end_year_offset = 0
+
+[seasons.annual]           # whole calendar year: NDVI percentiles separate cropland (green in some season) from bare land
+start = "01-01"
+end = "01-01"
+start_year_offset = 0
+end_year_offset = 1
+
+[scenes]
+max_cloud_cover = 60       # scene-level CLOUD_COVER (%) filter; clouds inside kept scenes are removed per pixel (QA_PIXEL)
+# LST pixels whose USGS surface-temperature uncertainty (ST_QA, K) exceeds this are dropped from the LST composite only.
+# Why: ASTER GED emissivity errors make blocky false hot spots (e.g. 28.09°N 77.50°E: emissivity 0.80, ST_QA ≈ 55 K,
+# LST 58–63 °C, vs 0.97 / 1.7 K / ~48 °C around it). Reflectance (and so the LULC classification) is not affected.
+max_st_uncertainty_k = 5.0
+# ...and pixels whose emissivity (ST_EMIS) is below this physical floor. Natural and built surfaces at 10–12 µm are
+# ~0.92–0.99; the artefact pixels have 0.74–0.80 and often NO uncertainty value (ST_QA = 0), so ST_QA alone misses them
+# (hottest pixel 28.0878°N 77.4840°E: emissivity 0.74–0.76, ST_QA 0, LST 37–69 °C in every 2015 scene).
+min_st_emissivity = 0.90
+
+# LULC classes (code → name, colour). Codes 1–4 are used everywhere (rasters, tables, matrices).
+# Barren/Open land is MERGED into Built-up in every year (decided 2026-10-19): the reference labels contain only 86 (2015)
+# and 14 (2025) Barren pixels, too few to train or test a class; Barren is spectrally closest to Built-up (both never
+# green: whole-year NDVI p90 ≈ 0.15–0.18 vs 0.34, cropland 0.71); one identical rule keeps every transition matrix valid.
+[[classes]]
+code = 1
+name = "Built-up (incl. bare land)"
+color = "#d6336c"
+
+[[classes]]
+code = 2
+name = "Vegetation/Trees"
+color = "#00704a"
+
+[[classes]]
+code = 3
+name = "Agriculture/Cropland"
+color = "#e3a600"
+
+[[classes]]
+code = 4
+name = "Water"
+color = "#1f5fbf"
+
+
+# Training labels: GLC-FCS30D pixels whose class is unchanged for ±stable_years around the study year,
+# AND agreeing with every independent product listed for that year (where one exists).
+[labels]
+glc_collection = "projects/sat-io/open-datasets/GLC-FCS30D/annual"
+glc_first_year = 2000      # band b1 = 2000 … b23 = 2022
+glc_last_year = 2022
+stable_years = 2
+# GLC-FCS30D fine classes → our 4 classes (bare / sparse codes go to 1 with impervious). Codes not listed (e.g. 183 flooded flat, 220 snow, 250 fill) never become labels.
+[labels.glc_map]
+1 = [190, 150, 152, 153, 200, 201, 202]                            # impervious surfaces + sparse vegetation, bare areas
+2 = [51, 52, 61, 62, 71, 72, 81, 82, 91, 92, 120, 121, 122, 130, 181, 182]   # forests, shrubland, grassland, swamp, marsh
+3 = [10, 11, 12, 20]                                               # rainfed, herbaceous, orchard, irrigated cropland
+4 = [210]                                                          # water body
+[labels.worldcover_map]    # ESA WorldCover v200 (2021)
+1 = [50, 60]
+2 = [10, 20, 30, 90, 95]
+3 = [40]
+4 = [80]
+[labels.dynamic_world_map] # Dynamic World V1 'label' (annual mode)
+1 = [6, 7]
+2 = [1, 2, 3, 5]
+3 = [4]
+4 = [0]
+# Independent agreement products per study year. Dynamic World starts 2015-12-07 here, so 2015 uses its 2016 mode.
+[labels.agreement]
+2015 = [{ product = "dynamic_world", year = 2016 }]
+2025 = [{ product = "worldcover" }, { product = "dynamic_world", year = 2025 }]
+2005 = []
+
+[random_forest]
+trees = 200
+seed = 42
+points_per_class = 600     # stratified (equal allocation); fewer are taken where fewer label pixels exist
+train_fraction = 0.7       # 70/30 split, stratified by class, seeded
+
+[uhi]
+# Method A (urban core vs rural ring): core = pixels whose built-up fraction within core_radius_m is ≥ core_threshold,
+# in patches of at least core_min_km2. Ring = non-built-up, non-water land inside the study area, nearest to the core,
+# grown until it has the core's area (capped at ring_max_km).
+core_radius_m = 500
+core_threshold = 0.5
+core_min_km2 = 1.0
+ring_max_km = 10
+# Correlations: Pearson r on every land pixel; the p-value is computed on a thinned grid (every n-th pixel) because
+# neighbouring pixels are not independent.
+correlation_thin = 10
+
+[population]
+collection = "JRC/GHSL/P2023A/GHS_POP"
+built_collection = "JRC/GHSL/P2023A/GHS_BUILT_S"
+epochs = [2000, 2005, 2010, 2015, 2020, 2025]
+projected_from = 2025      # GHSL epochs ≥ this are model projections, not census-based estimates
+
+[validation]
+points_per_class = 50      # stratified random points per class per year for manual checking in Google Earth Pro
+seed = 7
+
+[checks]
+min_overall_accuracy = 0.80
+min_kappa = 0.70
+min_class_accuracy = 0.60
+min_test_points_per_class = 30   # below this, a class's producer's/user's agreement and F1 are withheld (too few test points)
+min_points_per_class = 200
+min_scenes = 5
+min_valid_fraction = 0.95
+lst_summer_mean_range = [20.0, 60.0]   # °C, class means outside this are flagged
+lst_winter_mean_range = [5.0, 35.0]
+lst_pixel_range = [-5.0, 75.0]         # °C, 1st/99th percentiles outside this are flagged

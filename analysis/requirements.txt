@@ -1,0 +1,10 @@
+# TerraTrace LULC + UHI analysis pipeline (separate from the web app's backend/requirements.txt).
+# Versions used for the first results (2026-10): earthengine-api 1.7.48, numpy 2.5.4, pandas 3.0.6,
+# scipy 1.18.1, matplotlib 3.11.2, pytest 9.1.1 — the exact versions of each run are written to outputs/run_manifest.json.
+earthengine-api>=1.7
+numpy>=2.0
+pandas>=2.2
+scipy>=1.13
+matplotlib>=3.9
+pytest>=8
+# Optional, for interactive inspection in a notebook only (not used by the pipeline): geemap

@@ -176,6 +176,34 @@ cd frontend; npm run test:integrity; cd ..              # end-to-end; needs the 
 
 The integrity suite never starts a live Earth Engine analysis.
 
+## LULC + urban heat island case study (`analysis/`)
+
+A standalone, reproducible research pipeline. It is separate from the web app: it has its own virtual environment
+and does not import backend code. It classifies land use / land cover (Random Forest in Earth Engine) and measures
+Landsat land surface temperature and urban heat island intensity for a configurable city. The default city is
+Noida + Greater Noida + Ghaziabad. Every choice of method is in [analysis/config.toml](analysis/config.toml), and the
+method is described in [analysis/README.md](analysis/README.md).
+
+```powershell
+cd analysis
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+copy .env.example .env                      # set EE_PROJECT=<your Earth Engine project>; uses `earthengine authenticate`
+.venv\Scripts\python -m pytest tests -q     # offline tests, no Earth Engine
+.venv\Scripts\python run_pipeline.py        # everything, all years (Earth Engine steps take ~20 min per year)
+.venv\Scripts\python run_pipeline.py --years 2015 2025              # selected years only
+.venv\Scripts\python run_pipeline.py --steps stats figures report   # re-run the local steps only (seconds)
+```
+
+Results go to `analysis/outputs/`:
+
+- `maps/`, `charts/`: PNG files at 300 dpi.
+- `tables/`: CSV files.
+- `validation/`: KML files for manual checking.
+- `results_summary.md`: key numbers as sentences, with every flagged issue.
+
+Earth Engine results are cached in `analysis/outputs/cache/` (git-ignored), so later runs skip them unless you pass `--force`.
+
 ## Layout
 
 ```
