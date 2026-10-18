@@ -378,14 +378,73 @@ def refers_to_selected_area(window: str) -> bool:
     return False
 
 
+# Light / sensor / index physics: the only subject a percentage or "twice" may describe in a general segment that
+# mentions vegetation ("Healthy vegetation absorbs about 90% of red light"). Added 2026-10-19: such teaching was
+# withheld as a forest figure (2 of 6 live NDVI answers).
+SPECTRAL = re.compile(_W + r"(?:light|sunlight|red|near-?infra-?red|infra-?red|nir|swir|short-?wave|visible|reflect\w*|"
+                      r"absorb\w*|absorption|wavelengths?|bands?|radiation|energy|signals?|brightness|chlorophyll|"
+                      r"photosynthe\w*|thermal|emissivit\w*|ndvi|ndbi|nbr|evi|mndwi|ndwi|index|indices)" + _E, re.I)
+# Words that make a quantity about the EXTENT of something (never physics): cover, area, land, share, world, country…
+EXTENT = re.compile(_W + r"(?:cover\w*|areas?|land\w*|extent|share|territor\w*|hectares?|acres?|world\w*|global\w*|earth|"
+                    r"planet|countr\w*|nation\w*|of\s+(?:the\s+|its\s+|their\s+)?(?:forests?|trees?|woodlands?|canop\w+|"
+                    r"vegetation))" + _E, re.I)
+# Time words: "reflects 40% less after logging" describes a change, never pure physics.
+COMPARE_TIME = re.compile(_W + r"(?:after|before|since|until|ago|between|then|now|today|recent\w*|previous\w*)" + _E, re.I)
+_PERCENT = re.compile(r"(?:%|percent(?:age\s+points?)?|per\s*cent|pct)\s*$", re.I)
+
+
+def _place_or_year(text: str) -> bool:
+    """Any place reference or any year anywhere in the segment."""
+    if names(text) or POSSESSED_PLACE.search(text) or OTHER_PLACE.search(text) or refers_to_selected_area(text):
+        return True
+    for m in NUMBER.finditer(_DATASET_TOKENS.sub(" ", text)):
+        nv = _num_value(m.group(0))
+        if nv and _is_year(*nv):
+            return True
+    return False
+
+
+def _physics_sentence(sentence: str) -> bool:
+    """A sentence about light / sensors / indices, with no extent, change, comparison or time word."""
+    return bool(SPECTRAL.search(sentence)) and not (EXTENT.search(sentence) or CHANGE.search(sentence)
+                                                   or LOSS_WORDS.search(sentence) or GAIN_WORDS.search(sentence)
+                                                   or COMPARE_TIME.search(sentence))
+
+
+def _sentence_at(text: str, pos: int) -> str:
+    start = max([text.rfind(c, 0, pos) for c in ".!?;:\n"] + [-1]) + 1
+    ends = [i for i in (text.find(c, pos) for c in ".!?;:\n") if i >= 0]
+    return text[start:(min(ends) if ends else len(text))]
+
+
+def forest_figure(text: str) -> bool:
+    """A figure about forest / vegetation in a general segment. The WHOLE segment is one window (a figure three
+    sentences after "forest" is still about it). The only exemption: a percentage, "twice" or "N times" whose sentence
+    is light / sensor / index physics, in a segment with no place and no year."""
+    if not FOREST.search(text):
+        return False
+    change = CHANGE.search(text)
+    if QTY_TREES.search(text) or QTY_OF.search(text) or (change and QUANTIFIER.search(text)) or (change and bare_quantities(text)):
+        return True     # tree counts, "40 bigha of forest", quantified change: never exempt
+    hits = ([(m, True) for m in QTY_UNIT.finditer(text)] + [(m, False) for m in PROPORTION.finditer(text)]
+            + [(m, False) for m in N_TIMES.finditer(text)])
+    if not hits:
+        return False
+    if _place_or_year(text):
+        return True     # no exemption anywhere in a segment that names a place or a year
+    for m, has_unit in hits:
+        if has_unit and not _PERCENT.search(m.group(0)):
+            return True     # ha, km², acres…: always an amount of land
+        if not _physics_sentence(_sentence_at(text, m.start())):
+            return True
+    return False
+
+
 def check_general(text: str) -> str | None:
-    # Forest figures: the WHOLE segment is one window (a figure three sentences after "forest" is still about it).
+    # Forest figures: see forest_figure (whole segment; physics-only exemption).
     # Named-place change claims: a sentence and the one before it (whole paragraphs would withhold ordinary teaching).
-    if FOREST.search(text):
-        change = CHANGE.search(text)
-        if QTY_UNIT.search(text) or QTY_TREES.search(text) or QTY_OF.search(text) or PROPORTION.search(text) \
-                or N_TIMES.search(text) or (change and QUANTIFIER.search(text)) or (change and bare_quantities(text)):
-            return "forest_figure_in_general"
+    if forest_figure(text):
+        return "forest_figure_in_general"
     # A figure in text with no English word at all cannot be checked ("Bosque perdido: 40 %").
     if QTY_UNIT.search(text) and not any(w in EN_STOP for w in re.findall(r"[a-z']+", text.lower())):
         return "non_english"

@@ -295,6 +295,15 @@ The model must answer in segments, and **one failing segment withholds the whole
    N times); "most / nearly all / much of" together with a change word; or any other bare number together with a
    change word (except years, values ≤ 1, and numbers followed by a non-area unit: m, km, days, years, °, bands,
    scenes, observations, pixels, percentile).
+   **One narrow exemption (2026-10-19)**, because light physics was being withheld as a forest figure (2 of 6 live
+   NDVI answers, e.g. "Healthy vegetation absorbs about 90% of red light"): a **percentage, "twice" or "N times"** is
+   allowed only if (a) its sentence is about light, sensors or an index (light, red, near-infrared, reflect, absorb,
+   wavelength, band, NDVI, NDBI, …), (b) that sentence has no extent word (cover, area, land, share, world, country,
+   "of forest"), no change or comparison word (lost, increased, less, more, fewer, …) and no time word (after, before,
+   since, now, …), and (c) the **whole segment** names no place (no name, "my village", "this area", "nearby forests")
+   and no year. Area units (ha, km², acres), tree counts, "N … of forest" and quantified change are never exempt. The
+   prompt also asks for reflectance to be described qualitatively. Adversarial tests:
+   `backend/tests/test_chat_validator.py::test_figures_dressed_up_as_physics_stay_withheld`.
 2. **Place claim in a general segment** (`place_change_claim_in_general`): within a sentence and the one before it,
    a forest term together with (a) a reference to the selected area ("this area", "the selected site", "your area"),
    or (b) a change word and a possessed place ("my village", "our town") or a capitalised name. A capitalised word

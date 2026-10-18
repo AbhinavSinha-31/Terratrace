@@ -267,3 +267,46 @@ def test_vocabulary_applies_to_sentence_start_words_only():
     """Mid-sentence capitalised words are always possible names, whatever the vocabulary says."""
     assert V.names("Forest loss in Specialized Valley rose.") == ["Specialized", "Valley"]
     assert V.names("Specialized sensors see canopies.") == []
+
+
+# ----------------------------------------------------------------------------- light / index physics vs forest figures (2026-10-19)
+@pytest.mark.parametrize("text", [
+    "Healthy vegetation absorbs about 90% of red light and reflects around 50% of near-infrared light.",
+    "A dense tree canopy reflects roughly twice as much near-infrared light as bare soil.",
+    "Forest NDVI is often twice that of dry grassland.",
+    "Leaves absorb most red light. Trees therefore look dark in the red band, while about 40% of near-infrared light is reflected.",
+])
+def test_light_and_index_physics_with_vegetation_passes(text):
+    assert reason("general", text) is None
+
+
+@pytest.mark.parametrize("text", [
+    # a place anywhere in the segment: never exempt
+    "Forests in India reflect 50% of near-infrared light.",
+    "Delhi's trees are beautiful. They reflect about 40% of near-infrared light.",
+    "In my village the trees reflect 50% of near-infrared light.",
+    "This area's trees reflect 50% of near-infrared light.",
+    "Nearby forests reflect twice as much near-infrared light as fields.",
+    # a year: never exempt
+    "In 2020 the forest canopy reflected 45% of near-infrared light.",
+    # extent / cover / share words: an amount of land, not physics
+    "50% of the land is forest, and it reflects near-infrared light strongly.",
+    "Forest reflects near-infrared light and covers 31% of the world's land.",
+    "Half of the forest reflects strongly in the near-infrared band.",
+    "Tree canopy cover above 10% reflects near-infrared light.",
+    # change / comparison / time words: a change claim, not physics
+    "Forest canopy reflects 40% less near-infrared light after logging.",
+    "Vegetation reflected 30% more near-infrared light than before.",
+    "Trees now reflect twice as much near-infrared light as they did.",
+    "Healthy vegetation reflects more near-infrared light, about 50%, than red light.",
+    # amounts of land or trees: never exempt, even next to light words
+    "Forest reflects near-infrared light; 2 million trees were planted.",
+    "Near-infrared light helps map 400 hectares of forest.",
+    "Vegetation absorbs red light; 12 km2 of woodland reflect strongly.",
+    # the old must-stay-blocked cases, with light words added
+    "India lost 40 % of its forests in the last decade, as near-infrared reflectance shows.",
+    "Forest cover doubled, which raised near-infrared reflectance.",
+])
+def test_figures_dressed_up_as_physics_stay_withheld(text):
+    assert V.check_general(V.normalise(text)) == "forest_figure_in_general", "the forest-figure rule itself must fire"
+    assert not verdict("general", text).ok

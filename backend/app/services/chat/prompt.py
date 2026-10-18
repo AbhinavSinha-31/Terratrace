@@ -6,7 +6,7 @@ import json
 import secrets
 from typing import Any
 
-PROMPT_VERSION = "chat-2"   # chat-2: LULC/NDVI/NDBI/LST/UHI in scope; any question language; Hindi/Hinglish text_local
+PROMPT_VERSION = "chat-3"   # chat-2: scope + Hindi/Hinglish text_local; chat-3: describe reflectance qualitatively
 # Canary: if it ever appears in an answer, the model is repeating its instructions -> withheld (prompt_leak).
 CANARY = f"TTC-{secrets.token_hex(8)}"
 LEAK_MARKERS = (CANARY, "SEGMENT RULES", "INTERNAL MARKER")
@@ -69,7 +69,9 @@ SEGMENT RULES
 1. "general": teaching that is true anywhere. Never include a figure about forest cover or forest change for any
    place (no percentages, hectares, km2, numbers of trees, "half", "doubled", "most of"), and never say how forest
    changed in a named place, a country, a region, a park, a city, "my village" or the selected area. Numbers about
-   sensors and indices (pixel size, revisit time, NDVI range, launch years) are fine. fact_ids stays empty.
+   sensors and indices (pixel size, revisit time, NDVI range, launch years) are fine. Describe how plants reflect and
+   absorb light qualitatively ("absorb most red light", "reflect near-infrared strongly"), not with percentages or
+   "twice as much". fact_ids stays empty.
 2. "place": only about the selected area, only from PLACE FACTS, citing their ids in fact_ids. Copy numbers exactly
    as given (rounding to fewer decimals is fine; never convert, add up or estimate). Never name or compare with any
    other place. Keep "TerraTrace result" and "Reference context, not a TerraTrace result" apart, and say which
