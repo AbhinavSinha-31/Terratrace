@@ -12,6 +12,8 @@ import { Badge, Button, IconButton, Skeleton, StateView, TerratraceMark, Tooltip
 import { AnimatedNumber } from '../../design/Metric';
 import { DrawHint, SearchBar } from './SearchBar';
 import { SelectionPanel } from './SelectionPanel';
+import { CaseStudyCard } from '../casestudy/CaseStudyCard';
+import { CASE_STUDIES } from '../casestudy/data';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -186,7 +188,7 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
       }}
       data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}
-      className={`tt-card group relative flex min-w-[260px] flex-col lg:min-w-0 overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
+      className={`tt-card group relative flex min-w-[260px] flex-col xl:min-w-0 overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
       aria-label={`Open featured investigation: ${area.name}`}
     >
       <div className="relative h-[clamp(76px,10.5vh,124px)] overflow-hidden">
@@ -271,14 +273,16 @@ function Featured() {
           {frontPage && <ChatLauncher />}
         </div>
       </div>
-      {isError ? (
-        <div className="tt-panel"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>
-      ) : (
-        <div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pb-1 lg:grid lg:grid-cols-4 lg:overflow-visible">
-          {isLoading && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[200px] min-w-[260px] rounded-lg" />)}
-          {data?.items.map((a, i) => <FeaturedCard key={a.id} area={a} index={i} highlight={highlight} />)}
-        </div>
-      )}
+      {/* Live investigations from the backend, then the static case studies — which need no backend, so they stay
+          visible (and are never counted in the live totals) even when the investigations cannot be loaded. */}
+      <div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible">
+        {isError && (
+          <div className="tt-panel min-w-[260px] xl:col-span-4"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>
+        )}
+        {isLoading && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[200px] min-w-[260px] rounded-lg" />)}
+        {data?.items.map((a, i) => <FeaturedCard key={a.id} area={a} index={i} highlight={highlight} />)}
+        {CASE_STUDIES.map((c, i) => <CaseStudyCard key={c.id} meta={c} index={(data?.items.length ?? 4) + i} />)}
+      </div>
     </section>
   );
 }

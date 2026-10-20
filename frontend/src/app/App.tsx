@@ -7,6 +7,7 @@ import { AnalysisProgressOverlay } from '../features/analysis/AnalyzingOverlay';
 import { AboutModal } from '../features/shell/AboutModal';
 import { BootSplash } from '../features/shell/BootSplash';
 import { AskPage } from '../features/chat/AskPage';
+import { CaseStudyPage } from '../features/casestudy/CaseStudyPage';
 import { useUi } from '../state/store';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
@@ -68,6 +69,7 @@ export function App() {
         {view === 'explore' ? <Landing /> : <AnalysisView />}
         <AnalysisProgressOverlay />
         <AskPage />
+        <CaseStudyPage />
       </main>
       <AboutModal />
       <BootSplash />

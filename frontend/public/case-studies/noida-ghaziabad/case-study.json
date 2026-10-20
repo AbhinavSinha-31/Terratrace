@@ -1,0 +1,1058 @@
+{
+ "id": "noida-ghaziabad",
+ "kind": "static-case-study",
+ "generated_utc": "2026-10-18T21:17:06+00:00",
+ "pipeline_version": "1.0.0",
+ "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
+ "study": {
+  "name": "Noida, Greater Noida and Ghaziabad (Delhi NCR)",
+  "short_name": "Noida–Ghaziabad",
+  "districts": [
+   "Gautambudhnagar",
+   "Ghaziabad"
+  ],
+  "boundary_source": "FAO GAUL 2025 (level 2)",
+  "area_km2": 2329.975976275734,
+  "area_km2_grid": 2335.3749,
+  "years": [
+   2015,
+   2025
+  ],
+  "sensors": {
+   "2015": "Landsat 8",
+   "2025": "Landsat 8 + Landsat 9"
+  },
+  "scenes": [
+   {
+    "year": 2015,
+    "season": "summer",
+    "scenes": 17
+   },
+   {
+    "year": 2015,
+    "season": "winter",
+    "scenes": 18
+   },
+   {
+    "year": 2015,
+    "season": "annual",
+    "scenes": 56
+   },
+   {
+    "year": 2025,
+    "season": "summer",
+    "scenes": 29
+   },
+   {
+    "year": 2025,
+    "season": "winter",
+    "scenes": 36
+   },
+   {
+    "year": 2025,
+    "season": "annual",
+    "scenes": 101
+   }
+  ],
+  "classes": [
+   {
+    "code": 1,
+    "name": "Built-up (incl. bare land)",
+    "color": "#d6336c"
+   },
+   {
+    "code": 2,
+    "name": "Vegetation/Trees",
+    "color": "#00704a"
+   },
+   {
+    "code": 3,
+    "name": "Agriculture/Cropland",
+    "color": "#e3a600"
+   },
+   {
+    "code": 4,
+    "name": "Water",
+    "color": "#1f5fbf"
+   }
+  ],
+  "method_summary": "Landsat Collection 2 Level-2 composites; 4-class Random Forest (200 trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface temperature from the Landsat thermal band (April–June primary, November–February secondary); UHI as urban core minus an equal-area rural ring."
+ },
+ "findings": [
+  "Built-up land (including bare land) in Noida–Ghaziabad grew from 616 km² (26.4 %) in 2015 to 669 km² (28.7 %) in 2025, a net +53 km² (+9 %), while GHSL population rose +20 % (6.07 → 7.26 million; the 2025 figure is a GHSL projection).",
+  "Cropland was the main source of new built-up land: 155 km² changed from cropland to built-up, but 95 km² was mapped the other way (mostly class confusion), leaving a net conversion of 59 km² and a net cropland change of -73 km².",
+  "Vegetation/tree cover did not decline: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation and the expected vegetation-loss step is not supported.",
+  "In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was -0.55 °C relative to its rural ring in 2015 (cool island) and +0.50 °C in 2025 (heat island), small values whose change of sign cannot be separated from weather with one composite per year, whereas November–February showed a consistent heat island (+1.06 °C and +1.09 °C).",
+  "Cropland that became built-up between 2015 and 2025 changed by -0.01 SD in normalised April–June LST, against -0.11 SD for cropland that stayed cropland, a difference of +0.10 SD (+0.06 °C raw), i.e. slightly warmer than the unchanged class; conversion to built-up did not produce a clear summer temperature change."
+ ],
+ "limitations": [
+  {
+   "title": "Accuracy is agreement with reference labels, not true accuracy",
+   "text": "Training and test points come from the same GLC-FCS30D-derived labels, restricted to temporally stable pixels (easier than changing ones) and spatially clustered; the figures are optimistic. Independent, stratified validation points (outputs/validation, 50 per class per year) still have to be interpreted on high-resolution imagery."
+  },
+  {
+   "title": "Built-up includes bare land",
+   "text": "Barren/Open land could not be trained (86 and 14 label pixels) and was merged into Built-up in every year; construction sites and cleared plots therefore count as built-up."
+  },
+  {
+   "title": "Few labels for Vegetation/Trees and Water",
+   "text": "(2015: 1,652 and 1,434 label pixels; 2025: 1,625 and 2,786 label pixels), from a limited number of patches; their mapped areas are the least certain."
+  },
+  {
+   "title": "Change maps add the errors of two maps",
+   "text": "; small transitions (a few km²) are within classification noise."
+  },
+  {
+   "title": "One overpass time",
+   "text": "Landsat sees ~10:30 local time only; night-time UHI (usually the strongest) is not measured."
+  },
+  {
+   "title": "One composite per season per year",
+   "text": "Year-to-year weather differences affect absolute LST; UHI intensity and normalised LST reduce but do not remove this."
+  },
+  {
+   "title": "Thermal resolution",
+   "text": "LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed."
+  },
+  {
+   "title": "Rural ring inside the study area",
+   "text": "East Delhi (urban) borders the study area to the west, so the ring is restricted to the districts; its location differs between years with the urban core."
+  },
+  {
+   "title": "GHSL 2025 is a projection",
+   "text": ", and GHSL population is itself modelled from census and built-up data (not a count)."
+  },
+  {
+   "title": "2005 (once added): Landsat 7 SLC-off",
+   "text": "— about 22 % of each scene is missing in stripes; three pooled years fill most gaps, the remainder is reported. No independent label product exists for 2005 (stability filter only), and the sensor differs from 2015/2025 (ETM+ vs OLI)."
+  }
+ ],
+ "flags": [
+  {
+   "level": "CAUTION",
+   "topic": "accuracy",
+   "message": "All accuracy figures are AGREEMENT WITH REFERENCE LABELS (held-out GLC-FCS30D stable pixels), not accuracy against ground truth; stable pixels are easier than changing ones, so the figures are optimistic. Independent validation points (outputs/validation) have not been interpreted yet."
+  },
+  {
+   "level": "INFO",
+   "topic": "data",
+   "message": "2015: Landsat 8 OLI/TIRS."
+  },
+  {
+   "level": "INFO",
+   "topic": "data",
+   "message": "2025: Landsat 8 + 9 OLI/TIRS."
+  },
+  {
+   "level": "INFO",
+   "topic": "UHI",
+   "message": "2015 summer (built-up vs non-built-up land): UHI intensity is negative (-0.80 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
+  },
+  {
+   "level": "INFO",
+   "topic": "UHI",
+   "message": "2015 summer (urban core vs rural ring): UHI intensity is negative (-0.55 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
+  },
+  {
+   "level": "CAUTION",
+   "topic": "LULC change",
+   "message": "2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion (bare harvested fields are now inside Built-up (incl. bare land)); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline."
+  },
+  {
+   "level": "CAUTION",
+   "topic": "story",
+   "message": "2015→2025: Vegetation/Trees area INCREASED (139.3 → 166.8 km², +27.5 km²). This contradicts the expected 'vegetation loss' step; built-up growth here came mainly from cropland, not vegetation."
+  },
+  {
+   "level": "CAUTION",
+   "topic": "UHI",
+   "message": "summer: the core-vs-ring UHI changes sign between years (2015: -0.55 °C, 2025: +0.50 °C). Both values are small (< 1 °C); one composite per year cannot separate a trend from weather."
+  },
+  {
+   "level": "INFO",
+   "topic": "population",
+   "message": "GHSL epochs from 2025 are model projections, not census-based estimates."
+  }
+ ],
+ "areas": [
+  {
+   "year": 2015,
+   "class_code": 1,
+   "class": "Built-up (incl. bare land)",
+   "area_km2": 616.3272,
+   "percent": 26.39093192275039
+  },
+  {
+   "year": 2015,
+   "class_code": 2,
+   "class": "Vegetation/Trees",
+   "area_km2": 139.3353,
+   "percent": 5.9662926068101525
+  },
+  {
+   "year": 2015,
+   "class_code": 3,
+   "class": "Agriculture/Cropland",
+   "area_km2": 1544.8707,
+   "percent": 66.1508651137768
+  },
+  {
+   "year": 2015,
+   "class_code": 4,
+   "class": "Water",
+   "area_km2": 34.8417,
+   "percent": 1.4919103566626497
+  },
+  {
+   "year": 2025,
+   "class_code": 1,
+   "class": "Built-up (incl. bare land)",
+   "area_km2": 669.267,
+   "percent": 28.65779708431396
+  },
+  {
+   "year": 2025,
+   "class_code": 2,
+   "class": "Vegetation/Trees",
+   "area_km2": 166.8051,
+   "percent": 7.142540583098671
+  },
+  {
+   "year": 2025,
+   "class_code": 3,
+   "class": "Agriculture/Cropland",
+   "area_km2": 1472.0193,
+   "percent": 63.03139166221235
+  },
+  {
+   "year": 2025,
+   "class_code": 4,
+   "class": "Water",
+   "area_km2": 27.2835,
+   "percent": 1.168270670375022
+  }
+ ],
+ "net_change": [
+  {
+   "from_year": 2015,
+   "to_year": 2025,
+   "class": "Built-up (incl. bare land)",
+   "class_code": 1,
+   "from_km2": 616.3272,
+   "to_km2": 669.267,
+   "delta_km2": 52.939800000000105,
+   "delta_pp": 2.266865161563569,
+   "delta_rel_pct": 8.589560869616019
+  },
+  {
+   "from_year": 2015,
+   "to_year": 2025,
+   "class": "Vegetation/Trees",
+   "class_code": 2,
+   "from_km2": 139.3353,
+   "to_km2": 166.8051,
+   "delta_km2": 27.46980000000002,
+   "delta_pp": 1.1762479762885185,
+   "delta_rel_pct": 19.714889191755436
+  },
+  {
+   "from_year": 2015,
+   "to_year": 2025,
+   "class": "Agriculture/Cropland",
+   "class_code": 3,
+   "from_km2": 1544.8707,
+   "to_km2": 1472.0193,
+   "delta_km2": -72.85140000000001,
+   "delta_pp": -3.1194734515644527,
+   "delta_rel_pct": -4.715695624235739
+  },
+  {
+   "from_year": 2015,
+   "to_year": 2025,
+   "class": "Water",
+   "class_code": 4,
+   "from_km2": 34.8417,
+   "to_km2": 27.2835,
+   "delta_km2": -7.558200000000003,
+   "delta_pp": -0.3236396862876276,
+   "delta_rel_pct": -21.69297135329218
+  }
+ ],
+ "transitions": [
+  {
+   "from_year": 2015,
+   "to_year": 2025,
+   "total_changed_km2": 474.878,
+   "top": [
+    {
+     "from": "Agriculture/Cropland",
+     "to": "Built-up (incl. bare land)",
+     "km2": 154.829,
+     "share": 0.32603953015300774
+    },
+    {
+     "from": "Built-up (incl. bare land)",
+     "to": "Agriculture/Cropland",
+     "km2": 95.453,
+     "share": 0.20100531083773096
+    },
+    {
+     "from": "Agriculture/Cropland",
+     "to": "Vegetation/Trees",
+     "km2": 75.919,
+     "share": 0.15987053516903288
+    }
+   ],
+   "into_built": [
+    {
+     "from": "Agriculture/Cropland",
+     "km2": 154.829
+    },
+    {
+     "from": "Vegetation/Trees",
+     "km2": 21.655
+    },
+    {
+     "from": "Water",
+     "km2": 9.268
+    }
+   ],
+   "cropland_to_built": {
+    "gross_km2": 154.829,
+    "reverse_km2": 95.453,
+    "net_km2": 59.376000000000005
+   },
+   "classes": [
+    "Built-up (incl. bare land)",
+    "Vegetation/Trees",
+    "Agriculture/Cropland",
+    "Water"
+   ],
+   "matrix_km2": [
+    [
+     483.515,
+     31.044,
+     95.453,
+     6.315
+    ],
+    [
+     21.655,
+     52.684,
+     62.942,
+     2.054
+    ],
+    [
+     154.829,
+     75.919,
+     1309.754,
+     4.37
+    ],
+    [
+     9.268,
+     7.159,
+     3.87,
+     14.545
+    ]
+   ]
+  }
+ ],
+ "population": [
+  {
+   "epoch": 2000,
+   "population": 3670950,
+   "ghsl_built_km2": 117.34,
+   "projection": false,
+   "builtup_km2_this_study": null
+  },
+  {
+   "epoch": 2005,
+   "population": 4420498,
+   "ghsl_built_km2": 129.38,
+   "projection": false,
+   "builtup_km2_this_study": null
+  },
+  {
+   "epoch": 2010,
+   "population": 5240663,
+   "ghsl_built_km2": 145.11,
+   "projection": false,
+   "builtup_km2_this_study": null
+  },
+  {
+   "epoch": 2015,
+   "population": 6071969,
+   "ghsl_built_km2": 164.21,
+   "projection": false,
+   "builtup_km2_this_study": 616.3272
+  },
+  {
+   "epoch": 2020,
+   "population": 6783844,
+   "ghsl_built_km2": 187.58,
+   "projection": false,
+   "builtup_km2_this_study": null
+  },
+  {
+   "epoch": 2025,
+   "population": 7258221,
+   "ghsl_built_km2": 194.12,
+   "projection": true,
+   "builtup_km2_this_study": 669.267
+  }
+ ],
+ "lst_summary": [
+  {
+   "year": 2015,
+   "season": "summer",
+   "mean_land_c": 43.70255661010742,
+   "valid_fraction": 0.9997737836439023
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "mean_land_c": 23.76064682006836,
+   "valid_fraction": 0.999790354859085
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "mean_land_c": 40.35720443725586,
+   "valid_fraction": 0.9997891987277931
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "mean_land_c": 22.45159149169922,
+   "valid_fraction": 0.999781876562945
+  }
+ ],
+ "lst_per_class": [
+  {
+   "year": 2015,
+   "season": "summer",
+   "class": "Built-up (incl. bare land)",
+   "class_code": 1,
+   "mean_c": 43.1171875,
+   "n_pixels": 684786
+  },
+  {
+   "year": 2015,
+   "season": "summer",
+   "class": "Vegetation/Trees",
+   "class_code": 2,
+   "mean_c": 40.68000793457031,
+   "n_pixels": 154816
+  },
+  {
+   "year": 2015,
+   "season": "summer",
+   "class": "Agriculture/Cropland",
+   "class_code": 3,
+   "mean_c": 44.2088508605957,
+   "n_pixels": 1715970
+  },
+  {
+   "year": 2015,
+   "season": "summer",
+   "class": "Water",
+   "class_code": 4,
+   "mean_c": 39.80452728271485,
+   "n_pixels": 38702
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "class": "Built-up (incl. bare land)",
+   "class_code": 1,
+   "mean_c": 24.7718448638916,
+   "n_pixels": 684786
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "class": "Vegetation/Trees",
+   "class_code": 2,
+   "mean_c": 23.63473892211914,
+   "n_pixels": 154816
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "class": "Agriculture/Cropland",
+   "class_code": 3,
+   "mean_c": 23.368480682373047,
+   "n_pixels": 1716013
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "class": "Water",
+   "class_code": 4,
+   "mean_c": 22.85770797729492,
+   "n_pixels": 38702
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "class": "Built-up (incl. bare land)",
+   "class_code": 1,
+   "mean_c": 40.71337890625,
+   "n_pixels": 743555
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "class": "Vegetation/Trees",
+   "class_code": 2,
+   "mean_c": 38.94655227661133,
+   "n_pixels": 185337
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "class": "Agriculture/Cropland",
+   "class_code": 3,
+   "mean_c": 40.35513687133789,
+   "n_pixels": 1635119
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "class": "Water",
+   "class_code": 4,
+   "mean_c": 36.96530151367188,
+   "n_pixels": 30303
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "class": "Built-up (incl. bare land)",
+   "class_code": 1,
+   "mean_c": 23.1953125,
+   "n_pixels": 743555
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "class": "Vegetation/Trees",
+   "class_code": 2,
+   "mean_c": 22.61113166809082,
+   "n_pixels": 185337
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "class": "Agriculture/Cropland",
+   "class_code": 3,
+   "mean_c": 22.095304489135746,
+   "n_pixels": 1635100
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "class": "Water",
+   "class_code": 4,
+   "mean_c": 21.3371639251709,
+   "n_pixels": 30303
+  }
+ ],
+ "uhi": [
+  {
+   "year": 2015,
+   "season": "summer",
+   "method": "built-up vs non-built-up land",
+   "primary": false,
+   "uhi_c": -0.7996330261230469,
+   "urban_mean_c": 43.1171875,
+   "rural_mean_c": 43.91682052612305,
+   "ring_outer_km": null,
+   "result": "cool island"
+  },
+  {
+   "year": 2015,
+   "season": "summer",
+   "method": "urban core vs rural ring",
+   "primary": true,
+   "uhi_c": -0.54718017578125,
+   "urban_mean_c": 43.09038543701172,
+   "rural_mean_c": 43.63756561279297,
+   "ring_outer_km": 2.1949259668608416,
+   "result": "cool island"
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "method": "built-up vs non-built-up land",
+   "primary": false,
+   "uhi_c": 1.3813323974609375,
+   "urban_mean_c": 24.7718448638916,
+   "rural_mean_c": 23.390512466430664,
+   "ring_outer_km": null,
+   "result": "heat island"
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "method": "urban core vs rural ring",
+   "primary": true,
+   "uhi_c": 1.057464599609375,
+   "urban_mean_c": 24.95293235778809,
+   "rural_mean_c": 23.89546775817871,
+   "ring_outer_km": 2.1949259668608416,
+   "result": "heat island"
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "method": "built-up vs non-built-up land",
+   "primary": false,
+   "uhi_c": 0.50164794921875,
+   "urban_mean_c": 40.71337890625,
+   "rural_mean_c": 40.21173095703125,
+   "ring_outer_km": null,
+   "result": "heat island"
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "method": "urban core vs rural ring",
+   "primary": true,
+   "uhi_c": 0.4971580505371094,
+   "urban_mean_c": 40.83497619628906,
+   "rural_mean_c": 40.33781814575195,
+   "ring_outer_km": 2.170391669722311,
+   "result": "heat island"
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "method": "built-up vs non-built-up land",
+   "primary": false,
+   "uhi_c": 1.0474910736083984,
+   "urban_mean_c": 23.1953125,
+   "rural_mean_c": 22.1478214263916,
+   "ring_outer_km": null,
+   "result": "heat island"
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "method": "urban core vs rural ring",
+   "primary": true,
+   "uhi_c": 1.0905113220214844,
+   "urban_mean_c": 23.39794158935547,
+   "rural_mean_c": 22.307430267333984,
+   "ring_outer_km": 2.170391669722311,
+   "result": "heat island"
+  }
+ ],
+ "conversion": [
+  {
+   "period": "2015-2025",
+   "season": "summer",
+   "group": "Vegetation/Trees → Built-up",
+   "area_km2": 21.6549,
+   "delta_lst_c": -2.917942523956299,
+   "delta_z": 0.3044794797897339
+  },
+  {
+   "period": "2015-2025",
+   "season": "summer",
+   "group": "Agriculture/Cropland → Built-up",
+   "area_km2": 154.7775,
+   "delta_lst_c": -3.705522537231445,
+   "delta_z": -0.0073153348639607
+  },
+  {
+   "period": "2015-2025",
+   "season": "summer",
+   "group": "Stable Built-up",
+   "area_km2": 483.5016,
+   "delta_lst_c": -2.361413717269897,
+   "delta_z": 0.3243875801563263
+  },
+  {
+   "period": "2015-2025",
+   "season": "summer",
+   "group": "Stable Vegetation/Trees",
+   "area_km2": 52.6842,
+   "delta_lst_c": -2.314286708831787,
+   "delta_z": -0.2877990305423736
+  },
+  {
+   "period": "2015-2025",
+   "season": "summer",
+   "group": "Stable Agriculture/Cropland",
+   "area_km2": 1309.3101,
+   "delta_lst_c": -3.7696902751922607,
+   "delta_z": -0.1068299710750579
+  },
+  {
+   "period": "2015-2025",
+   "season": "winter",
+   "group": "Vegetation/Trees → Built-up",
+   "area_km2": 21.6549,
+   "delta_lst_c": -2.1104722023010254,
+   "delta_z": -0.2802173197269439
+  },
+  {
+   "period": "2015-2025",
+   "season": "winter",
+   "group": "Agriculture/Cropland → Built-up",
+   "area_km2": 154.7775,
+   "delta_lst_c": -1.0882225036621094,
+   "delta_z": 0.2512129545211792
+  },
+  {
+   "period": "2015-2025",
+   "season": "winter",
+   "group": "Stable Built-up",
+   "area_km2": 483.5016,
+   "delta_lst_c": -1.469940185546875,
+   "delta_z": 0.0076610976830124
+  },
+  {
+   "period": "2015-2025",
+   "season": "winter",
+   "group": "Stable Vegetation/Trees",
+   "area_km2": 52.6842,
+   "delta_lst_c": -1.3397390842437744,
+   "delta_z": -0.1068185120820999
+  },
+  {
+   "period": "2015-2025",
+   "season": "winter",
+   "group": "Stable Agriculture/Cropland",
+   "area_km2": 1309.329,
+   "delta_lst_c": -1.1745567321777344,
+   "delta_z": 0.0159531030803918
+  }
+ ],
+ "correlations": [
+  {
+   "year": 2015,
+   "season": "summer",
+   "index": "NDVI",
+   "r": -0.5074750013917937,
+   "p_thinned": 0.0,
+   "n_pixels": 2555572,
+   "n_thinned": 25587,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2015,
+   "season": "summer",
+   "index": "NDBI",
+   "r": 0.5546981083265173,
+   "p_thinned": 0.0,
+   "n_pixels": 2555572,
+   "n_thinned": 25587,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "index": "NDVI",
+   "r": -0.60383785377688,
+   "p_thinned": 0.0,
+   "n_pixels": 2555615,
+   "n_thinned": 25587,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2015,
+   "season": "winter",
+   "index": "NDBI",
+   "r": 0.6269958238927705,
+   "p_thinned": 0.0,
+   "n_pixels": 2555615,
+   "n_thinned": 25587,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "index": "NDVI",
+   "r": -0.4813328487912,
+   "p_thinned": 0.0,
+   "n_pixels": 2564011,
+   "n_thinned": 25660,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2025,
+   "season": "summer",
+   "index": "NDBI",
+   "r": 0.4405577121408215,
+   "p_thinned": 0.0,
+   "n_pixels": 2564011,
+   "n_thinned": 25660,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "index": "NDVI",
+   "r": -0.5666285557590339,
+   "p_thinned": 0.0,
+   "n_pixels": 2563992,
+   "n_thinned": 25660,
+   "thin_spacing_m": 300
+  },
+  {
+   "year": 2025,
+   "season": "winter",
+   "index": "NDBI",
+   "r": 0.5772357035856902,
+   "p_thinned": 0.0,
+   "n_pixels": 2563992,
+   "n_thinned": 25660,
+   "thin_spacing_m": 300
+  }
+ ],
+ "accuracy": [
+  {
+   "year": 2015,
+   "overall_agreement": 0.9138888888888888,
+   "kappa": 0.8851851851851852,
+   "n_test": 720,
+   "label": "agreement with reference labels",
+   "most_confused": [
+    {
+     "a": "Vegetation/Trees",
+     "b": "Water",
+     "n": 20
+    },
+    {
+     "a": "Vegetation/Trees",
+     "b": "Agriculture/Cropland",
+     "n": 15
+    }
+   ]
+  },
+  {
+   "year": 2025,
+   "overall_agreement": 0.9458333333333332,
+   "kappa": 0.9277777777777776,
+   "n_test": 720,
+   "label": "agreement with reference labels",
+   "most_confused": [
+    {
+     "a": "Vegetation/Trees",
+     "b": "Agriculture/Cropland",
+     "n": 11
+    },
+    {
+     "a": "Vegetation/Trees",
+     "b": "Water",
+     "n": 10
+    }
+   ]
+  }
+ ],
+ "masking": {
+  "rule": "In every scene a pixel's land surface temperature is dropped when the USGS uncertainty (ST_QA) exceeds 5 K or its emissivity (ST_EMIS) is below 0.90, in addition to the QA_PIXEL cloud, shadow and snow mask. It removes emissivity-database artefacts (blocky false hot spots) that the cloud mask cannot see; reflectance and the land-cover maps are unaffected.",
+  "impact": [
+   {
+    "year": 2015,
+    "season": "summer",
+    "pixels_with_lst_before": 2594842,
+    "pixels_with_lst_after": 2594274,
+    "pixels_removed_entirely": 568,
+    "pixels_changed_over_1c": 47297,
+    "pixels_over_55c_before": 129,
+    "pixels_over_55c_after": 15,
+    "max_land_lst_before_c": 67.75131225585938,
+    "max_land_lst_after_c": 55.51822280883789,
+    "p99_before_c": 50.78426361083984,
+    "p99_after_c": 50.80477142333984,
+    "uhi_core_ring_before_c": -0.5090713500976562,
+    "uhi_core_ring_after_c": -0.54718017578125,
+    "uhi_builtup_before_c": -0.8027267456054688,
+    "uhi_builtup_after_c": -0.7996330261230469
+   },
+   {
+    "year": 2015,
+    "season": "winter",
+    "pixels_with_lst_before": 2594842,
+    "pixels_with_lst_after": 2594317,
+    "pixels_removed_entirely": 525,
+    "pixels_changed_over_1c": 180565,
+    "pixels_over_55c_before": 0,
+    "pixels_over_55c_after": 0,
+    "max_land_lst_before_c": 45.03344345092773,
+    "max_land_lst_after_c": 34.06672668457031,
+    "p99_before_c": 27.96727180480957,
+    "p99_after_c": 27.939926147460938,
+    "uhi_core_ring_before_c": 1.0158462524414062,
+    "uhi_core_ring_after_c": 1.057464599609375,
+    "uhi_builtup_before_c": 1.330678939819336,
+    "uhi_builtup_after_c": 1.3813323974609375
+   },
+   {
+    "year": 2025,
+    "season": "summer",
+    "pixels_with_lst_before": 2594842,
+    "pixels_with_lst_after": 2594314,
+    "pixels_removed_entirely": 528,
+    "pixels_changed_over_1c": 106077,
+    "pixels_over_55c_before": 32,
+    "pixels_over_55c_after": 0,
+    "max_land_lst_before_c": 58.55342483520508,
+    "max_land_lst_after_c": 51.170501708984375,
+    "p99_before_c": 45.29150390625,
+    "p99_after_c": 45.47607803344727,
+    "uhi_core_ring_before_c": 0.5942344665527344,
+    "uhi_core_ring_after_c": 0.4971580505371094,
+    "uhi_builtup_before_c": 0.5700607299804688,
+    "uhi_builtup_after_c": 0.50164794921875
+   },
+   {
+    "year": 2025,
+    "season": "winter",
+    "pixels_with_lst_before": 2594842,
+    "pixels_with_lst_after": 2594295,
+    "pixels_removed_entirely": 547,
+    "pixels_changed_over_1c": 131899,
+    "pixels_over_55c_before": 0,
+    "pixels_over_55c_after": 0,
+    "max_land_lst_before_c": 44.09007263183594,
+    "max_land_lst_after_c": 35.34506607055664,
+    "p99_before_c": 25.710678100585938,
+    "p99_after_c": 25.935258865356445,
+    "uhi_core_ring_before_c": 1.0399131774902344,
+    "uhi_core_ring_after_c": 1.0905113220214844,
+    "uhi_builtup_before_c": 1.025434494018555,
+    "uhi_builtup_after_c": 1.0474910736083984
+   }
+  ]
+ },
+ "images": {
+  "lulc": {
+   "2015": {
+    "file": "lulc_2015.webp",
+    "width": 900,
+    "height": 1316,
+    "bytes": 141930
+   },
+   "2025": {
+    "file": "lulc_2025.webp",
+    "width": 900,
+    "height": 1364,
+    "bytes": 156502
+   }
+  },
+  "lst_summer": {
+   "2015": {
+    "file": "lst_summer_2015.webp",
+    "width": 900,
+    "height": 1351,
+    "bytes": 150334
+   },
+   "2025": {
+    "file": "lst_summer_2025.webp",
+    "width": 900,
+    "height": 1329,
+    "bytes": 125528
+   }
+  },
+  "lst_winter": {
+   "2015": {
+    "file": "lst_winter_2015.webp",
+    "width": 900,
+    "height": 1351,
+    "bytes": 167702
+   },
+   "2025": {
+    "file": "lst_winter_2025.webp",
+    "width": 900,
+    "height": 1329,
+    "bytes": 146056
+   }
+  },
+  "change": {
+   "2015-2025": {
+    "file": "change_2015_2025.webp",
+    "width": 900,
+    "height": 1341,
+    "bytes": 160814
+   }
+  },
+  "uhi_zones": {
+   "2015": {
+    "file": "uhi_zones_2015.webp",
+    "width": 900,
+    "height": 1340,
+    "bytes": 90994
+   },
+   "2025": {
+    "file": "uhi_zones_2025.webp",
+    "width": 900,
+    "height": 1340,
+    "bytes": 96918
+   }
+  },
+  "charts": {
+   "builtup_percent_by_year": {
+    "file": "builtup_percent_by_year.webp",
+    "width": 1200,
+    "height": 861,
+    "bytes": 20864
+   },
+   "lulc_composition": {
+    "file": "lulc_composition.webp",
+    "width": 1200,
+    "height": 778,
+    "bytes": 24390
+   },
+   "uhi_intensity_by_year": {
+    "file": "uhi_intensity_by_year.webp",
+    "width": 1200,
+    "height": 574,
+    "bytes": 32948
+   },
+   "lst_by_class_and_year": {
+    "file": "lst_by_class_and_year.webp",
+    "width": 1200,
+    "height": 553,
+    "bytes": 46734
+   },
+   "population_vs_builtup": {
+    "file": "population_vs_builtup.webp",
+    "width": 1200,
+    "height": 994,
+    "bytes": 48614
+   },
+   "scatter_lst_indices_summer": {
+    "file": "scatter_lst_indices_summer.webp",
+    "width": 1200,
+    "height": 1210,
+    "bytes": 114562
+   },
+   "scatter_lst_indices_winter": {
+    "file": "scatter_lst_indices_winter.webp",
+    "width": 1200,
+    "height": 1210,
+    "bytes": 123906
+   },
+   "conversion_lst_change_2015-2025": {
+    "file": "conversion_lst_change_2015-2025.webp",
+    "width": 1200,
+    "height": 487,
+    "bytes": 34434
+   }
+  },
+  "thumbnail": {
+   "file": "thumbnail.webp",
+   "width": 640,
+   "height": 240,
+   "bytes": 43050
+  }
+ },
+ "cross_checks": [
+  "2015: class areas re-counted from the raster, sum to the study area, percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases)",
+  "2025: class areas re-counted from the raster, sum to the study area, percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases)",
+  "2015→2025: transition-matrix row sums = 2015 class areas and column sums = 2025 class areas (re-counted)",
+  "population table identical to the Earth Engine sums"
+ ]
+}

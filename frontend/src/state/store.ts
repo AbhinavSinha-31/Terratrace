@@ -95,6 +95,10 @@ export interface AnalysisRequestMeta {
 interface UiState {
   view: View;
   phase: ExplorePhase;
+  /** A static case study shown full page over the map (null = none). Independent of the investigation; no backend. */
+  caseStudy: string | null;
+  openCaseStudy(id: string): void;
+  closeCaseStudy(): void;
   /** The active investigation — the only source of study / AOI / years / analysis state. */
   investigation: InvestigationState;
   /** Selectable timeline years (UI option list; per-year availability comes from the backend later). */
@@ -216,6 +220,9 @@ const snapTo = (years: number[], y: number) => years.reduce((best, v) => (Math.a
 export const useUi = create<UiState>((set, get) => ({
   view: 'explore',
   phase: 'intro',
+  caseStudy: null,
+  openCaseStudy: (id) => set({ caseStudy: id }),
+  closeCaseStudy: () => set({ caseStudy: null }),
   investigation: EMPTY_INVESTIGATION,
   years: DEFAULT_YEARS,
   playing: false,
