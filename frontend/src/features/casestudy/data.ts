@@ -78,4 +78,43 @@ export function useCaseStudy(id: string | null) {
   });
 }
 
-export const yearSpan = (years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');
+/** Mirrors analysis/render_tiles.py: static XYZ tiles rendered from the pipeline's 30 m rasters (no backend, no EE). */
+export interface TilesManifest {
+  id: string;
+  generated_utc: string;
+  tile_size: number;
+  minzoom: number;
+  maxzoom: number;
+  bounds: [number, number, number, number];
+  /** Relative to the case study folder, with a {layer} placeholder. */
+  tiles: string;
+  layers: ({ id: string; bytes: number } & (
+    | { kind: 'lulc'; year: number }
+    | { kind: 'change'; from_year: number; to_year: number }
+    | { kind: 'lst'; season: Season; year: number }
+  ))[];
+  legends: {
+    lulc: { code: number; name: string; color: string }[];
+    change: { code: number; name: string; color: string }[];
+    change_km2: Record<string, number[]>;
+    lst: Record<Season, { vmin: number; vmax: number; stops: string[] }>;
+  };
+  files: number;
+  bytes: number;
+}
+
+export function useCaseStudyTiles(id: string | null) {
+  return useQuery({
+    queryKey: ['case-study-tiles', id],
+    enabled: !!id,
+    staleTime: Infinity,
+    retry: 1,
+    queryFn: async (): Promise<TilesManifest> => {
+      const res = await fetch(caseStudyAsset(id as string, 'tiles.json'));
+      if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) throw new Error('The case study map could not be loaded.');
+      return (await res.json()) as TilesManifest;
+    },
+  });
+}
+
+export const yearSpan =(years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');

@@ -7,4 +7,6 @@ pandas>=2.2
 scipy>=1.13
 matplotlib>=3.9
 pytest>=8
+# render_tiles.py only (website map tiles: UTM 43N → Web Mercator); not used by the pipeline steps
+pyproj>=3.6
 # Optional, for interactive inspection in a notebook only (not used by the pipeline): geemap

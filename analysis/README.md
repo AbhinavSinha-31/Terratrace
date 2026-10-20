@@ -40,6 +40,17 @@ copy .env.example .env        # EE_PROJECT=<Earth Engine Cloud project>; log in 
 - **One request at a time:** Earth Engine requests run serially, because of the noncommercial quota.
 - **Credentials:** they come only from the environment or `analysis/.env` (git-ignored), never from code. A service-account key file, if you use one, must live outside the repository (`EE_SERVICE_ACCOUNT_KEY`).
 
+### Website case study (local, no Earth Engine)
+
+```powershell
+.venv\Scripts\python export_case_study.py   # case-study.json + web-sized figures, from outputs/tables and outputs/maps
+.venv\Scripts\python render_tiles.py        # interactive-map tiles, from the cached rasters in outputs/cache
+```
+
+- **Output:** both write to `frontend/public/case-studies/noida-ghaziabad/`, which is served as static files; the website needs no backend for the case study.
+- **Map tiles:** Web Mercator PNG tiles, z8–z12, for land cover per year, the change map and LST per season and year (about 12 MB, 938 files). z12 is about 34 m per pixel, the 30 m data's own resolution; the map enlarges z12 beyond that. Classes, colours and LST colour ranges are the publication maps' own (`terratrace_analysis.maps`). `--max-zoom 11` gives a smaller set.
+- **Order:** run `run_pipeline.py --steps stats figures report` first if the tables changed; `export_case_study.py` refuses to run when `results_summary.md` is older than the tables.
+
 ## Method
 
 ### 1. Imagery

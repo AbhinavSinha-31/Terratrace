@@ -193,6 +193,14 @@ def uhi_zone_map(cfg: Config, cache: Path, grid: Grid, aoi: np.ndarray, year: in
 SERIES_CORE, SERIES_RING = figstyle.SERIES[1], figstyle.SERIES[0]
 
 
+def lst_range(cache: Path, aoi: np.ndarray, years: list[int], season: str) -> tuple[float, float]:
+    """Colour range of one season's LST maps, shared by all years: the 2nd–98th percentile of every study-area pixel."""
+    vals = np.concatenate([load_year(cache, y)[f"lst_{season}"][aoi] for y in years])
+    vals = vals[np.isfinite(vals)]
+    vmin, vmax = np.percentile(vals, [2, 98])
+    return float(vmin), float(vmax)
+
+
 def run(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int]) -> None:
     figstyle.apply()
     out.mkdir(parents=True, exist_ok=True)
@@ -204,11 +212,9 @@ def run(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int]) -> 
         lulc_map(cfg, cache, grid, aoi, y, areas, out)
         uhi_zone_map(cfg, cache, grid, aoi, y, out)
     for season in ("summer", "winter"):
-        vals = np.concatenate([load_year(cache, y)[f"lst_{season}"][aoi] for y in years])
-        vals = vals[np.isfinite(vals)]
-        vmin, vmax = np.percentile(vals, [2, 98])
+        vmin, vmax = lst_range(cache, aoi, years, season)
         for y in years:
-            lst_map(cfg, cache, grid, aoi, y, season, float(vmin), float(vmax), out)
+            lst_map(cfg, cache, grid, aoi, y, season, vmin, vmax, out)
     for a, b in combinations(years, 2):
         change_map(cfg, cache, grid, aoi, a, b, out)
     log.info("maps: written to %s", out)

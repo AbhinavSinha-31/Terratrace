@@ -5,6 +5,7 @@ import { Badge, IconButton, Segmented, Skeleton, StateView } from '../../design'
 import { fmtDelta } from '../../lib/format';
 import { useUi } from '../../state/store';
 import { caseStudyAsset, caseStudyMeta, useCaseStudy, yearSpan, type CaseStudyDoc, type ImageRef } from './data';
+import { CaseStudyMap } from './CaseStudyMap';
 
 // Number formats match results_summary.md (1 decimal for km² and %, 2 for UHI, 3 for r and kappa).
 const nf1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -236,24 +237,44 @@ function Heat({ d }: { d: CaseStudyDoc }) {
         </div>
         <div>
           <h3 className="t-label mb-2 text-ink-3">Urban heat island intensity (urban − rural)</h3>
-          <Table minWidth={460}>
-            <thead><tr><th className={th}>Year · season</th><th className={thr}>Core − ring (primary)</th><th className={thr}>Built-up − rest</th><th className={th}>Result</th></tr></thead>
-            <tbody data-testid="case-study-uhi">
-              {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => {
-                const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
-                const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
-                if (!core) return null;
-                return (
-                  <tr key={`${s}-${y}`}>
-                    <td className={td}>{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</td>
-                    <td className={tdr}>{signedC(core.uhi_c)}</td>
-                    <td className={tdr}>{bu ? signedC(bu.uhi_c) : '—'}</td>
-                    <td className={td}><IslandBadge result={core.result} /></td>
-                  </tr>
-                );
-              }))}
-            </tbody>
-          </Table>
+          {/* Phones: one card per year and season, so the result is never off-screen. */}
+          <ul className="space-y-2 sm:hidden" data-testid="case-study-uhi-cards">
+            {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => {
+              const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
+              const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
+              if (!core) return null;
+              return (
+                <li key={`${s}-${y}`} className="rounded-md border border-line px-3 py-2.5 text-[12.5px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-ink">{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</span>
+                    <IslandBadge result={core.result} />
+                  </div>
+                  <div className="mt-1.5 flex justify-between gap-2 text-ink-2"><span>Core − ring (primary)</span><span className="t-data text-ink">{signedC(core.uhi_c)}</span></div>
+                  <div className="mt-0.5 flex justify-between gap-2 text-ink-2"><span>Built-up − rest</span><span className="t-data text-ink">{bu ? signedC(bu.uhi_c) : '—'}</span></div>
+                </li>
+              );
+            }))}
+          </ul>
+          <div className="hidden sm:block">
+            <Table minWidth={460}>
+              <thead><tr><th className={th}>Year · season</th><th className={thr}>Core − ring (primary)</th><th className={thr}>Built-up − rest</th><th className={th}>Result</th></tr></thead>
+              <tbody data-testid="case-study-uhi">
+                {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => {
+                  const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
+                  const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
+                  if (!core) return null;
+                  return (
+                    <tr key={`${s}-${y}`}>
+                      <td className={td}>{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</td>
+                      <td className={tdr}>{signedC(core.uhi_c)}</td>
+                      <td className={tdr}>{bu ? signedC(bu.uhi_c) : '—'}</td>
+                      <td className={td}><IslandBadge result={core.result} /></td>
+                    </tr>
+                  );
+                }))}
+              </tbody>
+            </Table>
+          </div>
           <p className="mt-2 text-[11.5px] leading-snug text-ink-3">
             Below zero = the city is cooler than its surroundings by day (a known pre-monsoon "urban cool island" over dry, harvested fields).
             Core = built-up fraction ≥ 50 % within 500 m; ring = nearest non-built, non-water land of equal area inside the study area.
@@ -389,6 +410,9 @@ export function CaseStudyPage() {
               <>
                 <Header d={data} onClose={close} />
                 <Findings d={data} />
+                <Section id="cs-map" title="Interactive map" kicker="Static tiles rendered from the 30 m analysis rasters · no live computation">
+                  <CaseStudyMap d={data} />
+                </Section>
                 <LandCover d={data} />
                 <Population d={data} />
                 <Heat d={data} />

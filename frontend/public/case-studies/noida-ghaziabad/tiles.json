@@ -1,0 +1,169 @@
+{
+ "id": "noida-ghaziabad",
+ "generated_utc": "2026-10-20T12:25:37+00:00",
+ "source": "analysis/outputs/cache rasters (the pipeline's 30 m UTM 43N grid); rendered by analysis/render_tiles.py, no Earth Engine",
+ "tile_size": 256,
+ "minzoom": 8,
+ "maxzoom": 12,
+ "bounds": [
+  77.199141,
+  28.085117,
+  77.73711,
+  28.92778
+ ],
+ "tiles": "tiles/{layer}/{z}/{x}/{y}.png",
+ "layers": [
+  {
+   "id": "lulc_2015",
+   "kind": "lulc",
+   "year": 2015,
+   "bytes": 482230
+  },
+  {
+   "id": "lulc_2025",
+   "kind": "lulc",
+   "year": 2025,
+   "bytes": 513350
+  },
+  {
+   "id": "change_2015_2025",
+   "kind": "change",
+   "from_year": 2015,
+   "to_year": 2025,
+   "bytes": 632269
+  },
+  {
+   "id": "lst_summer_2015",
+   "kind": "lst",
+   "season": "summer",
+   "year": 2015,
+   "bytes": 2515406
+  },
+  {
+   "id": "lst_summer_2025",
+   "kind": "lst",
+   "season": "summer",
+   "year": 2025,
+   "bytes": 2444742
+  },
+  {
+   "id": "lst_winter_2015",
+   "kind": "lst",
+   "season": "winter",
+   "year": 2015,
+   "bytes": 2703483
+  },
+  {
+   "id": "lst_winter_2025",
+   "kind": "lst",
+   "season": "winter",
+   "year": 2025,
+   "bytes": 2601683
+  }
+ ],
+ "legends": {
+  "lulc": [
+   {
+    "code": 0,
+    "name": "Not classified",
+    "color": "#ffffff"
+   },
+   {
+    "code": 1,
+    "name": "Built-up (incl. bare land)",
+    "color": "#d6336c"
+   },
+   {
+    "code": 2,
+    "name": "Vegetation/Trees",
+    "color": "#00704a"
+   },
+   {
+    "code": 3,
+    "name": "Agriculture/Cropland",
+    "color": "#e3a600"
+   },
+   {
+    "code": 4,
+    "name": "Water",
+    "color": "#1f5fbf"
+   }
+  ],
+  "change": [
+   {
+    "code": 1,
+    "name": "New built-up from cropland",
+    "color": "#eb6834"
+   },
+   {
+    "code": 2,
+    "name": "New built-up from vegetation",
+    "color": "#1baf7a"
+   },
+   {
+    "code": 3,
+    "name": "New built-up from water",
+    "color": "#2a78d6"
+   },
+   {
+    "code": 4,
+    "name": "Built-up in both years",
+    "color": "#3a3936"
+   },
+   {
+    "code": 5,
+    "name": "Other change",
+    "color": "#b5b3ad"
+   },
+   {
+    "code": 6,
+    "name": "No change (not built-up)",
+    "color": "#ecebe7"
+   }
+  ],
+  "change_km2": {
+   "change_2015_2025": [
+    154.8288,
+    21.654899999999998,
+    9.2682,
+    483.51509999999996,
+    289.125,
+    1376.9829
+   ]
+  },
+  "lst": {
+   "summer": {
+    "vmin": 36.23,
+    "vmax": 49.56,
+    "stops": [
+     "#000004",
+     "#210c4a",
+     "#57106e",
+     "#8a226a",
+     "#bc3754",
+     "#e45a31",
+     "#f98e09",
+     "#f9cb35",
+     "#fcffa4"
+    ]
+   },
+   "winter": {
+    "vmin": 20.06,
+    "vmax": 27.02,
+    "stops": [
+     "#000004",
+     "#210c4a",
+     "#57106e",
+     "#8a226a",
+     "#bc3754",
+     "#e45a31",
+     "#f98e09",
+     "#f9cb35",
+     "#fcffa4"
+    ]
+   }
+  }
+ },
+ "files": 938,
+ "bytes": 11893163
+}
