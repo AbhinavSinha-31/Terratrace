@@ -19,6 +19,10 @@ const SIZE: Record<Size, string> = {
   lg: 'h-11 gap-2.5 px-5 text-[13.5px] rounded-md',
 };
 
+/** The button look, for links that must stay links (e.g. `<a download>`). */
+export const buttonClass = (variant: Variant = 'secondary', size: Size = 'md', block = false) =>
+  `tt-press inline-flex select-none items-center justify-center whitespace-nowrap font-medium disabled:opacity-40 ${VARIANT[variant]} ${SIZE[size]} ${block ? 'w-full' : ''}`;
+
 export interface TerratraceButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
@@ -35,7 +39,7 @@ export const Button = forwardRef<HTMLButtonElement, TerratraceButtonProps>(funct
   return (
     <button
       ref={ref}
-      className={`tt-press inline-flex select-none items-center justify-center whitespace-nowrap font-medium disabled:opacity-40 ${VARIANT[variant]} ${SIZE[size]} ${block ? 'w-full' : ''} ${className}`}
+      className={`${buttonClass(variant, size, block)} ${className}`}
       {...rest}
     >
       {icon && <span className="-ml-0.5 inline-flex shrink-0">{icon}</span>}

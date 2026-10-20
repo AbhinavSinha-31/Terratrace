@@ -74,6 +74,112 @@ def limitations(T) -> list[dict]:
     return out
 
 
+# ----------------------------------------------------------------------------- plain-language presentation
+def _sg(v: float, d: int) -> str:
+    """Signed number with a typographic minus, for display (−0.55, +1.06)."""
+    return f"{v:+,.{d}f}".replace("-", "−")
+
+
+def headlines(T) -> list[dict]:
+    """Headline cards for a general reader (website and PDF): one number and one sentence each, from the tables.
+    Only the wording is written here; every number is read from the same tables as results_summary.md."""
+    a, b = T.years[0], T.years[-1]
+    bu, ag = T.built, T.cfg.class_name(3)
+    ba, bb = T.area(a, 1), T.area(b, 1)
+    pa, pb = T.area(a, 1, "percent_of_classified"), T.area(b, 1, "percent_of_classified")
+    tm = T.tm[(a, b)]
+    net = float(tm.loc[ag, bu] - tm.loc[bu, ag])
+    dc = T.area(b, 3) - T.area(a, 3)
+    va, vb = T.area(a, 2), T.area(b, 2)
+    vpa, vpb = T.area(a, 2, "percent_of_classified"), T.area(b, 2, "percent_of_classified")
+    sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
+    wa, wb = float(T.u(a, "winter", CORE).uhi_intensity_c), float(T.u(b, "winter", CORE).uhi_intensity_c)
+    nd = T.cor[T.cor["index"] == "NDVI"].r.astype(float)
+    nb = T.cor[T.cor["index"] == "NDBI"].r.astype(float)
+
+    pop = ""
+    if T.pop is not None:
+        p = T.pop.set_index("epoch")
+        if a in p.index and b in p.index:
+            pop = (f", while population rose {(p.population[b] / p.population[a] - 1) * 100:.0f} % "
+                   f"(GHSL{'; ' + str(b) + ' is a projection' if bool(p.projection_not_estimate[b]) else ''})")
+    cards = [{
+        "id": "built", "value": f"{_sg(bb - ba, 0)} km²", "period": f"{a}→{b}", "title": "More built-up land",
+        "text": f"Built-up land (including bare land) grew from {ba:,.0f} km² ({pa:.1f} % of the study area) in {a} "
+                f"to {bb:,.0f} km² ({pb:.1f} %) in {b}{pop}.",
+    }, {
+        "id": "farmland", "value": f"{net:,.0f} km²", "period": f"{a}→{b}", "title": "The city grew mostly into farmland",
+        "text": f"Most new built-up land replaced cropland: a net {net:,.0f} km² of farmland became built-up, and cropland "
+                f"overall {'shrank' if dc < 0 else 'grew'} by {abs(dc):,.0f} km².",
+    }]
+    slight = abs(vpb - vpa) < 2
+    cards.append({
+        "id": "vegetation", "value": f"{_sg(vb - va, 0)} km²", "period": f"{a}→{b}",
+        "title": f"Tree and vegetation cover {'rose' if vb >= va else 'fell'}{' slightly' if slight else ''}",
+        "text": f"Tree/vegetation cover went from {vpa:.1f} % to {vpb:.1f} % of the study area ({va:,.0f} → {vb:,.0f} km²)"
+                f"{', possibly due to parks and plantations' if vb >= va else ''}.",
+    })
+    both_warm = wa >= report.NEAR_ZERO_C and wb >= report.NEAR_ZERO_C
+    cards.append({
+        "id": "winter", "value": (f"≈ {_sg(wa, 1)} °C" if round(wa, 1) == round(wb, 1) else f"{_sg(wa, 1)} / {_sg(wb, 1)} °C"),
+        "period": "Nov–Feb", "title": "Winter heat island in both years" if both_warm else "Winter: city vs countryside",
+        "text": f"In November–February the urban core was {_sg(wa, 2)} °C ({a}) and {_sg(wb, 2)} °C ({b}) "
+                f"{'warmer than' if both_warm else 'relative to'} the countryside around it.",
+    })
+    small = max(abs(sa), abs(sb)) < 1
+    cards.append({
+        "id": "summer", "value": "< 1 °C" if small else f"{_sg(sa, 1)} / {_sg(sb, 1)} °C", "period": "Apr–Jun",
+        "title": "Summer days: no clear city heat effect" if small else "Summer days: city vs countryside",
+        "text": f"In April–June, around 10:30 local time, the urban core was {'within 1 °C of' if small else 'compared with'} the "
+                f"countryside around it in both years ({_sg(sa, 2)} °C in {a}, {_sg(sb, 2)} °C in {b}).",
+    })
+    if (nd < 0).all():
+        cards.append({
+            "id": "greener", "value": f"r ≈ {_sg(nd.mean(), 1)}", "period": "NDVI–LST", "title": "Greener areas are cooler",
+            "text": f"Surface temperature falls as vegetation (NDVI) rises in both seasons and years (r {_sg(nd.max(), 3)} to "
+                    f"{_sg(nd.min(), 3)}) and rises with built-up surfaces (NDBI, r {_sg(nb.min(), 3)} to {_sg(nb.max(), 3)}).",
+        })
+    return cards
+
+
+def caveats(T) -> list[dict]:
+    """How to read the results: the technical caveats, stated plainly (Method & limitations on the page and in the PDF)."""
+    a, b = T.years[0], T.years[-1]
+    bu, ag = T.built, T.cfg.class_name(3)
+    tm = T.tm[(a, b)]
+    fwd, rev = float(tm.loc[ag, bu]), float(tm.loc[bu, ag])
+    acc = T.acc.set_index("year")
+    sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
+    out = [{
+        "title": "Net, not gross, land-cover change",
+        "text": f"Between {a} and {b}, {fwd:.1f} km² of cropland was mapped as built-up, but {rev:.1f} km² was mapped the other way. "
+                "Built-up land rarely turns back into cropland: most of this reverse flow is confusion between bare harvested fields "
+                f"(counted as built-up) and cropland. The headline figures therefore use the net change ({fwd - rev:.1f} km²), and "
+                "change patches of a few km² are within classification noise.",
+    }, {
+        "title": "Agreement, not accuracy",
+        "text": f"The land-cover maps agree with held-out reference labels for {acc.overall_agreement[a] * 100:.1f} % ({a}) and "
+                f"{acc.overall_agreement[b] * 100:.1f} % ({b}) of test points (kappa {acc.kappa[a]:.3f} and {acc.kappa[b]:.3f}). "
+                "These labels come from GLC-FCS30D and are restricted to pixels whose class did not change, which are easier to map, "
+                "so the figures are optimistic. They are agreement with reference labels, not accuracy against ground truth; "
+                "independent validation is still to be done.",
+    }]
+    if (sa < 0) != (sb < 0):
+        out.append({
+            "title": "The summer daytime result changes sign",
+            "text": f"In April–June the urban core was {_sg(sa, 2)} °C relative to its rural ring in {a} (a cool island) and "
+                    f"{_sg(sb, 2)} °C in {b} (a heat island). Both values are below 1 °C, and with one composite per season and year a "
+                    "change this small cannot be separated from year-to-year weather, so it is not read as a warming trend. A daytime "
+                    "cool island over dry, harvested farmland is known in pre-monsoon India (Shastri et al., 2017).",
+        })
+    out.append({
+        "title": "Association, not cause",
+        "text": "Correlations describe how surface temperature varies with vegetation and built-up surfaces across pixels; on their own "
+                f"they do not show cause. Population and built-up area are compared at two time points ({a} and {b}) only.",
+    })
+    return out
+
+
 # ----------------------------------------------------------------------------- export
 def main() -> None:
     cfg = config_mod.load()
@@ -162,8 +268,8 @@ def main() -> None:
         "id": CASE_ID, "kind": "static-case-study", "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "pipeline_version": __version__, "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
         "study": {
-            "name": cfg.study["name"], "short_name": cfg.study["short_name"], "districts": cfg.study["gaul_districts"],
-            "boundary_source": "FAO GAUL 2025 (level 2)", "area_km2": T.aoi_area["area_km2_geodesic"], "area_km2_grid": T.aoi_area["area_km2_grid"],
+            "name": cfg.study["name"], "short_name": cfg.study["short_name"], "districts": cfg.study.get("district_labels", cfg.study["gaul_districts"]),
+            "boundary_source": "FAO GAUL 2025, level 2", "area_km2": T.aoi_area["area_km2_geodesic"], "area_km2_grid": T.aoi_area["area_km2_grid"],
             "years": T.years, "sensors": sensors,
             "scenes": [{"year": int(r.year), "season": r.season, "scenes": int(r.scenes)} for _, r in T.scenes.iterrows()],
             "classes": [{"code": c.code, "name": c.name, "color": c.color} for c in cfg.classes],
@@ -172,6 +278,7 @@ def main() -> None:
                                "Landsat thermal band (April–June primary, November–February secondary); UHI as urban core minus an "
                                "equal-area rural ring."),
         },
+        "headlines": headlines(T), "caveats": caveats(T),
         "findings": F, "limitations": [{"title": l["title"], "text": l["text"]} for l in LIM], "flags": flags,
         "areas": areas, "net_change": net, "transitions": transitions, "population": pop,
         "lst_summary": lst_summary, "lst_per_class": lst_class, "uhi": uhi, "conversion": conv, "correlations": cor,

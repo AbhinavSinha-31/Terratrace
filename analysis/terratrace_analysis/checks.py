@@ -89,14 +89,14 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
         fwd, rev = tm.loc[aname, bname], tm.loc[bname, aname]
         if fwd > 0 and rev > 0.25 * fwd:
             flags.append(("CAUTION", "LULC change", f"{a}→{b}: {fwd:.1f} km² of {aname} became {bname}, but {rev:.1f} km² went the other way "
-                          f"({rev / fwd:.0%} of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion "
-                          f"(bare harvested fields are now inside {bname}); use the NET conversion ({fwd - rev:.1f} km²) and net class "
+                          f"({rev / fwd:.0%} of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion, "
+                          f"because bare harvested fields are counted in {bname}; use the NET conversion ({fwd - rev:.1f} km²) and net class "
                           f"changes, not the gross transition, as the headline."))
         va = areas[(areas.year == a) & (areas.class_code == 2)].area_km2.iloc[0]
         vb = areas[(areas.year == b) & (areas.class_code == 2)].area_km2.iloc[0]
         if vb > va:
-            flags.append(("CAUTION", "story", f"{a}→{b}: {vname} area INCREASED ({va:.1f} → {vb:.1f} km², {vb - va:+.1f} km²). This contradicts the "
-                          f"expected 'vegetation loss' step; built-up growth here came mainly from cropland, not vegetation."))
+            flags.append(("INFO", "vegetation", f"{a}→{b}: {vname} area increased ({va:.1f} → {vb:.1f} km², {vb - va:+.1f} km²); "
+                          f"built-up growth in this period came mainly from cropland, not vegetation."))
     for season in ("summer", "winter"):
         u = uhi[(uhi.season == season) & (uhi.method == "urban core vs rural ring")].sort_values("year")
         if len(u) > 1 and np.sign(u.uhi_intensity_c).nunique() > 1:

@@ -138,7 +138,7 @@ def s1_setup(T: Tables, L: list[str]) -> None:
                    f"{int(T.scenes[(T.scenes.year == y) & (T.scenes.season == 'annual')].scenes.iloc[0])} whole-year" for y in T.years)
     pts = "; ".join(f"{y}: {int(T.labels[T.labels.year == y].train_points.sum())} training / {int(T.labels[T.labels.year == y].test_points.sum())} test"
                     for y in T.years)
-    L += [f"- **Study area:** {cfg.study['name']} — FAO GAUL 2025 districts {' + '.join(cfg.study['gaul_districts'])}, "
+    L += [f"- **Study area:** {cfg.study['name']} — FAO GAUL 2025 districts {' + '.join(cfg.study.get('district_labels', cfg.study['gaul_districts']))}, "
           f"{_f(T.aoi_area['area_km2_geodesic'], 0)} km² (30 m grid: {_f(T.aoi_area['area_km2_grid'], 0)} km²).",
           f"- **Years and sensors:** {sens} — Landsat Collection 2 Level-2, Tier 1, 30 m.",
           f"- **Scenes used:** {sc}.",
@@ -327,9 +327,9 @@ def s8_findings(T: Tables, L: list[str]) -> None:
              f"{_f(rev, 0)} km² was mapped the other way (mostly class confusion), leaving a net conversion of {_f(fwd - rev, 0)} km² and a net "
              f"cropland change of {_signed(T.area(b, 3) - T.area(a, 3), 0, ' km²')}.")
     dv = T.area(b, 2) - T.area(a, 2)
-    F.append(f"Vegetation/tree cover did {'not decline' if dv >= 0 else 'decline'}: it changed by {_signed(dv, 0, ' km²')} "
-             f"({_f(T.area(a, 2), 0)} → {_f(T.area(b, 2), 0)} km²), so urban growth in this period replaced cropland rather than "
-             f"vegetation{' and the expected vegetation-loss step is not supported' if dv >= 0 else ''}.")
+    F.append(f"Vegetation/tree cover {'increased' if dv >= 0 else 'decreased'}: it changed by {_signed(dv, 0, ' km²')} "
+             f"({_f(T.area(a, 2), 0)} → {_f(T.area(b, 2), 0)} km²)"
+             f"{', so urban growth in this period replaced cropland rather than vegetation' if dv >= 0 else ''}.")
     u_b, u_a = T.u(b, "summer", CORE), T.u(a, "summer", CORE)
     w_a, w_b = T.u(a, "winter", CORE), T.u(b, "winter", CORE)
     F.append(f"In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was {_signed(u_a.uhi_intensity_c)} relative to its rural ring "

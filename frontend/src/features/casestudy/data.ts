@@ -37,6 +37,11 @@ export interface CaseStudyDoc {
     years: number[]; sensors: Record<string, string>; scenes: { year: number; season: Season | 'annual'; scenes: number }[];
     classes: { code: number; name: string; color: string }[]; method_summary: string;
   };
+  /** Plain-language headline cards (one number, one sentence), generated from the tables by export_case_study.py. */
+  headlines: { id: string; value: string; period: string; title: string; text: string }[];
+  /** How to read the results: the technical caveats, stated plainly. */
+  caveats: { title: string; text: string }[];
+  /** The full technical findings, verbatim from results_summary.md. */
   findings: string[];
   limitations: { title: string; text: string }[];
   flags: { level: 'WARNING' | 'CAUTION' | 'INFO'; topic: string; message: string }[];
@@ -117,4 +122,25 @@ export function useCaseStudyTiles(id: string | null) {
   });
 }
 
-export const yearSpan =(years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');
+/** Mirrors analysis/export_report.py: the shareable files (PDF report, data ZIP) and their real sizes. */
+export interface CaseStudyDownloads {
+  generated_utc: string;
+  pdf: { file: string; bytes: number; pages: number; title: string };
+  data: { file: string; bytes: number; files: number };
+}
+
+export function useCaseStudyDownloads(id: string | null) {
+  return useQuery({
+    queryKey: ['case-study-downloads', id],
+    enabled: !!id,
+    staleTime: Infinity,
+    retry: 1,
+    queryFn: async (): Promise<CaseStudyDownloads> => {
+      const res = await fetch(caseStudyAsset(id as string, 'downloads.json'));
+      if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) throw new Error('The downloads could not be loaded.');
+      return (await res.json()) as CaseStudyDownloads;
+    },
+  });
+}
+
+export const yearSpan = (years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');

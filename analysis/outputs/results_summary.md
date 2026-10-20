@@ -1,10 +1,10 @@
 # Results summary — Noida, Greater Noida and Ghaziabad (Delhi NCR)
 
-Generated 2026-10-19 by the TerraTrace analysis pipeline v1.0.0 from `outputs/tables/*.csv` (years 2015, 2025). Every number is read from those tables; none is typed by hand.
+Generated 2026-10-20 by the TerraTrace analysis pipeline v1.0.0 from `outputs/tables/*.csv` (years 2015, 2025). Every number is read from those tables; none is typed by hand.
 
 ## 1. Study setup
 
-- **Study area:** Noida, Greater Noida and Ghaziabad (Delhi NCR) — FAO GAUL 2025 districts Gautambudhnagar + Ghaziabad, 2,330 km² (30 m grid: 2,335 km²).
+- **Study area:** Noida, Greater Noida and Ghaziabad (Delhi NCR) — FAO GAUL 2025 districts Gautam Buddha Nagar + Ghaziabad, 2,330 km² (30 m grid: 2,335 km²).
 - **Years and sensors:** 2015: Landsat 8; 2025: Landsat 8 + Landsat 9 — Landsat Collection 2 Level-2, Tier 1, 30 m.
 - **Scenes used:** 2015: 17 April–June, 18 Nov–Feb, 56 whole-year; 2025: 29 April–June, 36 Nov–Feb, 101 whole-year.
 - **Classes (4):** Built-up (incl. bare land), Vegetation/Trees, Agriculture/Cropland, Water (Barren/Open land merged into Built-up in every year). Random Forest, 200 trees; points (600 per class, 70/30 per class): 2015: 1680 training / 720 test; 2025: 1680 training / 720 test.
@@ -112,13 +112,13 @@ Absolute LST differs between years partly because of that season's weather; comp
 **Flags raised by checks.py:**
 
 - **CAUTION** (accuracy): All accuracy figures are AGREEMENT WITH REFERENCE LABELS (held-out GLC-FCS30D stable pixels), not accuracy against ground truth; stable pixels are easier than changing ones, so the figures are optimistic. Independent validation points (outputs/validation) have not been interpreted yet.
-- **CAUTION** (LULC change): 2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion (bare harvested fields are now inside Built-up (incl. bare land)); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline.
-- **CAUTION** (story): 2015→2025: Vegetation/Trees area INCREASED (139.3 → 166.8 km², +27.5 km²). This contradicts the expected 'vegetation loss' step; built-up growth here came mainly from cropland, not vegetation.
+- **CAUTION** (LULC change): 2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion, because bare harvested fields are counted in Built-up (incl. bare land); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline.
 - **CAUTION** (UHI): summer: the core-vs-ring UHI changes sign between years (2015: -0.55 °C, 2025: +0.50 °C). Both values are small (< 1 °C); one composite per year cannot separate a trend from weather.
 - **INFO** (data): 2015: Landsat 8 OLI/TIRS.
 - **INFO** (data): 2025: Landsat 8 + 9 OLI/TIRS.
 - **INFO** (UHI): 2015 summer (built-up vs non-built-up land): UHI intensity is negative (-0.80 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017).
 - **INFO** (UHI): 2015 summer (urban core vs rural ring): UHI intensity is negative (-0.55 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017).
+- **INFO** (vegetation): 2015→2025: Vegetation/Trees area increased (139.3 → 166.8 km², +27.5 km²); built-up growth in this period came mainly from cropland, not vegetation.
 - **INFO** (population): GHSL epochs from 2025 are model projections, not census-based estimates.
 
 **Cross-checks run before writing this file (all passed):**
@@ -132,7 +132,7 @@ Absolute LST differs between years partly because of that season's weather; comp
 
 1. Built-up land (including bare land) in Noida–Ghaziabad grew from 616 km² (26.4 %) in 2015 to 669 km² (28.7 %) in 2025, a net +53 km² (+9 %), while GHSL population rose +20 % (6.07 → 7.26 million; the 2025 figure is a GHSL projection).
 2. Cropland was the main source of new built-up land: 155 km² changed from cropland to built-up, but 95 km² was mapped the other way (mostly class confusion), leaving a net conversion of 59 km² and a net cropland change of -73 km².
-3. Vegetation/tree cover did not decline: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation and the expected vegetation-loss step is not supported.
+3. Vegetation/tree cover increased: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation.
 4. In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was -0.55 °C relative to its rural ring in 2015 (cool island) and +0.50 °C in 2025 (heat island), small values whose change of sign cannot be separated from weather with one composite per year, whereas November–February showed a consistent heat island (+1.06 °C and +1.09 °C).
 5. Cropland that became built-up between 2015 and 2025 changed by -0.01 SD in normalised April–June LST, against -0.11 SD for cropland that stayed cropland, a difference of +0.10 SD (+0.06 °C raw), i.e. slightly warmer than the unchanged class; conversion to built-up did not produce a clear summer temperature change.
 

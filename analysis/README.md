@@ -7,8 +7,8 @@ urban heat island (UHI).
 It **tests** the story; it does not assume it. Each link is measured separately, every suspicious number is
 flagged in `outputs/results_summary.md`, and a result that goes against the story is reported as it is.
 
-- Study area: Noida, Greater Noida and Ghaziabad. These are the FAO GAUL 2025 districts *Gautambudhnagar* and
-  *Ghaziabad*, about 2,335 km².
+- Study area: Noida, Greater Noida and Ghaziabad. These are the FAO GAUL 2025 districts *Gautam Buddha Nagar*
+  (spelled `Gautambudhnagar` in GAUL) and *Ghaziabad*, about 2,335 km².
 - Study years: 2005, 2015 and 2025.
 - All settings: [config.toml](config.toml).
 
@@ -45,11 +45,13 @@ copy .env.example .env        # EE_PROJECT=<Earth Engine Cloud project>; log in 
 ```powershell
 .venv\Scripts\python export_case_study.py   # case-study.json + web-sized figures, from outputs/tables and outputs/maps
 .venv\Scripts\python render_tiles.py        # interactive-map tiles, from the cached rasters in outputs/cache
+.venv\Scripts\python export_report.py       # PDF report + data ZIP (CSV tables and a README of every column)
 ```
 
 - **Output:** both write to `frontend/public/case-studies/noida-ghaziabad/`, which is served as static files; the website needs no backend for the case study.
 - **Map tiles:** Web Mercator PNG tiles, z8–z12, for land cover per year, the change map and LST per season and year (about 12 MB, 938 files). z12 is about 34 m per pixel, the 30 m data's own resolution; the map enlarges z12 beyond that. Classes, colours and LST colour ranges are the publication maps' own (`terratrace_analysis.maps`). `--max-zoom 11` gives a smaller set.
-- **Order:** run `run_pipeline.py --steps stats figures report` first if the tables changed; `export_case_study.py` refuses to run when `results_summary.md` is older than the tables.
+- **PDF report:** `export_report.py` builds the A4 report from the same `case-study.json` the page reads (plus the full-size maps and charts), so the PDF, the page and `results_summary.md` cannot disagree. The author line, title and status line are in `config.toml` `[report]`; add co-authors there.
+- **Order:** run `run_pipeline.py --steps stats figures report` first if the tables changed, then `export_case_study.py`, then `export_report.py`. Each export refuses to run when its inputs are older than the tables or its sentences are not verbatim in `results_summary.md`.
 
 ## Method
 

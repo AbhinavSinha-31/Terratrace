@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, BookOpenText, Info, ShieldCheck, X } from 'lucide-react';
-import { Badge, IconButton, Segmented, Skeleton, StateView } from '../../design';
+import { Badge, IconButton, Segmented, Skeleton, StateView, Tooltip } from '../../design';
 import { fmtDelta } from '../../lib/format';
 import { useUi } from '../../state/store';
 import { caseStudyAsset, caseStudyMeta, useCaseStudy, yearSpan, type CaseStudyDoc, type ImageRef } from './data';
 import { CaseStudyMap } from './CaseStudyMap';
+import { DownloadCard } from './DownloadCard';
 
 // Number formats match results_summary.md (1 decimal for km² and %, 2 for UHI, 3 for r and kappa).
 const nf1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -91,7 +92,14 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge tone="accent" icon={<BookOpenText size={11} />}>Case study · Landsat {years}</Badge>
-        <Badge>Static results · no live analysis</Badge>
+        <span className="inline-flex items-center gap-1">
+          <Badge>Precomputed analysis · interactive map</Badge>
+          <Tooltip content={`Computed from Landsat satellite data with TerraTrace's analysis pipeline. Results are fixed for ${d.study.years.join(' and ')}; live re-analysis is coming later.`}>
+            <button type="button" aria-label="About these results" className="tt-press grid h-6 w-6 place-items-center rounded-full text-ink-3 hover:text-ink">
+              <Info size={13} />
+            </button>
+          </Tooltip>
+        </span>
       </div>
       <div>
         <h1 id="case-study-title" className="t-h1 text-ink">{meta?.name ?? d.study.short_name}</h1>
@@ -113,75 +121,113 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
           ))}</dd>
         </div>
       </dl>
-      <p className="text-[12.5px] leading-relaxed text-ink-3"><span className="text-ink-2">Method: </span>{d.study.method_summary}</p>
     </header>
   );
 }
 
-function Findings({ d }: { d: CaseStudyDoc }) {
+/** Scrolls the case study to a section (an in-page #anchor would replace the app's own #/case-study/… route). */
+const goTo = (id: string) => {
+  const el = document.getElementById(id);
+  // The id is the section's heading; its <section> carries the scroll margin that clears the app header.
+  (el?.closest('section') ?? el)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+function ToMethod({ children }: { children: ReactNode }) {
+  return <button type="button" onClick={() => goTo('cs-method')} className="tt-press text-accent hover:underline">{children}</button>;
+}
+
+function Headlines({ d }: { d: CaseStudyDoc }) {
   return (
-    <Section id="cs-findings" title="Key findings" kicker="Each sentence is generated from the analysis tables">
-      <ol className="space-y-2.5" data-testid="case-study-findings">
-        {d.findings.map((f, i) => (
-          <li key={i} className="tt-panel flex gap-3 p-3.5 text-[13.5px] leading-relaxed text-ink">
-            <span className="t-data grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent/12 text-[12px] text-accent">{i + 1}</span>
-            <span>{f}</span>
+    <Section id="cs-findings" title="Key findings" kicker={`${yearSpan(d.study.years)} · from Landsat satellite data`}>
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="case-study-headlines">
+        {d.headlines.map((h) => (
+          <li key={h.id} className="tt-panel flex flex-col p-4" data-headline={h.id}>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="t-data text-[28px] font-semibold leading-none text-ink">{h.value}</span>
+              <span className="t-label shrink-0 text-ink-3">{h.period}</span>
+            </div>
+            <h3 className="mt-3 text-[14px] font-semibold leading-snug text-ink">{h.title}</h3>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">{h.text}</p>
           </li>
         ))}
-      </ol>
+      </ul>
+      <p className="mt-3 text-[12px] text-ink-3">How these figures were made, and what they cannot show: <ToMethod>Method &amp; limitations</ToMethod>.</p>
     </Section>
   );
 }
 
-function LandCover({ d }: { d: CaseStudyDoc }) {
+function DetailedFindings({ d }: { d: CaseStudyDoc }) {
+  return (
+    <details className="tt-panel group p-4" data-testid="case-study-findings">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] font-medium text-ink">
+        Detailed findings (for researchers)
+        <span className="text-[11.5px] font-normal text-ink-3 group-open:hidden">Show</span>
+        <span className="hidden text-[11.5px] font-normal text-ink-3 group-open:inline">Hide</span>
+      </summary>
+      <p className="mt-2 text-[11.5px] text-ink-3">Verbatim from the pipeline's results summary, which is generated from the same tables.</p>
+      <ol className="mt-3 space-y-2">
+        {d.findings.map((f, i) => (
+          <li key={i} className="flex gap-3 text-[12.5px] leading-relaxed text-ink-2">
+            <span className="t-data grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent/12 text-[11px] text-accent">{i + 1}</span>
+            <span>{f}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function LandCoverMaps({ d }: { d: CaseStudyDoc }) {
+  const ys = d.study.years;
+  return (
+    <Section id="cs-landcover" title={`Land cover, ${ys.join(' and ')}`} kicker="Satellite classification at 30 m · bare land is counted as built-up">
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${ys.length > 2 ? 'lg:grid-cols-3' : ''}`}>
+        {ys.map((y) => <Figure key={y} id={d.id} img={d.images.lulc[String(y)]} alt={`Land use / land cover map, ${y}`} caption={`Land use / land cover, ${y}`} />)}
+      </div>
+    </Section>
+  );
+}
+
+function LandCoverChange({ d }: { d: CaseStudyDoc }) {
   const ys = d.study.years;
   const pairs = d.transitions;
   const main = pairs.find((t) => t.from_year === ys[0] && t.to_year === ys[ys.length - 1]) ?? pairs[0];
   const area = (y: number, code: number) => d.areas.find((a) => a.year === y && a.class_code === code);
   const net = (code: number) => d.net_change.find((n) => n.from_year === main.from_year && n.to_year === main.to_year && n.class_code === code);
   const built = d.study.classes[0]?.name;
+  if (!main) return null;
   return (
-    <Section id="cs-landcover" title="Land cover" kicker="Random Forest, 30 m · Barren/Open land is merged into Built-up in every year">
-      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${ys.length > 2 ? 'lg:grid-cols-3' : ''}`}>
-        {ys.map((y) => <Figure key={y} id={d.id} img={d.images.lulc[String(y)]} alt={`Land use / land cover map, ${y}`} caption={`Land use / land cover, ${y}`} />)}
-      </div>
-      {main && (
-        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <Figure id={d.id} img={d.images.change[`${main.from_year}-${main.to_year}`]} alt={`Land-cover change ${main.from_year} to ${main.to_year}`}
-            caption="Pixel-by-pixel comparison of the two maps; classification errors of both add up here." />
-          <div className="space-y-4">
-            <div className="tt-panel p-4" data-testid="case-study-net">
-              <div className="t-label text-ink-3">Net change {main.from_year} → {main.to_year}</div>
-              <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
-                <span className="t-data text-[26px] font-semibold text-ink">{fmtDelta(net(1)?.delta_km2 ?? 0, 1)} km²</span>
-                <span className="text-[13px] text-ink-2">{built} ({fmtDelta(net(1)?.delta_pp ?? 0, 1)} percentage points)</span>
-              </div>
-              <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2">
-                Net conversion of cropland to built-up: <b className="t-data font-medium text-ink">{km2(main.cropland_to_built.net_km2)} km²</b>.
-                The gross transition ({km2(main.cropland_to_built.gross_km2)} km²) is offset by {km2(main.cropland_to_built.reverse_km2)} km² mapped
-                the other way — mostly confusion between bare harvested fields and built-up land — so the net figure is the headline.
-              </p>
+    <Section id="cs-change" title="Land-cover change" kicker={`${main.from_year} → ${main.to_year} · net change per class`}>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Figure id={d.id} img={d.images.change[`${main.from_year}-${main.to_year}`]} alt={`Land-cover change ${main.from_year} to ${main.to_year}`}
+          caption="Pixel-by-pixel comparison of the two land-cover maps." />
+        <div className="space-y-4">
+          <div className="tt-panel p-4" data-testid="case-study-net">
+            <div className="t-label text-ink-3">Net change {main.from_year} → {main.to_year}</div>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+              <span className="t-data text-[26px] font-semibold text-ink">{fmtDelta(net(1)?.delta_km2 ?? 0, 1)} km²</span>
+              <span className="text-[13px] text-ink-2">{built} ({fmtDelta(net(1)?.delta_pp ?? 0, 1)} percentage points)</span>
             </div>
-            <Table minWidth={460}>
-              <thead><tr><th className={th}>Class</th>{ys.map((y) => <th key={y} className={thr}>{y} km² (%)</th>)}<th className={thr}>Net km²</th><th className={thr}>pp</th></tr></thead>
-              <tbody data-testid="case-study-areas">
-                {d.study.classes.map((c) => (
-                  <tr key={c.code}>
-                    <td className={td}><span className="mr-2 inline-block h-2.5 w-2.5 rounded-[2px] align-middle" style={{ background: c.color }} />{c.name}</td>
-                    {ys.map((y) => { const a = area(y, c.code); return <td key={y} className={tdr}>{a ? `${km2(a.area_km2)} (${pct1(a.percent)})` : '—'}</td>; })}
-                    <td className={tdr}>{net(c.code) ? fmtDelta(net(c.code)!.delta_km2, 1) : '—'}</td>
-                    <td className={tdr}>{net(c.code) ? fmtDelta(net(c.code)!.delta_pp, 1) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-            <div className="text-[12px] leading-relaxed text-ink-3">
-              <span className="text-ink-2">Largest gross transitions</span> ({km2(main.total_changed_km2)} km² changed class in total):{' '}
-              {main.top.map((t, i) => <span key={i}>{i > 0 && '; '}{km2(t.km2)} km² {t.from} → {t.to}</span>)}.
-            </div>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2">
+              Cropland that became built-up, net: <b className="t-data font-medium text-ink">{km2(main.cropland_to_built.net_km2)} km²</b>.
+              {' '}Why net figures are used: <ToMethod>Method &amp; limitations</ToMethod>.
+            </p>
           </div>
+          <Table minWidth={460}>
+            <thead><tr><th className={th}>Class</th>{ys.map((y) => <th key={y} className={thr}>{y} km² (%)</th>)}<th className={thr}>Net km²</th><th className={thr}>pp</th></tr></thead>
+            <tbody data-testid="case-study-areas">
+              {d.study.classes.map((c) => (
+                <tr key={c.code}>
+                  <td className={td}><span className="mr-2 inline-block h-2.5 w-2.5 rounded-[2px] align-middle" style={{ background: c.color }} />{c.name}</td>
+                  {ys.map((y) => { const a = area(y, c.code); return <td key={y} className={tdr}>{a ? `${km2(a.area_km2)} (${pct1(a.percent)})` : '—'}</td>; })}
+                  <td className={tdr}>{net(c.code) ? fmtDelta(net(c.code)!.delta_km2, 1) : '—'}</td>
+                  <td className={tdr}>{net(c.code) ? fmtDelta(net(c.code)!.delta_pp, 1) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
         </div>
-      )}
+      </div>
     </Section>
   );
 }
@@ -282,8 +328,7 @@ function Heat({ d }: { d: CaseStudyDoc }) {
             </Table>
           </div>
           <p className="mt-2 text-[11.5px] leading-snug text-ink-3">
-            Below zero = the city is cooler than its surroundings by day (a known pre-monsoon "urban cool island" over dry, harvested fields).
-            Core = built-up fraction ≥ 50 % within 500 m; ring = nearest non-built, non-water land of equal area inside the study area.
+            Urban core minus the countryside around it. How the core and ring are drawn, and why the summer value changes sign: <ToMethod>Method &amp; limitations</ToMethod>.
           </p>
         </div>
       </div>
@@ -347,11 +392,29 @@ function Correlations({ d }: { d: CaseStudyDoc }) {
   );
 }
 
-function MethodQuality({ d }: { d: CaseStudyDoc }) {
+function MethodLimitations({ d }: { d: CaseStudyDoc }) {
   const removed = d.masking.impact.map((m) => Number(m.pixels_removed_entirely) / Number(m.pixels_with_lst_before) * 100);
   return (
-    <Section id="cs-quality" title="Method & quality" kicker="What the numbers can and cannot claim">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <Section id="cs-method" title="Method & limitations" kicker="What the numbers can and cannot claim">
+      <h3 className="t-label mb-2 text-ink-3">How to read these results</h3>
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2" data-testid="case-study-caveats">
+        {d.caveats.map((c) => (
+          <li key={c.title} className="tt-panel p-4 text-[12.5px] leading-relaxed text-ink-2">
+            <b className="block text-[13px] font-semibold text-ink">{c.title}</b>
+            <span className="mt-1 block">{c.text}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="tt-panel mt-4 p-4 text-[12.5px] leading-relaxed text-ink-2">
+        <h3 className="t-label mb-1.5 text-ink-3">Method</h3>
+        <p>{d.study.method_summary}</p>
+        <p className="mt-2">
+          Urban core: pixels whose built-up fraction within 500 m is at least 50 %, in patches of at least 1 km². Rural ring: the nearest
+          non-built-up, non-water land of equal area inside the study area (East Delhi, west of the study area, is itself urban). A negative
+          value means the city is cooler than its surroundings by day.
+        </p>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="tt-panel p-4">
           <h3 className="t-label flex items-center gap-1.5 text-ink-3"><ShieldCheck size={13} /> Classification — agreement with reference labels</h3>
           <ul className="mt-2 space-y-2 text-[12.5px] text-ink-2" data-testid="case-study-accuracy">
@@ -386,17 +449,12 @@ function MethodQuality({ d }: { d: CaseStudyDoc }) {
           ))}
         </ul>
       </div>
-    </Section>
-  );
-}
-
-function Limitations({ d }: { d: CaseStudyDoc }) {
-  return (
-    <Section id="cs-limitations" title="Limitations">
+      <h3 id="cs-limitations" className="t-label mb-2 mt-6 text-ink-3">Limitations</h3>
       <ul className="tt-panel space-y-2 p-4 text-[12.5px] leading-relaxed text-ink-2" data-testid="case-study-limitations">
         {/* Joined exactly as in results_summary.md: the bold lead carries its own punctuation. */}
         {d.limitations.map((l, i) => <li key={i}><b className="font-medium text-ink">{l.title}</b>{/^[;,.:]/.test(l.text) ? '' : ' '}{l.text}</li>)}
       </ul>
+      <div className="mt-4"><DetailedFindings d={d} /></div>
     </Section>
   );
 }
@@ -429,18 +487,20 @@ export function CaseStudyPage() {
             {data && (
               <>
                 <Header d={data} onClose={close} />
-                <Findings d={data} />
-                <Section id="cs-map" title="Interactive map" kicker="Static tiles rendered from the 30 m analysis rasters · no live computation">
+                <Headlines d={data} />
+                <DownloadCard id={data.id} place="top" />
+                <Section id="cs-map" title="Interactive map" kicker="Precomputed tiles from the 30 m analysis rasters">
                   <CaseStudyMap d={data} />
                 </Section>
-                <LandCover d={data} />
+                <LandCoverMaps d={data} />
+                <LandCoverChange d={data} />
                 <Population d={data} />
                 <Heat d={data} />
                 <Correlations d={data} />
-                <MethodQuality d={data} />
-                <Limitations d={data} />
+                <MethodLimitations d={data} />
+                <DownloadCard id={data.id} place="bottom" />
                 <footer className="border-t border-line pt-4 text-[11.5px] leading-relaxed text-ink-4">
-                  Static case study generated {data.generated_utc.slice(0, 10)} by the TerraTrace analysis pipeline v{data.pipeline_version} from
+                  Precomputed case study generated {data.generated_utc.slice(0, 10)} by the TerraTrace analysis pipeline v{data.pipeline_version} from
                   precomputed tables (Landsat Collection 2 via Google Earth Engine; GLC-FCS30D, ESA WorldCover, Dynamic World labels; GHSL population).
                   It is not a live TerraTrace analysis and is not counted in the homepage totals.
                 </footer>

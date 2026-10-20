@@ -1,17 +1,17 @@
 {
  "id": "noida-ghaziabad",
  "kind": "static-case-study",
- "generated_utc": "2026-10-20T12:12:03+00:00",
+ "generated_utc": "2026-10-20T18:14:32+00:00",
  "pipeline_version": "1.0.0",
  "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
  "study": {
   "name": "Noida, Greater Noida and Ghaziabad (Delhi NCR)",
   "short_name": "Noida–Ghaziabad",
   "districts": [
-   "Gautambudhnagar",
+   "Gautam Buddha Nagar",
    "Ghaziabad"
   ],
-  "boundary_source": "FAO GAUL 2025 (level 2)",
+  "boundary_source": "FAO GAUL 2025, level 2",
   "area_km2": 2329.975976275734,
   "area_km2_grid": 2335.3749,
   "years": [
@@ -78,10 +78,72 @@
   ],
   "method_summary": "Landsat Collection 2 Level-2 composites; 4-class Random Forest (200 trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface temperature from the Landsat thermal band (April–June primary, November–February secondary); UHI as urban core minus an equal-area rural ring."
  },
+ "headlines": [
+  {
+   "id": "built",
+   "value": "+53 km²",
+   "period": "2015→2025",
+   "title": "More built-up land",
+   "text": "Built-up land (including bare land) grew from 616 km² (26.4 % of the study area) in 2015 to 669 km² (28.7 %) in 2025, while population rose 20 % (GHSL; 2025 is a projection)."
+  },
+  {
+   "id": "farmland",
+   "value": "59 km²",
+   "period": "2015→2025",
+   "title": "The city grew mostly into farmland",
+   "text": "Most new built-up land replaced cropland: a net 59 km² of farmland became built-up, and cropland overall shrank by 73 km²."
+  },
+  {
+   "id": "vegetation",
+   "value": "+27 km²",
+   "period": "2015→2025",
+   "title": "Tree and vegetation cover rose slightly",
+   "text": "Tree/vegetation cover went from 6.0 % to 7.1 % of the study area (139 → 167 km²), possibly due to parks and plantations."
+  },
+  {
+   "id": "winter",
+   "value": "≈ +1.1 °C",
+   "period": "Nov–Feb",
+   "title": "Winter heat island in both years",
+   "text": "In November–February the urban core was +1.06 °C (2015) and +1.09 °C (2025) warmer than the countryside around it."
+  },
+  {
+   "id": "summer",
+   "value": "< 1 °C",
+   "period": "Apr–Jun",
+   "title": "Summer days: no clear city heat effect",
+   "text": "In April–June, around 10:30 local time, the urban core was within 1 °C of the countryside around it in both years (−0.55 °C in 2015, +0.50 °C in 2025)."
+  },
+  {
+   "id": "greener",
+   "value": "r ≈ −0.5",
+   "period": "NDVI–LST",
+   "title": "Greener areas are cooler",
+   "text": "Surface temperature falls as vegetation (NDVI) rises in both seasons and years (r −0.481 to −0.604) and rises with built-up surfaces (NDBI, r +0.441 to +0.627)."
+  }
+ ],
+ "caveats": [
+  {
+   "title": "Net, not gross, land-cover change",
+   "text": "Between 2015 and 2025, 154.8 km² of cropland was mapped as built-up, but 95.5 km² was mapped the other way. Built-up land rarely turns back into cropland: most of this reverse flow is confusion between bare harvested fields (counted as built-up) and cropland. The headline figures therefore use the net change (59.4 km²), and change patches of a few km² are within classification noise."
+  },
+  {
+   "title": "Agreement, not accuracy",
+   "text": "The land-cover maps agree with held-out reference labels for 91.4 % (2015) and 94.6 % (2025) of test points (kappa 0.885 and 0.928). These labels come from GLC-FCS30D and are restricted to pixels whose class did not change, which are easier to map, so the figures are optimistic. They are agreement with reference labels, not accuracy against ground truth; independent validation is still to be done."
+  },
+  {
+   "title": "The summer daytime result changes sign",
+   "text": "In April–June the urban core was −0.55 °C relative to its rural ring in 2015 (a cool island) and +0.50 °C in 2025 (a heat island). Both values are below 1 °C, and with one composite per season and year a change this small cannot be separated from year-to-year weather, so it is not read as a warming trend. A daytime cool island over dry, harvested farmland is known in pre-monsoon India (Shastri et al., 2017)."
+  },
+  {
+   "title": "Association, not cause",
+   "text": "Correlations describe how surface temperature varies with vegetation and built-up surfaces across pixels; on their own they do not show cause. Population and built-up area are compared at two time points (2015 and 2025) only."
+  }
+ ],
  "findings": [
   "Built-up land (including bare land) in Noida–Ghaziabad grew from 616 km² (26.4 %) in 2015 to 669 km² (28.7 %) in 2025, a net +53 km² (+9 %), while GHSL population rose +20 % (6.07 → 7.26 million; the 2025 figure is a GHSL projection).",
   "Cropland was the main source of new built-up land: 155 km² changed from cropland to built-up, but 95 km² was mapped the other way (mostly class confusion), leaving a net conversion of 59 km² and a net cropland change of -73 km².",
-  "Vegetation/tree cover did not decline: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation and the expected vegetation-loss step is not supported.",
+  "Vegetation/tree cover increased: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation.",
   "In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was -0.55 °C relative to its rural ring in 2015 (cool island) and +0.50 °C in 2025 (heat island), small values whose change of sign cannot be separated from weather with one composite per year, whereas November–February showed a consistent heat island (+1.06 °C and +1.09 °C).",
   "Cropland that became built-up between 2015 and 2025 changed by -0.01 SD in normalised April–June LST, against -0.11 SD for cropland that stayed cropland, a difference of +0.10 SD (+0.06 °C raw), i.e. slightly warmer than the unchanged class; conversion to built-up did not produce a clear summer temperature change."
  ],
@@ -156,12 +218,12 @@
   {
    "level": "CAUTION",
    "topic": "LULC change",
-   "message": "2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion (bare harvested fields are now inside Built-up (incl. bare land)); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline."
+   "message": "2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion, because bare harvested fields are counted in Built-up (incl. bare land); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline."
   },
   {
-   "level": "CAUTION",
-   "topic": "story",
-   "message": "2015→2025: Vegetation/Trees area INCREASED (139.3 → 166.8 km², +27.5 km²). This contradicts the expected 'vegetation loss' step; built-up growth here came mainly from cropland, not vegetation."
+   "level": "INFO",
+   "topic": "vegetation",
+   "message": "2015→2025: Vegetation/Trees area increased (139.3 → 166.8 km², +27.5 km²); built-up growth in this period came mainly from cropland, not vegetation."
   },
   {
    "level": "CAUTION",

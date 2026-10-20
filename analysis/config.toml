@@ -11,6 +11,8 @@ gaul_collection = "FAO/GAUL/2025/level2"
 gaul_country = "India"
 gaul_state = "Uttar Pradesh"
 gaul_districts = ["Gautambudhnagar", "Ghaziabad"]
+# How the districts are written in every report, map caption and web page (GAUL's own spelling above is only for the filter).
+district_labels = ["Gautam Buddha Nagar", "Ghaziabad"]
 # Working grid: UTM zone 43N (metres), 30 m Landsat pixels. Areas are pixel counts × 900 m².
 crs = "EPSG:32643"
 scale_m = 30
@@ -157,3 +159,12 @@ min_valid_fraction = 0.95
 lst_summer_mean_range = [20.0, 60.0]   # °C, class means outside this are flagged
 lst_winter_mean_range = [5.0, 35.0]
 lst_pixel_range = [-5.0, 75.0]         # °C, 1st/99th percentiles outside this are flagged
+
+# PDF report and data download for the website (export_report.py). The author line is printed exactly as written here
+# (title page, page footer, "How to cite", PDF metadata) — add co-authors here, nowhere else.
+[report]
+author = "Abhinav Sinha, Bennett University"
+title = "Urban growth and surface heat in Noida–Ghaziabad (Delhi NCR)"   # the study years are appended
+status = "Preliminary results — not peer reviewed"
+pdf_file = "terratrace-noida-ghaziabad-case-study.pdf"
+data_file = "terratrace-noida-ghaziabad-data.zip"

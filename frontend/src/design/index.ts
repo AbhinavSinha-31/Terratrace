@@ -1,6 +1,6 @@
 /** TERRATRACE design system — import UI building blocks from here. */
 export { TerratraceLogo, TerratraceMark, MARK_PATHS } from './Logo';
-export { Button, IconButton } from './Button';
+export { Button, IconButton, buttonClass } from './Button';
 export { Panel, Card, SectionLabel, Kbd, Divider } from './Surface';
 export { Badge, StatusDot, SeverityBadge, EvidenceBadge } from './Badge';
 export { Tooltip } from './Tooltip';
