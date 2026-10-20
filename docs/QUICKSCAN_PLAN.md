@@ -1,0 +1,94 @@
+# Quick scan — land, heat and carbon for any area
+
+Status: approved 2026-10-21, implemented on branch `quickscan` (from `case-study-noida`; never merged into `main` without review).
+
+A light, on-request scan for any searched or drawn area, next to the forest-change analysis. It is not a replacement for
+the research pipeline in `analysis/` (custom Random Forest, raster downloads, ~25 min of Earth Engine per run), which
+stays the *Research case study* tier.
+
+## Decisions (user, 2026-10-21)
+
+1. **Land cover: Dynamic World** (`GOOGLE/DYNAMICWORLD/V1`). ESA WorldCover v200 (2021) is used only as a cross-check.
+2. **Carbon: "above-ground tree biomass carbon (ESA CCI)"** from `ESA/CCI/Above_Ground_Biomass/V6_0`, designed so a
+   broader carbon source (e.g. soil organic carbon) can be added later as another component.
+3. **Tier 1 is named "Research case study"** (not "verified research": its accuracy is agreement with reference labels).
+4. **The quick scan runs behind a "Run quick scan" button**; it is never started automatically.
+
+## Tiers shown in the interface
+
+| Tier | What | Example |
+|---|---|---|
+| Research case study | Custom classifier, validated pipeline, PDF report; accuracy reported as agreement with reference labels | Noida–Ghaziabad |
+| Live analysis | TerraTrace forest-change method with its validity checks | the four featured forests, any area |
+| Quick scan | Computed on request from public datasets; **not validated for this area** | any area, on request |
+
+Quick-scan numbers never enter the homepage "Detected change" totals.
+
+## What a quick scan computes
+
+**Land surface temperature (LST).** Landsat 8/9 Collection 2 Level-2 thermal band, with exactly the research pipeline's
+per-scene masking (QA_PIXEL cloud/shadow/snow, QA_RADSAT, `ST_QA` ≤ 5 K, `ST_EMIS` ≥ 0.90, scale factors) — imported from
+`analysis/terratrace_analysis/landsat.py`, not copied. Per-pixel median of clear scenes for the scan year (all months by
+default; a season can be chosen). Fewer than 5 usable scenes → UNAVAILABLE.
+
+**Land cover.** Dynamic World annual composite for the scan year: mean probability per class, top class wins; 10 m
+resampled to 30 m by mode for the statistics. Pixels whose top probability is below 0.5 are counted as *low confidence*.
+Labelled "Land cover from Dynamic World (Google/WRI), {year}" — never "TerraTrace classification".
+Cross-check: share of pixels where the Dynamic World class agrees with ESA WorldCover 2021 (mapped to the same groups).
+
+**Mean LST per class** and a **simple surface UHI** = mean LST of built-up land − mean LST of other land (water excluded),
+reported only when built-up land is ≥ 5 % of the land and ≥ 2 km² (and the rest also ≥ 2 km²). Labelled
+"simple surface UHI (built − non-built)"; the core-vs-ring method stays in the research tier.
+
+**Above-ground tree biomass carbon (ESA CCI).** `agb` (Mg/ha, oven-dry woody biomass of living trees) × 0.47 (IPCC
+default carbon fraction) → t C/ha and total t C, for the latest CCI year (2022), with a range from `agb_sd`. Excludes
+roots, dead wood, litter and soil. The result is a list of carbon *components*; soil carbon can be added later as a
+second component without changing the others.
+
+## How it runs
+
+- **One grouped Earth Engine request per scan** returns class areas, LST per class, the UHI inputs, carbon sums,
+  valid fractions, scene counts and the WorldCover agreement.
+- **Cached** in `backend/.cache/quickscan/<aid>-<year>-<season>-<QUICKSCAN_VERSION>.json`. A failure is UNAVAILABLE with
+  a public reason and is **not** cached. A method change bumps `QUICKSCAN_VERSION`.
+- **Background job** after the user presses *Run quick scan*; one at a time on the analysis workers; its own rate limit.
+  Same interactive area limit as the analysis (1,500 km²).
+- **Restricted mode** (Earth Engine noncommercial quota exceeded): new scans are refused with an honest reason; stored
+  results still open.
+- **Map layers** (LST, Dynamic World land cover, biomass carbon) are served through the existing `/api/tiles` proxy and
+  disk cache; tiles are created lazily on first view. No credentials reach the browser.
+
+## Earth Engine use during development
+
+Offline, mocked tests only. When the code is complete, ask the user before any live probe; then run **one** small area
+(~50 km²) first and time it.
+
+## Chatbot
+
+May quote, as cited facts with dataset and year: Dynamic World class areas, mean LST (with year, season, scene count),
+the simple UHI (with its method name), biomass carbon (as a range, "ESA CCI {year} × 0.47"). May not: call any of these a
+TerraTrace classification, state trends between years without two stored scans, make causal claims, or present biomass
+carbon as total ecosystem carbon. Dynamic World "trees" must never pass the validator as forest cover.
+
+## Phases
+
+- **A** — backend provider + service, offline tests with mocked Earth Engine.
+- **B** — tile kinds for LST, Dynamic World and biomass carbon via `/api/tiles`.
+- **C** — frontend "Land, heat & carbon" tab, layers, legends, labels, tier badges, phone layout.
+- **D** — chatbot facts and validator tests (°C, km², t C/ha; DW trees ≠ forest cover).
+
+After each phase: typecheck, build and the full backend suite green; commit.
+
+## Risks
+
+Quota (every scan adds EE use); three different tree numbers on one screen (Dynamic World, Hansen, the forest
+analysis) — each labelled with its dataset; carbon year (2022) differs from the scan year; CCI biomass is
+forest-oriented (urban/cropland values uncertain); cloudy regions may not reach 5 scenes; LST colours use each area's
+own range (legend shows the values).
+
+## Sources
+
+- Dynamic World V1 — https://developers.google.com/earth-engine/datasets/catalog/GOOGLE_DYNAMICWORLD_V1
+- ESA WorldCover v200 — https://developers.google.com/earth-engine/datasets/catalog/ESA_WorldCover_v200
+- ESA CCI Above-Ground Biomass v6.0 — https://developers.google.com/earth-engine/datasets/catalog/ESA_CCI_Above_Ground_Biomass_V6_0
+- Landsat Collection 2 Level-2 — https://developers.google.com/earth-engine/datasets/catalog/LANDSAT_LC08_C02_T1_L2
