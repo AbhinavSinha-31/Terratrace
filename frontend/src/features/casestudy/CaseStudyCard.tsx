@@ -24,8 +24,8 @@ export function CaseStudyCard({ meta, index, cell }: { meta: CaseStudyMeta; inde
       aria-label={`Open case study: ${meta.name}`}
     >
       <div className="relative h-[clamp(76px,10.5vh,124px)] overflow-hidden bg-[#0b0f12]">
-        <img src={meta.thumbnail_url} alt="" loading="lazy"
-          className="h-full w-full scale-105 object-cover transition duration-700 ease-out group-hover:scale-[1.12]" />
+        {data?.thumbnail_url && <img src={data.thumbnail_url} alt="" loading="lazy"
+          className="h-full w-full scale-105 object-cover transition duration-700 ease-out group-hover:scale-[1.12]" />}
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-[#0b0f12]" />
         <div className="absolute left-3 top-3 flex gap-1.5">
           <span className="tt-img-badge">{meta.country}</span>

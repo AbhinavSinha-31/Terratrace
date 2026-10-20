@@ -266,7 +266,7 @@ def main() -> None:
     sensors = {str(y): " + ".join(names[s] for s in T.meta[y]["sensors"]) for y in T.years}
     doc = {
         "id": CASE_ID, "kind": "static-case-study", "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "pipeline_version": __version__, "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
+        "pipeline_version": __version__, "thumbnail_url": cfg.raw["website"]["thumbnail_url"], "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
         "study": {
             "name": cfg.study["name"], "short_name": cfg.study["short_name"], "districts": cfg.study.get("district_labels", cfg.study["gaul_districts"]),
             "boundary_source": "FAO GAUL 2025, level 2", "area_km2": T.aoi_area["area_km2_geodesic"], "area_km2_grid": T.aoi_area["area_km2_grid"],

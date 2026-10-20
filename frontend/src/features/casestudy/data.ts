@@ -11,14 +11,10 @@ export interface CaseStudyMeta {
   country: string;
   region: string;
   subtitle: string;
-  /** Card image: the same true-colour source and zoom as the live featured cards (Sentinel-2 cloudless 2025 by EOX,
-   *  one z10 tile over the urban core; credited in About). Not derived from the case study's own rasters. */
-  thumbnail_url: string;
 }
 
 export const CASE_STUDIES: CaseStudyMeta[] = [
-  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & surface heat',
-    thumbnail_url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg' },
+  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & surface heat' },
 ];
 
 export const caseStudyMeta = (id: string) => CASE_STUDIES.find((c) => c.id === id) ?? null;
@@ -32,6 +28,9 @@ export interface CaseStudyDoc {
   id: string;
   generated_utc: string;
   pipeline_version: string;
+  /** Card image URL, from the case study's data (config.toml [website]), like the live cards' backend metadata —
+   *  imagery URLs are never built in frontend source. */
+  thumbnail_url: string;
   study: {
     name: string; short_name: string; districts: string[]; boundary_source: string; area_km2: number; area_km2_grid: number;
     years: number[]; sensors: Record<string, string>; scenes: { year: number; season: Season | 'annual'; scenes: number }[];

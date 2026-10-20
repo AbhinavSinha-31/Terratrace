@@ -1,8 +1,9 @@
 {
  "id": "noida-ghaziabad",
  "kind": "static-case-study",
- "generated_utc": "2026-10-20T18:14:32+00:00",
+ "generated_utc": "2026-10-20T20:26:44+00:00",
  "pipeline_version": "1.0.0",
+ "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg",
  "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
  "study": {
   "name": "Noida, Greater Noida and Ghaziabad (Delhi NCR)",

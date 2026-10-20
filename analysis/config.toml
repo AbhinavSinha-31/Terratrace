@@ -160,6 +160,12 @@ lst_summer_mean_range = [20.0, 60.0]   # °C, class means outside this are flagg
 lst_winter_mean_range = [5.0, 35.0]
 lst_pixel_range = [-5.0, 75.0]         # °C, 1st/99th percentiles outside this are flagged
 
+# Website presentation of the case study (export_case_study.py).
+[website]
+# Homepage card image: the same true-colour basemap the live featured cards use (Sentinel-2 cloudless 2025 by EOX, one
+# z10 tile over the urban core; credited in the app's About). Not derived from this study's rasters.
+thumbnail_url = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg"
+
 # PDF report and data download for the website (export_report.py). The author line is printed exactly as written here
 # (title page, page footer, "How to cite", PDF metadata) — add co-authors here, nowhere else.
 [report]
