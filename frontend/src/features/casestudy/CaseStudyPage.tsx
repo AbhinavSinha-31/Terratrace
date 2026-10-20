@@ -50,6 +50,24 @@ function Table({ children, minWidth = 520 }: { children: ReactNode; minWidth?: n
     </div>
   );
 }
+/** Phones (< 640 px): a table's rows as cards, so no column is ever off-screen. The table itself is shown from sm up. */
+interface PhoneCard { key: string; title: ReactNode; aside?: ReactNode; rows: [ReactNode, ReactNode][] }
+function PhoneCards({ items, testId }: { items: PhoneCard[]; testId: string }) {
+  return (
+    <ul className="space-y-2 sm:hidden" data-testid={testId}>
+      {items.map((it) => (
+        <li key={it.key} className="rounded-md border border-line px-3 py-2.5 text-[12.5px]">
+          <div className="flex items-center justify-between gap-2"><span className="text-ink">{it.title}</span>{it.aside}</div>
+          {it.rows.map(([label, value], i) => (
+            <div key={i} className={`${i ? 'mt-0.5' : 'mt-1.5'} flex justify-between gap-3 text-ink-2`}><span>{label}</span><span className="t-data shrink-0 text-ink">{value}</span></div>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+const seasonShort = (s: Season) => (s === 'summer' ? 'Apr–Jun' : 'Nov–Feb');
+
 const th = 'border-b border-line px-2 py-1.5 text-left font-medium text-ink-3';
 const thr = `${th} text-right`;
 const td = 'border-b border-line/60 px-2 py-1.5 text-ink-2';
@@ -237,24 +255,12 @@ function Heat({ d }: { d: CaseStudyDoc }) {
         </div>
         <div>
           <h3 className="t-label mb-2 text-ink-3">Urban heat island intensity (urban − rural)</h3>
-          {/* Phones: one card per year and season, so the result is never off-screen. */}
-          <ul className="space-y-2 sm:hidden" data-testid="case-study-uhi-cards">
-            {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => {
-              const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
-              const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
-              if (!core) return null;
-              return (
-                <li key={`${s}-${y}`} className="rounded-md border border-line px-3 py-2.5 text-[12.5px]">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-ink">{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</span>
-                    <IslandBadge result={core.result} />
-                  </div>
-                  <div className="mt-1.5 flex justify-between gap-2 text-ink-2"><span>Core − ring (primary)</span><span className="t-data text-ink">{signedC(core.uhi_c)}</span></div>
-                  <div className="mt-0.5 flex justify-between gap-2 text-ink-2"><span>Built-up − rest</span><span className="t-data text-ink">{bu ? signedC(bu.uhi_c) : '—'}</span></div>
-                </li>
-              );
-            }))}
-          </ul>
+          <PhoneCards testId="case-study-uhi-cards" items={(['summer', 'winter'] as Season[]).flatMap((s) => ys.flatMap((y): PhoneCard[] => {
+            const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
+            const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
+            return core ? [{ key: `${s}-${y}`, title: `${y} · ${seasonShort(s)}`, aside: <IslandBadge result={core.result} />,
+              rows: [['Core − ring (primary)', signedC(core.uhi_c)], ['Built-up − rest', bu ? signedC(bu.uhi_c) : '—']] }] : [];
+          }))} />
           <div className="hidden sm:block">
             <Table minWidth={460}>
               <thead><tr><th className={th}>Year · season</th><th className={thr}>Core − ring (primary)</th><th className={thr}>Built-up − rest</th><th className={th}>Result</th></tr></thead>
@@ -285,14 +291,21 @@ function Heat({ d }: { d: CaseStudyDoc }) {
         <Figure id={d.id} img={d.images.uhi_zones[String(ys[ys.length - 1])]} alt="Urban core and rural ring zones" caption={`UHI zones (urban core and rural ring), ${ys[ys.length - 1]}`} />
         <div className="space-y-2">
           <h3 className="t-label text-ink-3">Did land that became built-up warm? (key test)</h3>
-          <Table minWidth={420}>
-            <thead><tr><th className={th}>Group · {SEASON[season]}</th><th className={thr}>km²</th><th className={thr}>ΔLST</th><th className={thr}>Δ normalised</th></tr></thead>
-            <tbody>
-              {d.conversion.filter((c) => c.season === season).map((c) => (
-                <tr key={`${c.period}-${c.group}`}><td className={td}>{c.group}</td><td className={tdr}>{km2(c.area_km2)}</td><td className={tdr}>{signedC(c.delta_lst_c)}</td><td className={tdr}>{fmtDelta(c.delta_z, 2)} SD</td></tr>
-              ))}
-            </tbody>
-          </Table>
+          <p className="text-[11.5px] text-ink-3 sm:hidden">{SEASON[season]}</p>
+          <PhoneCards testId="case-study-conversion-cards" items={d.conversion.filter((c) => c.season === season).map((c) => ({
+            key: `${c.period}-${c.group}`, title: c.group,
+            rows: [['Area', `${km2(c.area_km2)} km²`], ['ΔLST', signedC(c.delta_lst_c)], ['Δ normalised', `${fmtDelta(c.delta_z, 2)} SD`]],
+          }))} />
+          <div className="hidden sm:block">
+            <Table minWidth={420}>
+              <thead><tr><th className={th}>Group · {SEASON[season]}</th><th className={thr}>km²</th><th className={thr}>ΔLST</th><th className={thr}>Δ normalised</th></tr></thead>
+              <tbody>
+                {d.conversion.filter((c) => c.season === season).map((c) => (
+                  <tr key={`${c.period}-${c.group}`}><td className={td}>{c.group}</td><td className={tdr}>{km2(c.area_km2)}</td><td className={tdr}>{signedC(c.delta_lst_c)}</td><td className={tdr}>{fmtDelta(c.delta_z, 2)} SD</td></tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
           <p className="text-[11.5px] leading-snug text-ink-3">Normalised LST = (LST − study-area mean) / SD for that season and year, so a hotter year as a whole does not count as warming.</p>
         </div>
       </div>
@@ -305,19 +318,26 @@ function Correlations({ d }: { d: CaseStudyDoc }) {
   const r = (y: number, s: Season, i: 'NDVI' | 'NDBI') => d.correlations.find((c) => c.year === y && c.season === s && c.index === i);
   return (
     <Section id="cs-correlations" title="Temperature vs vegetation and built-up indices" kicker="Pearson r over all land pixels (water excluded)">
-      <Table minWidth={460}>
-        <thead><tr><th className={th}>Year · season</th><th className={thr}>LST vs NDVI r</th><th className={thr}>LST vs NDBI r</th><th className={thr}>Pixels</th></tr></thead>
-        <tbody data-testid="case-study-correlations">
-          {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => (
-            <tr key={`${s}-${y}`}>
-              <td className={td}>{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</td>
-              <td className={tdr}>{r(y, s, 'NDVI') ? signedR(r(y, s, 'NDVI')!.r) : '—'}</td>
-              <td className={tdr}>{r(y, s, 'NDBI') ? signedR(r(y, s, 'NDBI')!.r) : '—'}</td>
-              <td className={tdr}>{r(y, s, 'NDVI')?.n_pixels.toLocaleString('en-US') ?? '—'}</td>
-            </tr>
-          )))}
-        </tbody>
-      </Table>
+      <PhoneCards testId="case-study-correlation-cards" items={(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y): PhoneCard => ({
+        key: `${s}-${y}`, title: `${y} · ${seasonShort(s)}`,
+        rows: [['LST vs NDVI r', r(y, s, 'NDVI') ? signedR(r(y, s, 'NDVI')!.r) : '—'], ['LST vs NDBI r', r(y, s, 'NDBI') ? signedR(r(y, s, 'NDBI')!.r) : '—'],
+          ['Pixels', r(y, s, 'NDVI')?.n_pixels.toLocaleString('en-US') ?? '—']],
+      })))} />
+      <div className="hidden sm:block">
+        <Table minWidth={460}>
+          <thead><tr><th className={th}>Year · season</th><th className={thr}>LST vs NDVI r</th><th className={thr}>LST vs NDBI r</th><th className={thr}>Pixels</th></tr></thead>
+          <tbody data-testid="case-study-correlations">
+            {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => (
+              <tr key={`${s}-${y}`}>
+                <td className={td}>{y} · {s === 'summer' ? 'Apr–Jun' : 'Nov–Feb'}</td>
+                <td className={tdr}>{r(y, s, 'NDVI') ? signedR(r(y, s, 'NDVI')!.r) : '—'}</td>
+                <td className={tdr}>{r(y, s, 'NDBI') ? signedR(r(y, s, 'NDBI')!.r) : '—'}</td>
+                <td className={tdr}>{r(y, s, 'NDVI')?.n_pixels.toLocaleString('en-US') ?? '—'}</td>
+              </tr>
+            )))}
+          </tbody>
+        </Table>
+      </div>
       <p className="mt-2 text-[11.5px] leading-snug text-ink-3">All p &lt; 0.001 on a 300 m thinned grid (neighbouring 30 m pixels are not independent); with this many pixels the size of r is what matters.</p>
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Figure id={d.id} img={d.images.charts.scatter_lst_indices_summer} alt="LST against NDVI and NDBI, April–June" caption="April–June (primary)" />
