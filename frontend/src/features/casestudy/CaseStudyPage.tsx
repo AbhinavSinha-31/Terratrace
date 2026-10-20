@@ -81,7 +81,7 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
       <dl className="grid grid-cols-1 gap-3 text-[12.5px] sm:grid-cols-3">
         <div className="tt-panel p-3">
           <dt className="t-label text-ink-3">Study area</dt>
-          <dd className="mt-1 text-ink"><span className="t-data">{km2(d.study.area_km2)} km²</span><span className="text-ink-3"> · {d.study.districts.join(' + ')} districts ({d.study.boundary_source})</span></dd>
+          <dd className="mt-1 text-ink"><span className="t-data">{Math.round(d.study.area_km2).toLocaleString('en-US')} km²</span><span className="text-ink-3"> · {d.study.districts.join(' + ')} districts ({d.study.boundary_source})</span></dd>
         </div>
         <div className="tt-panel p-3">
           <dt className="t-label text-ink-3">Years and sensors</dt>
@@ -353,7 +353,8 @@ function Limitations({ d }: { d: CaseStudyDoc }) {
   return (
     <Section id="cs-limitations" title="Limitations">
       <ul className="tt-panel space-y-2 p-4 text-[12.5px] leading-relaxed text-ink-2" data-testid="case-study-limitations">
-        {d.limitations.map((l, i) => <li key={i}><b className="font-medium text-ink">{l.title}.</b> {l.text}</li>)}
+        {/* Joined exactly as in results_summary.md: the bold lead carries its own punctuation. */}
+        {d.limitations.map((l, i) => <li key={i}><b className="font-medium text-ink">{l.title}</b>{/^[;,.:]/.test(l.text) ? '' : ' '}{l.text}</li>)}
       </ul>
     </Section>
   );

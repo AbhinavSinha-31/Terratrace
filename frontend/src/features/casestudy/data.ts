@@ -11,10 +11,14 @@ export interface CaseStudyMeta {
   country: string;
   region: string;
   subtitle: string;
+  /** Card image: the same true-colour source and zoom as the live featured cards (Sentinel-2 cloudless 2025 by EOX,
+   *  one z10 tile over the urban core; credited in About). Not derived from the case study's own rasters. */
+  thumbnail_url: string;
 }
 
 export const CASE_STUDIES: CaseStudyMeta[] = [
-  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & surface heat' },
+  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & surface heat',
+    thumbnail_url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg' },
 ];
 
 export const caseStudyMeta = (id: string) => CASE_STUDIES.find((c) => c.id === id) ?? null;
@@ -54,7 +58,7 @@ export interface CaseStudyDoc {
   masking: { rule: string; impact: Record<string, number | string | boolean>[] };
   images: {
     lulc: Record<string, ImageRef>; lst_summer: Record<string, ImageRef>; lst_winter: Record<string, ImageRef>;
-    change: Record<string, ImageRef>; uhi_zones: Record<string, ImageRef>; charts: Record<string, ImageRef>; thumbnail: ImageRef;
+    change: Record<string, ImageRef>; uhi_zones: Record<string, ImageRef>; charts: Record<string, ImageRef>;
   };
   cross_checks: string[];
 }

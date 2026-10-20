@@ -135,7 +135,11 @@ function OverviewPanel() {
       <div className="my-3.5 h-px bg-line" />
       <div>
         <div className="text-[12px] text-ink-3">Featured investigations</div>
-        <div className="t-data mt-1 text-[26px] font-medium leading-none">{n ? String(n).padStart(2, '0') : '—'}</div>
+        {/* Live investigations only; the static case studies are listed beside the number, never added to it. */}
+        <div className="mt-1 flex items-baseline gap-2" data-testid="overview-featured-count">
+          <span className="t-data text-[26px] font-medium leading-none">{n ? String(n).padStart(2, '0') : '—'}</span>
+          <span className="text-[12px] text-ink-2">live{CASE_STUDIES.length > 0 && ` · ${CASE_STUDIES.length} case ${CASE_STUDIES.length === 1 ? 'study' : 'studies'}`}</span>
+        </div>
         <div className="mt-1 text-[10.5px] text-ink-4">Any area on Earth can be analysed</div>
       </div>
     </section>
@@ -168,7 +172,20 @@ function DataSourcesPanel() {
 }
 
 // ---------------------------------------------------------------- featured
-function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: number; highlight: boolean }) {
+/**
+ * Featured row layout. Phones: a snap-scrolling row (the next card peeks in). From `sm`: a 6-column grid — two cards
+ * per row, and from `lg` 3 + 2 (a full row of three spans 2 columns each, a last row of two spans 3, a lone last card
+ * the whole row). Cards are never squeezed into one row, so titles and labels are not cut off.
+ */
+const FEATURED_ROW = 'no-scrollbar -mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-6 sm:overflow-visible sm:px-0';
+function featuredCell(i: number, n: number): string {
+  const sm = n % 2 === 1 && i === n - 1 ? 'sm:col-span-6' : 'sm:col-span-3';
+  const tail = n % 3;
+  const lg = i < n - tail ? 'lg:col-span-2' : tail === 2 ? 'lg:col-span-3' : 'lg:col-span-6';
+  return `w-[min(300px,82vw)] shrink-0 snap-start sm:w-auto ${sm} ${lg}`;
+}
+
+function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index: number; highlight: boolean; cell: string }) {
   const open = useUi((s) => s.openAnalysis);
   const hover = useUi((s) => s.hoverAoi);
   const hovered = useUi((s) => s.hoveredAoiId === area.id);
@@ -188,7 +205,7 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
       }}
       data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}
-      className={`tt-card group relative flex min-w-[260px] flex-col xl:min-w-0 overflow-hidden rounded-lg text-left ${hovered || highlight ? 'is-hover' : ''}`}
+      className={`tt-card group relative flex flex-col overflow-hidden rounded-lg text-left ${cell} ${hovered || highlight ? 'is-hover' : ''}`}
       aria-label={`Open featured investigation: ${area.name}`}
     >
       <div className="relative h-[clamp(76px,10.5vh,124px)] overflow-hidden">
@@ -202,7 +219,7 @@ function FeaturedCard({ area, index, highlight }: { area: StudyArea; index: numb
       <div className="flex flex-1 flex-col px-4 pb-3.5 pt-2.5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold tracking-[-0.005em] text-ink">{area.name}</div>
+            <div className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-[-0.005em] text-ink" title={area.name}>{area.name}</div>
             <div className="mt-0.5 truncate text-[12px] text-ink-3">{area.tags[0] ?? area.biome}</div>
           </div>
           <ChevronRight size={18} className="mt-0.5 shrink-0 text-ink-3 transition group-hover:translate-x-1 group-hover:text-accent" />
@@ -275,13 +292,16 @@ function Featured() {
       </div>
       {/* Live investigations from the backend, then the static case studies — which need no backend, so they stay
           visible (and are never counted in the live totals) even when the investigations cannot be loaded. */}
-      <div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pb-1 xl:grid xl:grid-cols-5 xl:overflow-visible">
+      <div className={FEATURED_ROW}>
         {isError && (
-          <div className="tt-panel min-w-[260px] xl:col-span-4"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>
+          <div className="tt-panel w-[min(300px,82vw)] shrink-0 sm:col-span-6 sm:w-auto"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>
         )}
-        {isLoading && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[200px] min-w-[260px] rounded-lg" />)}
-        {data?.items.map((a, i) => <FeaturedCard key={a.id} area={a} index={i} highlight={highlight} />)}
-        {CASE_STUDIES.map((c, i) => <CaseStudyCard key={c.id} meta={c} index={(data?.items.length ?? 4) + i} />)}
+        {isLoading && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className={`h-[200px] rounded-lg ${featuredCell(i, 4 + CASE_STUDIES.length)}`} />)}
+        {data?.items.map((a, i) => <FeaturedCard key={a.id} area={a} index={i} highlight={highlight} cell={featuredCell(i, data.items.length + CASE_STUDIES.length)} />)}
+        {CASE_STUDIES.map((c, i) => {
+          const live = data?.items.length ?? (isLoading ? 4 : 0);
+          return <CaseStudyCard key={c.id} meta={c} index={live + i} cell={featuredCell(live + i, live + CASE_STUDIES.length)} />;
+        })}
       </div>
     </section>
   );

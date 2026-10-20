@@ -1,7 +1,7 @@
 {
  "id": "noida-ghaziabad",
  "kind": "static-case-study",
- "generated_utc": "2026-10-18T21:17:06+00:00",
+ "generated_utc": "2026-10-20T12:12:03+00:00",
  "pipeline_version": "1.0.0",
  "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
  "study": {
@@ -87,11 +87,11 @@
  ],
  "limitations": [
   {
-   "title": "Accuracy is agreement with reference labels, not true accuracy",
+   "title": "Accuracy is agreement with reference labels, not true accuracy.",
    "text": "Training and test points come from the same GLC-FCS30D-derived labels, restricted to temporally stable pixels (easier than changing ones) and spatially clustered; the figures are optimistic. Independent, stratified validation points (outputs/validation, 50 per class per year) still have to be interpreted on high-resolution imagery."
   },
   {
-   "title": "Built-up includes bare land",
+   "title": "Built-up includes bare land.",
    "text": "Barren/Open land could not be trained (86 and 14 label pixels) and was merged into Built-up in every year; construction sites and cleared plots therefore count as built-up."
   },
   {
@@ -103,19 +103,19 @@
    "text": "; small transitions (a few km²) are within classification noise."
   },
   {
-   "title": "One overpass time",
+   "title": "One overpass time.",
    "text": "Landsat sees ~10:30 local time only; night-time UHI (usually the strongest) is not measured."
   },
   {
-   "title": "One composite per season per year",
+   "title": "One composite per season per year.",
    "text": "Year-to-year weather differences affect absolute LST; UHI intensity and normalised LST reduce but do not remove this."
   },
   {
-   "title": "Thermal resolution",
+   "title": "Thermal resolution.",
    "text": "LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed."
   },
   {
-   "title": "Rural ring inside the study area",
+   "title": "Rural ring inside the study area.",
    "text": "East Delhi (urban) borders the study area to the west, so the ring is restricted to the districts; its location differs between years with the urban core."
   },
   {
@@ -1041,12 +1041,6 @@
     "height": 487,
     "bytes": 34434
    }
-  },
-  "thumbnail": {
-   "file": "thumbnail.webp",
-   "width": 640,
-   "height": 240,
-   "bytes": 43050
   }
  },
  "cross_checks": [

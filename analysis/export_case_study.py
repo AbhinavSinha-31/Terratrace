@@ -11,6 +11,8 @@ same code that writes results_summary.md (terratrace_analysis.report), so the pa
 Re-runnable: when 2005 is added to the pipeline, run this again and the page shows all three years.
 
 Output: frontend/public/case-studies/<id>/case-study.json and *.webp (each image ≤ ~480 KB).
+The homepage card image is not exported here: it is the same true-colour basemap tile the live featured cards use
+(see frontend/src/features/casestudy/data.ts), not a land-cover or temperature map.
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from PIL import Image
 
@@ -52,26 +53,6 @@ def webp(src: Path, dest: Path, width: int) -> dict:
     return {"file": dest.name, "width": im.width, "height": im.height, "bytes": dest.stat().st_size}
 
 
-def thumbnail(cfg, year: int, dest: Path) -> dict:
-    """Card image: the year's LULC raster around the urban core (no axes or text), 640 × 240 px."""
-    lulc = np.load(CACHE / str(year) / "lulc.npy")
-    aoi = np.load(CACHE / "aoi_mask.npy").astype(bool)
-    core = np.load(CACHE / str(year) / "urban_core.npy")
-    rgb = np.zeros((*lulc.shape, 3), np.uint8)
-    rgb[:] = (11, 15, 18)                                   # page background outside the study area
-    for c in cfg.classes:
-        h = c.color.lstrip("#")
-        rgb[(lulc == c.code) & aoi] = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-    r, cidx = np.nonzero(core)
-    cy, cx = int(np.median(r)), int(np.median(cidx))
-    h, w = 450, 1200
-    y0 = min(max(cy - h // 2, 0), lulc.shape[0] - h)
-    x0 = min(max(cx - w // 2, 0), lulc.shape[1] - w) if lulc.shape[1] > w else 0
-    crop = Image.fromarray(rgb[y0:y0 + h, x0:x0 + w]).resize((640, 240), Image.LANCZOS)
-    crop.save(dest, "WEBP", quality=82, method=6)
-    return {"file": dest.name, "width": 640, "height": 240, "bytes": dest.stat().st_size}
-
-
 # ----------------------------------------------------------------------------- report sentences (verbatim)
 def _section(fn, T) -> list[str]:
     lines: list[str] = []
@@ -88,7 +69,8 @@ def limitations(T) -> list[dict]:
     for l in _section(report.s9_limits, T):
         m = re.match(r"^- \*\*(.+?)\*\*\s*(.*)$", l)
         if m:
-            out.append({"title": m.group(1).rstrip("."), "text": m.group(2).strip(), "markdown": l})
+            # The bold lead keeps its own punctuation ("…accuracy." / "…two maps" + "; small …"), as in the summary.
+            out.append({"title": m.group(1), "text": m.group(2).strip(), "markdown": l})
     return out
 
 
@@ -174,7 +156,6 @@ def main() -> None:
         images["charts"][name] = webp(OUT / "charts" / f"{name}.png", DEST / f"{name}.webp", 1200)
     for p in sorted((OUT / "charts").glob("conversion_lst_change_*.png")):
         images["charts"][p.stem] = webp(p, DEST / f"{p.stem}.webp", 1200)
-    images["thumbnail"] = thumbnail(cfg, T.years[-1], DEST / "thumbnail.webp")
 
     sensors = {str(y): " + ".join(names[s] for s in T.meta[y]["sensors"]) for y in T.years}
     doc = {
@@ -204,7 +185,7 @@ def main() -> None:
     }
     (DEST / "case-study.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
     sizes = sorted(((p.stat().st_size, p.name) for p in DEST.iterdir()), reverse=True)
-    print(f"wrote {DEST} — {len(sizes)} files, {sum(s for s, _ in sizes) / 1e6:.2f} MB; largest: "
+    print(f"wrote {DEST.relative_to(ROOT.parent).as_posix()} — {len(sizes)} files, {sum(s for s, _ in sizes) / 1e6:.2f} MB; largest: "
           + ", ".join(f"{n} {s / 1e3:.0f} KB" for s, n in sizes[:3]))
     print(f"cross-checks: {len(cross)} passed; findings/limitations verbatim in results_summary.md: {len(F)}/{len(LIM)}")
 
