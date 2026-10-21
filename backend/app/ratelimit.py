@@ -33,13 +33,14 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("GET", re.compile(r"^/api/search$"), "search"),
     ("POST", re.compile(r"^/api/explain$"), "explain"),
     ("POST", re.compile(r"^/api/chat(?:/stream)?$"), "chat"),   # the streaming route shares the chat limit
+    ("POST", re.compile(r"^/api/quickscan/[^/]+$"), "quickscan"),   # starts one Earth Engine request
 ]
 
 
 def limit_for(group: str) -> int:
     return {"analysis": settings.rate_analysis_per_min, "compute": settings.rate_compute_per_min,
             "search": settings.rate_search_per_min, "explain": settings.rate_explain_per_min,
-            "chat": settings.rate_chat_per_min}[group]
+            "chat": settings.rate_chat_per_min, "quickscan": settings.rate_quickscan_per_min}[group]
 
 
 def group_of(method: str, path: str) -> str | None:

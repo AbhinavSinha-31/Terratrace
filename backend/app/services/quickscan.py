@@ -1,0 +1,341 @@
+"""Quick scan — surface temperature, land cover and above-ground tree biomass carbon for any area, on request.
+
+Tier "Quick scan": computed from public datasets, NOT validated for the area (docs/QUICKSCAN_PLAN.md). It never enters
+the forest "Detected change" totals and is never called a TerraTrace classification. Every value carries its dataset,
+year and resolution.
+
+Runs only when a user presses "Run quick scan" (POST /api/quickscan/{aid}), as a background job on the analysis
+workers (one Earth Engine request, providers/earth_engine/quickscan.py). A finished scan is stored in
+cache_dir/quickscan/<aid>-<year>-<season>-<version>.json and opens instantly afterwards. A FAILURE (Earth Engine error,
+timeout) is reported as UNAVAILABLE with a public reason and is not stored, so it can be run again. A measured shortage
+(e.g. fewer than 5 usable Landsat scenes) is a result and is stored, like any other measurement. New scans are refused
+while Earth Engine reports restricted mode (quota exhausted); stored scans still open.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import time
+from datetime import date, datetime, timezone
+from typing import Any, Callable
+
+from ..config import settings
+from ..lru import LRUDict
+from ..providers.earth_engine import provider as P
+from ..providers.earth_engine import quickscan as Q
+from . import analysis
+
+log = logging.getLogger("terratrace.quickscan")
+
+CACHE = settings.cache_dir / "quickscan"
+TIER = "quick_scan"
+LABEL = "Quick scan · public datasets, not validated for this area"
+FIRST_YEAR = 2016                     # first full year of Dynamic World (from 2015-06-27)
+DEFAULT_SEASON = "all"
+UHI_MIN_SHARE = 0.05                  # built-up land must be ≥ 5 % of the land …
+UHI_MIN_HA = 200.0                    # … and ≥ 2 km² (and the rest of the land ≥ 2 km² too)
+FAILURE_TTL_S = 120.0                 # a failed scan is not retried by itself; a new request after this runs again
+RESTRICTED_RECENT_S = 3600.0          # restricted mode seen within this window → new scans are refused
+
+# Dynamic World classes (index = label value), display names and the WorldCover-style colours used on the map.
+DW_CLASSES = [
+    ("water", "Water", "#419bdf"), ("trees", "Trees", "#397d49"), ("grass", "Grass", "#88b053"),
+    ("flooded_vegetation", "Flooded vegetation", "#7a87c6"), ("crops", "Crops", "#e49635"),
+    ("shrub_and_scrub", "Shrub and scrub", "#dfc35a"), ("built", "Built area", "#c4281b"),
+    ("bare", "Bare ground", "#a59b8f"), ("snow_and_ice", "Snow and ice", "#b39fe1"),
+]
+WATER, BUILT = 0, 6
+
+SOURCES = {
+    "landsat": {"dataset": "Landsat 8 and 9 Collection 2 Level-2 surface temperature (USGS)",
+                "ids": ["LANDSAT/LC08/C02/T1_L2", "LANDSAT/LC09/C02/T1_L2"], "resolution_m": 30,
+                "note": "Thermal band acquired at 100 m, delivered at 30 m. Same scene masking as the research pipeline."},
+    "dynamic_world": {"dataset": "Dynamic World V1 (Google, World Resources Institute)", "id": P.DW, "resolution_m": 10,
+                      "statistics_resolution_m": Q.SCALE},
+    "cci": {"dataset": "ESA CCI Above-Ground Biomass v6.0", "id": Q.CCI_AGB, "year": Q.CCI_YEAR, "resolution_m": Q.CCI_SCALE},
+    "worldcover": {"dataset": "ESA WorldCover v200", "id": P.WORLDCOVER, "year": Q.WORLDCOVER_YEAR, "resolution_m": 10},
+}
+
+_memory: LRUDict = LRUDict(settings.memory_cache_entries)
+_failures: LRUDict = LRUDict(settings.memory_cache_entries)      # key -> (public reason, code, monotonic time)
+_running: dict[str, Any] = {}                                    # key -> Future
+_lock = threading.Lock()
+# Background execution on the analysis workers (one Earth Engine computation at a time across analyses and scans).
+_submit: Callable[..., Any] = lambda fn, *a: analysis._POOL.submit(fn, *a)   # noqa: E731 — replaced in tests
+
+
+class QuickScanError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code, self.message = code, message
+
+
+# ----------------------------------------------------------------------------- inputs
+def last_year() -> int:
+    """The latest COMPLETE calendar year (a scan covers a whole year of Dynamic World)."""
+    return date.today().year - 1
+
+
+def validate(year: int | None, season: str | None) -> tuple[int, str]:
+    y = last_year() if year is None else int(year)
+    s = DEFAULT_SEASON if season is None else season
+    if not FIRST_YEAR <= y <= last_year():
+        raise QuickScanError("invalid_year", f"Quick scans cover complete years from {FIRST_YEAR} to {last_year()}.")
+    if s not in Q.SEASONS:
+        raise QuickScanError("invalid_season", f"Season must be one of: {', '.join(Q.SEASONS)}.")
+    return y, s
+
+
+def version() -> str:
+    """Method version: changes whenever a dataset, threshold or rule that affects a number changes."""
+    return Q.method_version({"uhi": [UHI_MIN_SHARE, UHI_MIN_HA], "classes": [c[0] for c in DW_CLASSES]})
+
+
+def _key(aid: str, year: int, season: str) -> str:
+    return f"{aid}-{year}-{season}-{version()}"
+
+
+def _path(key: str):
+    return CACHE / f"{key}.json"
+
+
+# ----------------------------------------------------------------------------- interpretation (pure)
+def _r(v: float | None, n: int) -> float | None:
+    return None if v is None else round(float(v), n)
+
+
+def _date(ms: Any) -> str | None:
+    return None if ms is None else datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).date().isoformat()
+
+
+def parse(raw: dict[str, Any], *, year: int, season: str) -> dict[str, Any]:
+    """Interpret one raw measurement (providers/earth_engine/quickscan.measure). Nothing is estimated: a value that was
+    not measured is null with a reason, never 0."""
+    counts = raw.get("counts") or {}
+    aoi_ha = float((raw.get("aoi") or {}).get("area_ha") or 0.0)
+    groups = {int(g["class"]): [float(v or 0.0) for v in g["sum"]] for g in ((raw.get("classes") or {}).get("groups") or [])}
+    season_label = Q.SEASON_LABELS[season]
+
+    # ---- land cover (Dynamic World)
+    classified_ha = sum(v[0] for v in groups.values())
+    if raw.get("classes") is None or classified_ha <= 0:
+        landcover: dict[str, Any] = {"status": "UNAVAILABLE", "reason": f"No Dynamic World images over this area in {year}.",
+                                     "source": {**SOURCES["dynamic_world"], "year": year}}
+    else:
+        classes = []
+        for i, (key, name, color) in enumerate(DW_CLASSES):
+            a, low = groups.get(i, [0.0, 0.0, 0.0, 0.0])[:2]
+            classes.append({"key": key, "name": name, "color": color, "area_km2": _r(a / 100, 3),
+                            "share": _r(a / classified_ha, 4), "low_confidence_share": _r(low / a, 4) if a > 0 else None})
+        wc = raw.get("worldcover") or {}
+        compared, agree = float(wc.get("compared_ha") or 0.0), float(wc.get("agree_ha") or 0.0)
+        landcover = {
+            "status": "READY", "label": f"Land cover from Dynamic World (Google/WRI), {year}",
+            "source": {**SOURCES["dynamic_world"], "year": year, "images": int(counts.get("dw_images") or 0)},
+            "method": f"Annual mean probability per class, top class; aggregated from 10 m to {Q.SCALE} m by mode.",
+            "classified_km2": _r(classified_ha / 100, 3), "coverage_share": _r(classified_ha / aoi_ha, 4) if aoi_ha else None,
+            "low_confidence_share": _r(sum(v[1] for v in groups.values()) / classified_ha, 4),
+            "low_confidence_rule": f"top mean probability below {Q.LOW_CONFIDENCE}",
+            "classes": classes,
+            "worldcover_agreement": ({"share": _r(agree / compared, 4), "compared_km2": _r(compared / 100, 3),
+                                      "source": SOURCES["worldcover"],
+                                      "note": "Agreement with ESA WorldCover 2021 (another year and method) — a cross-check, not accuracy."}
+                                     if compared > 0 else None),
+        }
+
+    # ---- land surface temperature (Landsat)
+    n_scenes = int(counts.get("landsat_scenes") or 0)
+    lst_src = {**SOURCES["landsat"], "year": year, "season": season, "season_label": season_label,
+               "scenes": n_scenes, "spacecraft": counts.get("landsat_by_spacecraft") or {},
+               "first_scene": _date(counts.get("landsat_first_ms")), "last_scene": _date(counts.get("landsat_last_ms"))}
+    stats = raw.get("lst")
+    if n_scenes < Q.MIN_SCENES or stats is None:
+        lst: dict[str, Any] = {"status": "UNAVAILABLE", "source": lst_src,
+                               "reason": f"Only {n_scenes} usable Landsat scene{'s' if n_scenes != 1 else ''} over this area for "
+                                         f"{season_label} {year}; a quick scan needs at least {Q.MIN_SCENES}."}
+    elif stats.get("lst_mean") is None:
+        lst = {"status": "UNAVAILABLE", "source": lst_src, "reason": "No clear land pixels in the Landsat scenes of this period."}
+    else:
+        per_class = []
+        for i, (key, name, _c) in enumerate(DW_CLASSES):
+            a, _low, a_lst, x = groups.get(i, [0.0, 0.0, 0.0, 0.0])
+            if a_lst > 0:
+                per_class.append({"key": key, "name": name, "mean_c": _r(x / a_lst, 2), "area_km2": _r(a_lst / 100, 3),
+                                  "water": i == WATER})
+        lst = {
+            "status": "READY", "label": f"Land surface temperature, {season_label} {year}", "source": lst_src,
+            "method": "Per-pixel median of clear Landsat 8/9 scenes; water excluded from the statistics where Dynamic World maps it.",
+            "mean_c": _r(stats["lst_mean"], 2), "p2_c": _r(stats.get("lst_p2"), 2), "median_c": _r(stats.get("lst_p50"), 2),
+            "p98_c": _r(stats.get("lst_p98"), 2),
+            "valid_share": _r(float(stats.get("valid_ha") or 0.0) / aoi_ha, 4) if aoi_ha else None,
+            "per_class": per_class, "uhi": _uhi(groups),
+        }
+
+    # ---- above-ground tree biomass carbon (ESA CCI)
+    c = raw.get("carbon")
+    cci_src = {**SOURCES["cci"]}
+    if c is None or float(c.get("covered_ha") or 0.0) <= 0:
+        carbon_component: dict[str, Any] = {"id": "agb_trees", "status": "UNAVAILABLE", "source": cci_src,
+                                            "reason": f"No ESA CCI biomass values over this area for {Q.CCI_YEAR}."}
+    else:
+        covered, agb, sd = float(c["covered_ha"]), float(c.get("agb_x_ha") or 0.0), float(c.get("sd_x_ha") or 0.0)
+        total, spread = agb * Q.CARBON_FRACTION, sd * Q.CARBON_FRACTION
+        carbon_component = {
+            "id": "agb_trees", "status": "READY", "label": "Above-ground tree biomass carbon (ESA CCI)", "source": cci_src,
+            "density_t_per_ha": _r(total / covered, 2), "total_t": _r(total, 0),
+            "range_t": [_r(max(0.0, total - spread), 0), _r(total + spread, 0)],
+            "coverage_share": _r(covered / float(c.get("area_ha") or covered), 4),
+            "carbon_fraction": Q.CARBON_FRACTION,
+            "method": f"ESA CCI above-ground biomass {Q.CCI_YEAR} (oven-dry woody biomass of living trees) × {Q.CARBON_FRACTION} "
+                      "(IPCC default carbon fraction).",
+            "range_rule": "± the CCI per-pixel standard deviation, summed as if fully correlated (the widest range).",
+            "excludes": "Roots, dead wood, litter and soil carbon are not included.",
+        }
+    carbon = {"status": carbon_component["status"], "label": "Carbon", "components": [carbon_component],
+              "scope": "Above-ground tree biomass only. Further carbon pools (e.g. soil) can be added as components."}
+
+    sections = (landcover["status"], lst["status"], carbon["status"])
+    return {
+        "status": "READY" if "READY" in sections else "UNAVAILABLE",
+        "reason": None if "READY" in sections else "None of the quick-scan datasets has values over this area.",
+        "tier": TIER, "label": LABEL, "year": year, "season": season, "season_label": season_label,
+        "area_km2": _r(aoi_ha / 100, 3), "landcover": landcover, "lst": lst, "carbon": carbon,
+    }
+
+
+def _uhi(groups: dict[int, list[float]]) -> dict[str, Any]:
+    """Simple surface UHI = mean LST of built-up land − mean LST of the other land (water excluded), area-weighted."""
+    label = "Simple surface UHI (built − non-built land, water excluded)"
+    land_ha = sum(v[0] for k, v in groups.items() if k != WATER)
+    built = groups.get(BUILT, [0.0, 0.0, 0.0, 0.0])
+    rest = [v for k, v in groups.items() if k not in (WATER, BUILT)]
+    built_ha, rest_ha = built[0], sum(v[0] for v in rest)
+    rest_lst_ha, rest_x = sum(v[2] for v in rest), sum(v[3] for v in rest)
+    share = built_ha / land_ha if land_ha else 0.0
+    if share < UHI_MIN_SHARE or built_ha < UHI_MIN_HA or rest_ha < UHI_MIN_HA:
+        return {"status": "UNAVAILABLE", "label": label, "built_km2": _r(built_ha / 100, 3), "built_share": _r(share, 4),
+                "reason": f"Not enough built-up land for a heat-island figure: it needs at least {UHI_MIN_SHARE:.0%} of the land and "
+                          f"{UHI_MIN_HA / 100:g} km² (and as much other land); this area has {built_ha / 100:.1f} km² ({share:.1%})."}
+    if built[2] <= 0 or rest_lst_ha <= 0:
+        return {"status": "UNAVAILABLE", "label": label, "reason": "Built-up or other land has no valid surface temperature."}
+    b, n = built[3] / built[2], rest_x / rest_lst_ha
+    return {"status": "READY", "label": label, "value_c": _r(b - n, 2), "built_mean_c": _r(b, 2), "other_mean_c": _r(n, 2),
+            "built_km2": _r(built_ha / 100, 3), "built_share": _r(share, 4), "other_km2": _r(rest_ha / 100, 3)}
+
+
+# ----------------------------------------------------------------------------- cache and jobs
+def _envelope(aid: str, year: int, season: str, status: str, **extra: Any) -> dict[str, Any]:
+    return {"aoi_id": aid, "status": status, "tier": TIER, "label": LABEL, "year": year, "season": season,
+            "season_label": Q.SEASON_LABELS[season], "first_year": FIRST_YEAR, "last_year": last_year(), **extra}
+
+
+def stored(aid: str, year: int, season: str) -> dict[str, Any] | None:
+    """The stored scan of an area, year and season (current method version), or None. Never computes."""
+    try:
+        v = version()
+    except P.EarthEngineError:
+        return None
+    key = _key(aid, year, season)
+    doc = _memory.get(key)
+    if doc is None:
+        try:
+            doc = json.loads(_path(key).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if doc.get("quickscan_version") != v:
+            return None
+        _memory[key] = doc
+    return doc
+
+
+def status(aid: str, year: int | None = None, season: str | None = None) -> dict[str, Any]:
+    """Stored scan, PROCESSING, a recent failure (UNAVAILABLE, retryable) or NOT_RUN. Never computes."""
+    analysis.aoi_doc(aid)                      # AnalysisNotFound for an unknown area
+    y, s = validate(year, season)
+    doc = stored(aid, y, s)
+    if doc is not None:
+        return doc
+    try:
+        key = _key(aid, y, s)
+    except P.EarthEngineError as e:
+        return _envelope(aid, y, s, "UNAVAILABLE", reason=e.message, reason_code=e.code, retryable=False)
+    fut = _running.get(key)
+    if fut is not None and not fut.done():
+        return _envelope(aid, y, s, "PROCESSING")
+    fail = _failures.get(key)
+    if fail and time.monotonic() - fail[2] < FAILURE_TTL_S:
+        return _envelope(aid, y, s, "UNAVAILABLE", reason=fail[0], reason_code=fail[1], retryable=True)
+    return _envelope(aid, y, s, "NOT_RUN")
+
+
+def _refusal(aid: str, y: int, s: str, target: dict[str, Any]) -> dict[str, Any] | None:
+    area = target.get("area_km2")
+    if area is not None and area > settings.interactive_max_km2:
+        return _envelope(aid, y, s, "UNAVAILABLE", reason_code="area_too_large", retryable=False,
+                         reason=f"Quick scans are limited to {settings.interactive_max_km2:,.0f} km²; this area is {area:,.0f} km².")
+    if not P.provider.credentials_configured():
+        return _envelope(aid, y, s, "UNAVAILABLE", reason_code="ee_unconfigured", retryable=False,
+                         reason="Live Earth Engine is not configured on this server, so quick scans cannot run.")
+    seen = P.RESTRICTED_MODE.get("seen_at")
+    if seen is not None and time.time() - seen < RESTRICTED_RECENT_S:
+        return _envelope(aid, y, s, "UNAVAILABLE", reason_code="quota_restricted", retryable=True,
+                         reason="Earth Engine's free compute quota is used up right now, so new quick scans are paused. "
+                                "Stored scans still open; try again later.")
+    return None
+
+
+def start(aid: str, year: int | None = None, season: str | None = None) -> dict[str, Any]:
+    """Run a quick scan in the background (or join the running one). Returns immediately with its state."""
+    aoi = analysis.aoi_doc(aid)
+    y, s = validate(year, season)
+    doc = stored(aid, y, s)
+    if doc is not None:
+        return doc
+    target = analysis.analysis_target(aoi)
+    refused = _refusal(aid, y, s, target)
+    if refused is not None:
+        return refused
+    try:
+        key = _key(aid, y, s)
+    except P.EarthEngineError as e:
+        return _envelope(aid, y, s, "UNAVAILABLE", reason=e.message, reason_code=e.code, retryable=False)
+    with _lock:
+        fut = _running.get(key)
+        if fut is None or fut.done():
+            _failures.pop(key, None)
+            log.info("[quickscan] QUEUED aoi=%s year=%s season=%s area_km2=%s", aid, y, s, target.get("area_km2"))
+            _running[key] = _submit(_run, aid, y, s, key, target["geometry"], target.get("area_km2"))
+    return status(aid, y, s)
+
+
+def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2: float | None) -> None:
+    t0 = time.monotonic()
+    try:
+        raw = Q.measure(geometry, y, s)
+        doc = parse(raw, year=y, season=s)
+    except Exception as e:  # noqa: BLE001 — Earth Engine / network; the public reason never carries raw error text
+        text = str(e)
+        if isinstance(e, P.EarthEngineError) and e.code in ("ee_unconfigured", "quickscan_unavailable"):
+            reason, code = e.message, e.code
+        elif "Too Many Requests" in text or "429" in text:
+            reason, code = "Earth Engine is throttling requests right now; run the quick scan again in a few minutes.", "ee_throttled"
+        elif "quota" in text.lower() or "restricted" in text.lower():
+            reason, code = "Earth Engine's free compute quota is used up right now; run the quick scan again later.", "quota_restricted"
+        else:
+            reason, code = "The quick scan could not be computed right now.", "quickscan_failed"
+        log.warning("[quickscan] FAILED aoi=%s year=%s season=%s after %.1fs: %s: %s", aid, y, s, time.monotonic() - t0,
+                    type(e).__name__, text[:300])
+        _failures[key] = (reason, code, time.monotonic())
+        return
+    doc = {**_envelope(aid, y, s, doc["status"]), **doc, "aoi_id": aid, "quickscan_version": version(),
+           "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "elapsed_s": round(time.monotonic() - t0, 1),
+           "analysed_area_km2": area_km2}
+    _memory[key] = doc
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        _path(key).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    except OSError as e:
+        log.warning("[quickscan] cache write failed: %s", e)
+    log.info("[quickscan] %s aoi=%s year=%s season=%s in %.1fs", doc["status"], aid, y, s, doc["elapsed_s"])

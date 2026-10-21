@@ -58,6 +58,21 @@ second component without changing the others.
 - **Map layers** (LST, Dynamic World land cover, biomass carbon) are served through the existing `/api/tiles` proxy and
   disk cache; tiles are created lazily on first view. No credentials reach the browser.
 
+## Deployment
+
+The backend imports the research pipeline's Landsat code from `analysis/` (next to `backend/` in the repository, or
+`TT_ANALYSIS_DIR`). It needs only `earthengine-api` and the standard library — no numpy, pandas or matplotlib. Without
+`analysis/` the quick scan reports itself unavailable; it is never re-implemented in the backend.
+
+## Implementation status
+
+- **Phase A (done):** `backend/app/providers/earth_engine/quickscan.py` (one request), `backend/app/services/quickscan.py`
+  (interpretation, cache, jobs, refusals), `GET`/`POST /api/quickscan/{aid}?year=&season=`, rate group `quickscan`
+  (`TT_RATE_QUICKSCAN_PER_MIN`, default 6), offline tests `backend/tests/test_quickscan.py`. The pipeline's
+  `landsat.collection` was split into `scenes` (date ranges) so both use one scene filter and one `prepare` mask.
+  Implementation details: low confidence is the share of 10 m pixels below 0.5; LST per class is area-weighted;
+  the carbon range sums the per-pixel standard deviations as if fully correlated (the widest range).
+
 ## Earth Engine use during development
 
 Offline, mocked tests only. When the code is complete, ask the user before any live probe; then run **one** small area

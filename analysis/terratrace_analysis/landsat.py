@@ -80,8 +80,9 @@ ST_QA_SCALE = 0.01   # ST_QA DN → uncertainty in kelvin
 ST_EMIS_SCALE = 0.0001   # ST_EMIS DN → emissivity
 
 
-def _prepare(sensor: str, max_st_uncertainty_k: float, min_st_emissivity: float):
-    """Mask, scale and rename one scene of `sensor`."""
+def prepare(sensor: str, max_st_uncertainty_k: float, min_st_emissivity: float):
+    """Mask, scale and rename one scene of `sensor` (also used by the web app's quick scan: backend/app/providers/
+    earth_engine/quickscan.py imports it, so both apply exactly the same masking)."""
     src = SOURCE_BANDS[sensor]
 
     def f(img):
@@ -96,16 +97,21 @@ def _prepare(sensor: str, max_st_uncertainty_k: float, min_st_emissivity: float)
     return f
 
 
-def collection(cfg: Config, geom, spec: YearSpec, season: str):
-    """All usable scenes of a study year's season, every sensor merged, already masked/scaled/renamed."""
-    ranges = season_ranges(cfg, spec, season)
+def scenes(cfg: Config, geom, sensors: tuple[str, ...] | list[str], ranges: list[tuple[str, str]]):
+    """All usable scenes of `sensors` over `geom` in the date ranges [start, end), merged, masked/scaled/renamed.
+    The scene filter (Tier 1, CLOUD_COVER limit) and the per-scene masking come from config.toml [scenes]."""
     date_filter = ee.Filter.Or(*[ee.Filter.date(a, b) for a, b in ranges])
     merged = None
-    for sensor in spec.sensors:
+    for sensor in sensors:
         c = (ee.ImageCollection(COLLECTIONS[sensor]).filterBounds(geom).filter(date_filter)
-             .filter(ee.Filter.lt("CLOUD_COVER", cfg.max_cloud_cover)).map(_prepare(sensor, cfg.max_st_uncertainty_k, cfg.min_st_emissivity)))
+             .filter(ee.Filter.lt("CLOUD_COVER", cfg.max_cloud_cover)).map(prepare(sensor, cfg.max_st_uncertainty_k, cfg.min_st_emissivity)))
         merged = c if merged is None else merged.merge(c)
     return merged
+
+
+def collection(cfg: Config, geom, spec: YearSpec, season: str):
+    """All usable scenes of a study year's season, every sensor merged, already masked/scaled/renamed."""
+    return scenes(cfg, geom, spec.sensors, season_ranges(cfg, spec, season))
 
 
 def indices(img):

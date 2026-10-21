@@ -16,7 +16,7 @@ from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health
-from ..services import analysis, context as area_context, featured, imagery, search, science as sc, tiles as tile_cache
+from ..services import analysis, context as area_context, featured, imagery, quickscan, search, science as sc, tiles as tile_cache
 from ..services.chat import counters as chat_counters, service as chat
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
@@ -233,6 +233,33 @@ def get_analysis_status(aid: str = _aid(), baseline: int | None = _year(), compa
         return analysis.stored_status(aid, *_window(baseline, comparison))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
+
+
+def _quickscan(fn, aid: str, year: int | None, season: str | None) -> dict[str, Any]:
+    try:
+        return fn(aid, year, season)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except quickscan.QuickScanError as e:
+        raise _err(422, "invalid_request", e.message, False) from None
+
+
+_SEASON = Query(None, pattern="^(all|mam|jja|son|djf)$")
+
+
+@router.get("/quickscan/{aid}")
+def get_quickscan(aid: str = _aid(), year: int | None = _year(), season: str | None = _SEASON) -> dict[str, Any]:
+    """Quick scan of an area (land cover, surface temperature, biomass carbon from public datasets): the stored scan,
+    PROCESSING, a recent failure, or NOT_RUN. Read-only — it never starts Earth Engine work (services/quickscan.py)."""
+    return _quickscan(quickscan.status, aid, year, season)
+
+
+@router.post("/quickscan/{aid}")
+async def run_quickscan(aid: str = _aid(), year: int | None = _year(), season: str | None = _SEASON) -> dict[str, Any]:
+    """Start a quick scan ("Run quick scan"), or join the running one; returns its state at once. Rate-limited.
+    Refused (UNAVAILABLE with a public reason) over the interactive area limit, without Earth Engine, or while Earth
+    Engine reports restricted mode."""
+    return await asyncio.to_thread(_quickscan, quickscan.start, aid, year, season)
 
 
 @router.get("/progress/{rid}")
