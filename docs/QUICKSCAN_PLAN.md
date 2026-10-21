@@ -73,6 +73,25 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
   Implementation details: low confidence is the share of 10 m pixels below 0.5; LST per class is area-weighted;
   the carbon range sums the per-pixel standard deviations as if fully correlated (the widest range).
 
+- **Phase B (done):** map layers `GET /api/tiles/{aid}/quickscan/{lst|landcover|carbon}/{year}/{season}/{z}/{x}/{y}`,
+  served only for a STORED scan whose section is READY (a tile request never starts a scan), through the shared tile
+  cache (key includes the quick-scan method version) and map-ID cache (one build per layer). Tiles are built by the same
+  functions as the measurement. Legends: temperature = inferno over the area's own 2nd–98th percentile (not comparable
+  between areas, said in the legend); land cover = Dynamic World's class colours at 10 m; carbon = one fixed range,
+  0–150 t C/ha, for every area. A READY scan lists its `layers` (tile template, legend, source); not stored on disk.
+
+## Backlog (not part of the quick-scan phases; do later)
+
+1. **Integrity script end to end.** `frontend/scripts/check-data-integrity.mjs` stops at the Hasdeo step that waits for a
+   "Run live analysis 2018 → 2025" button (Hasdeo opens with its stored 2019→2025 result, so the button never appears —
+   pre-existing, reproduced on 50ec485). Make it run to the end, and make it NEVER click a live-analysis button (it
+   currently clicks "Run live analysis 1990 → 2025", which starts a real Earth Engine analysis when Earth Engine is
+   configured).
+2. **Chatbot withheld a numeric answer.** On merged main (2026-10-21) "How much forest change did TerraTrace detect in this
+   area?" on Hasdeo Arand was withheld as `unsupported_number`, although the stored READY result has the figures.
+   Investigate which number failed validation (model rounding/units vs the facts offered) and propose a fix that keeps
+   the guarantee that no unverified number is ever shown.
+
 ## Earth Engine use during development
 
 Offline, mocked tests only. When the code is complete, ask the user before any live probe; then run **one** small area

@@ -39,13 +39,10 @@ UHI_MIN_HA = 200.0                    # … and ≥ 2 km² (and the rest of the 
 FAILURE_TTL_S = 120.0                 # a failed scan is not retried by itself; a new request after this runs again
 RESTRICTED_RECENT_S = 3600.0          # restricted mode seen within this window → new scans are refused
 
-# Dynamic World classes (index = label value), display names and the WorldCover-style colours used on the map.
-DW_CLASSES = [
-    ("water", "Water", "#419bdf"), ("trees", "Trees", "#397d49"), ("grass", "Grass", "#88b053"),
-    ("flooded_vegetation", "Flooded vegetation", "#7a87c6"), ("crops", "Crops", "#e49635"),
-    ("shrub_and_scrub", "Shrub and scrub", "#dfc35a"), ("built", "Built area", "#c4281b"),
-    ("bare", "Bare ground", "#a59b8f"), ("snow_and_ice", "Snow and ice", "#b39fe1"),
-]
+# Dynamic World classes (index = label value) with display names; colours are the map layer's own (Q.DW_PALETTE).
+_DW_NAMES = ["Water", "Trees", "Grass", "Flooded vegetation", "Crops", "Shrub and scrub", "Built area", "Bare ground",
+             "Snow and ice"]
+DW_CLASSES = [(key, _DW_NAMES[i], "#" + Q.DW_PALETTE[i]) for i, key in enumerate(P.DW_LABELS)]
 WATER, BUILT = 0, 6
 
 SOURCES = {
@@ -225,6 +222,46 @@ def _uhi(groups: dict[int, list[float]]) -> dict[str, Any]:
             "built_km2": _r(built_ha / 100, 3), "built_share": _r(share, 4), "other_km2": _r(rest_ha / 100, 3)}
 
 
+# ----------------------------------------------------------------------------- map layers
+def layers_for(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Map layers of a READY scan, served by GET /api/tiles/{aid}/quickscan/{layer}/{year}/{season}/{z}/{x}/{y}. A section
+    that is not READY has no layer (nothing is drawn for a value that was not measured)."""
+    if not doc or doc.get("status") != "READY":
+        return []
+    aid, y, s = doc["aoi_id"], doc["year"], doc["season"]
+
+    def tiles(layer: str) -> list[str]:
+        return [f"/api/tiles/{aid}/quickscan/{layer}/{y}/{s}/{{z}}/{{x}}/{{y}}"]
+    out = []
+    lst = doc.get("lst") or {}
+    if lst.get("status") == "READY" and lst.get("p2_c") is not None and lst.get("p98_c") is not None:
+        out.append({"id": "lst", "label": lst["label"], "tiles": tiles("lst"), "source": lst["source"],
+                    "legend": {"type": "gradient", "unit": "°C", "min": lst["p2_c"], "max": lst["p98_c"],
+                               "palette": ["#" + c for c in Q.LST_PALETTE],
+                               "note": "Colours span this area's 2nd–98th percentile, so they are not comparable between areas."}})
+    lc = doc.get("landcover") or {}
+    if lc.get("status") == "READY":
+        out.append({"id": "landcover", "label": lc["label"], "tiles": tiles("landcover"), "source": lc["source"],
+                    "legend": {"type": "classes", "classes": [{"key": k, "name": n, "color": c} for k, n, c in DW_CLASSES],
+                               "note": "Shown at Dynamic World's 10 m; statistics use 30 m (mode)."}})
+    comp = ((doc.get("carbon") or {}).get("components") or [{}])[0]
+    if comp.get("status") == "READY":
+        lo, hi = Q.CARBON_RANGE_T_PER_HA
+        out.append({"id": "carbon", "label": comp["label"], "tiles": tiles("carbon"), "source": comp["source"],
+                    "legend": {"type": "gradient", "unit": "t C/ha", "min": lo, "max": hi, "palette": ["#" + c for c in Q.CARBON_PALETTE],
+                               "note": f"Same colour range for every area; values above {hi:g} t C/ha show as the darkest colour."}})
+    return out
+
+
+def lst_range(doc: dict[str, Any]) -> tuple[float, float] | None:
+    lst = doc.get("lst") or {}
+    return (lst["p2_c"], lst["p98_c"]) if lst.get("status") == "READY" and lst.get("p2_c") is not None else None
+
+
+def _with_layers(doc: dict[str, Any]) -> dict[str, Any]:
+    return {**doc, "layers": layers_for(doc)} if doc.get("status") == "READY" and doc.get("quickscan_version") else doc
+
+
 # ----------------------------------------------------------------------------- cache and jobs
 def _envelope(aid: str, year: int, season: str, status: str, **extra: Any) -> dict[str, Any]:
     return {"aoi_id": aid, "status": status, "tier": TIER, "label": LABEL, "year": year, "season": season,
@@ -256,7 +293,7 @@ def status(aid: str, year: int | None = None, season: str | None = None) -> dict
     y, s = validate(year, season)
     doc = stored(aid, y, s)
     if doc is not None:
-        return doc
+        return _with_layers(doc)
     try:
         key = _key(aid, y, s)
     except P.EarthEngineError as e:
@@ -292,7 +329,7 @@ def start(aid: str, year: int | None = None, season: str | None = None) -> dict[
     y, s = validate(year, season)
     doc = stored(aid, y, s)
     if doc is not None:
-        return doc
+        return _with_layers(doc)
     target = analysis.analysis_target(aoi)
     refused = _refusal(aid, y, s, target)
     if refused is not None:

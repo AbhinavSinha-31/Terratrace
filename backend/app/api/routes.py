@@ -14,6 +14,7 @@ from ..config import settings
 from ..errors import public_error
 from ..providers import registry
 from ..providers.ai import claude
+from ..providers.earth_engine import quickscan as qs_ee
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health
 from ..services import analysis, context as area_context, featured, imagery, quickscan, search, science as sc, tiles as tile_cache
@@ -382,6 +383,44 @@ def chat_stats() -> dict[str, Any]:
 async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> dict[str, Any]:
     results, notice = await search.search(q)
     return {"query": q, "results": results, "notice": notice}
+
+
+@router.get("/tiles/{aid}/quickscan/{layer}/{year}/{season}/{z}/{x}/{y}")
+async def quickscan_tiles(aid: str = _aid(), layer: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+                          season: str = Path(..., pattern="^(all|mam|jja|son|djf)$"),
+                          z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
+    """Quick-scan map tiles (land surface temperature, Dynamic World land cover, ESA CCI biomass carbon) — only for a
+    STORED scan whose section is READY: a tile request never starts a quick scan. Same cache, concurrency cap, backoff
+    and public errors as the other tile routes; declared BEFORE the year route."""
+    if layer not in qs_ee.LAYERS:
+        raise _err(404, "not_found", "This map layer does not exist.", False)
+    _tile_xyz(z, x, y)
+    try:
+        try:
+            aoi = analysis.aoi_doc(aid)
+        except analysis.AnalysisNotFound:
+            raise _err(404, "not_found") from None
+        doc = quickscan.stored(aid, year, season)
+        if not any(lyr["id"] == layer for lyr in quickscan.layers_for(doc)):
+            raise _err(404, "not_found", "This map layer is not available: run the quick scan first.", False)
+        geometry = analysis.analysis_target(aoi)["geometry"]
+        rng = quickscan.lst_range(doc) if layer == "lst" else None
+
+        async def template() -> str:
+            return await asyncio.to_thread(qs_ee.tile_url, aid, layer, year, season, geometry, rng)
+
+        key = tile_cache.cache_key(f"qs-{layer}-{season}-{doc['quickscan_version']}", aid, year, z, x, y)
+        return await _serve_tile(key, z, x, y, template, lambda: ee_provider.drop_mapid(qs_ee.mapid_key(aid, layer, year, season, rng)))
+    except HTTPException:
+        raise
+    except EarthEngineError as e:
+        if e.code == "unknown_layer":
+            raise _err(404, "not_found", "This map layer does not exist.", False) from None
+        log.warning("Quick-scan tiles %s/%s unavailable: %s", aid, layer, e)
+        raise _err(503, "tiles_unavailable") from None
+    except Exception as e:  # noqa: BLE001 — ee transport errors / TileUnavailable; details stay in the log
+        log.warning("Quick-scan tiles %s/%s unavailable: %s", aid, layer, e)
+        raise _err(503, "tiles_unavailable") from None
 
 
 @router.get("/tiles/{aid}/context/{layer}/{z}/{x}/{y}")

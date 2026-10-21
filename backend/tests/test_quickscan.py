@@ -321,3 +321,138 @@ def test_a_quick_scan_never_touches_the_forest_analysis_results(ee_scan):
     assert client.post("/api/quickscan/hasdeo-arand?year=2025").json()["status"] == "READY"
     after = sorted(p.name for p in analysis.RESULTS.glob("*.json")) if analysis.RESULTS.exists() else []
     assert before == after
+
+
+# ----------------------------------------------------------------------------- Phase B: map layers through /api/tiles
+TILE = "/api/tiles/hasdeo-arand/quickscan/{layer}/2025/all/3/5/3"
+
+
+def _scan():
+    r = client.post("/api/quickscan/hasdeo-arand?year=2025&season=all")
+    assert r.json()["status"] == "READY"
+    return r.json()
+
+
+def test_a_ready_scan_lists_its_map_layers_with_legends_and_sources(ee_scan):
+    layers = {lyr["id"]: lyr for lyr in _scan()["layers"]}
+    assert set(layers) == {"lst", "landcover", "carbon"}
+    for lyr in layers.values():
+        assert lyr["tiles"] == [f"/api/tiles/hasdeo-arand/quickscan/{lyr['id']}/2025/all/{{z}}/{{x}}/{{y}}"]
+        assert "earthengine" not in json.dumps(lyr) and lyr["source"]["dataset"] and lyr["source"]["resolution_m"]
+    assert (layers["lst"]["legend"]["min"], layers["lst"]["legend"]["max"], layers["lst"]["legend"]["unit"]) == (29.1, 41.7, "°C")
+    assert [c["color"] for c in layers["landcover"]["legend"]["classes"]] == [c[2] for c in quickscan.DW_CLASSES]
+    assert len(layers["landcover"]["legend"]["classes"]) == 9 and layers["landcover"]["source"]["id"] == "GOOGLE/DYNAMICWORLD/V1"
+    assert (layers["carbon"]["legend"]["min"], layers["carbon"]["legend"]["max"], layers["carbon"]["legend"]["unit"]) == (0.0, 150.0, "t C/ha")
+    # stored on disk WITHOUT the layers (presentation only)
+    stored = json.loads(next(quickscan.CACHE.glob("hasdeo-arand-2025-all-*.json")).read_text(encoding="utf-8"))
+    assert "layers" not in stored
+
+
+def test_a_section_that_is_not_ready_has_no_layer_and_no_tiles(monkeypatch, fake_ee_tiles):
+    raw = json.loads(json.dumps(RAW))
+    raw["counts"]["landsat_scenes"], raw["lst"] = 3, None
+    monkeypatch.setattr(Q, "measure", lambda *a: raw)
+    built = []
+    monkeypatch.setattr(Q, "tile_url", lambda *a: (built.append(a), "https://earthengine.example/qs/{z}/{x}/{y}")[1])
+    ids = {lyr["id"] for lyr in _scan()["layers"]}
+    assert ids == {"landcover", "carbon"}
+    r = client.get(TILE.format(layer="lst"))
+    assert r.status_code == 404 and r.json()["detail"]["code"] == "not_found" and built == []
+
+
+def test_no_tiles_before_a_scan_is_run_and_tiles_never_start_one(ee_scan, monkeypatch):
+    monkeypatch.setattr(Q, "tile_url", lambda *a: pytest.fail("no map ID without a stored scan"))
+    for layer in ("lst", "landcover", "carbon"):
+        r = client.get(TILE.format(layer=layer))
+        assert r.status_code == 404 and "run the quick scan first" in r.json()["detail"]["user_message"]
+    assert ee_scan == [], "a tile request never runs a quick scan"
+
+
+@pytest.mark.parametrize("path,code", [
+    ("/api/tiles/hasdeo-arand/quickscan/ndvi/2025/all/3/5/3", 404),        # unknown layer
+    ("/api/tiles/hasdeo-arand/quickscan/lst/2025/monsoon/3/5/3", 422),     # unknown season
+    ("/api/tiles/hasdeo-arand/quickscan/lst/2025/all/3/9/3", 404),         # x outside zoom 3
+    ("/api/tiles/aoi-000000000000/quickscan/lst/2025/all/3/5/3", 404),     # unknown area
+])
+def test_quickscan_tile_route_validates_like_the_other_tile_routes(path, code):
+    r = client.get(path)
+    assert r.status_code == code
+    if isinstance(r.json().get("detail"), dict):
+        assert set(r.json()["detail"]) >= {"code", "user_message", "retryable"}
+
+
+def test_quickscan_tiles_are_cached_and_build_one_map_id_with_the_stored_lst_range(ee_scan, monkeypatch, fake_ee_tiles):
+    _scan()
+    built = []
+    monkeypatch.setattr(Q, "tile_url", lambda aid, layer, year, season, geometry, rng: (
+        built.append((aid, layer, year, season, rng)), "https://earthengine.example/qs/{z}/{x}/{y}")[1])
+    r = client.get(TILE.format(layer="lst"))
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert client.get(TILE.format(layer="lst")).content == r.content
+    assert built == [("hasdeo-arand", "lst", 2025, "all", (29.1, 41.7))] and len(fake_ee_tiles.urls) == 1
+    assert client.get(TILE.format(layer="carbon")).status_code == 200 and built[-1][-1] is None
+
+
+def test_quickscan_tile_failures_are_public_errors(ee_scan, monkeypatch, fake_ee_tiles):
+    _scan()
+    monkeypatch.setattr(Q, "tile_url", lambda *a: (_ for _ in ()).throw(RuntimeError("ee.EEException C:\\secret token")))
+    r = client.get(TILE.format(layer="landcover"))
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "tiles_unavailable" and r.json()["detail"]["retryable"] is True
+    assert not any(s.lower() in r.text.lower() for s in LEAKS)
+
+
+def test_a_method_change_never_serves_old_tiles(ee_scan, monkeypatch, fake_ee_tiles):
+    _scan()
+    monkeypatch.setattr(Q, "tile_url", lambda *a: "https://earthengine.example/qs/{z}/{x}/{y}")
+    assert client.get(TILE.format(layer="landcover")).status_code == 200
+    monkeypatch.setattr(quickscan, "version", lambda: "qs-1-newmethod")
+    quickscan._memory.clear()
+    assert client.get(TILE.format(layer="landcover")).status_code == 404
+
+
+def test_quickscan_tiles_are_not_rate_limited():
+    from app import ratelimit
+    assert ratelimit.group_of("GET", "/api/tiles/hasdeo-arand/quickscan/lst/2025/all/3/5/3") is None
+
+
+def _fake_ee(monkeypatch, cfg, seen, map_ids):
+    class FakeLandsat:
+        def scenes(self, c, geom, sensors, ranges):
+            seen.append((sensors, ranges))
+            return _Expr("scenes")
+
+    ee = _Expr("ee")
+    ee.data = type("Data", (), {"getMapId": staticmethod(lambda p: (map_ids.append(p), {
+        "tile_fetcher": type("TF", (), {"url_format": "https://earthengine.example/qs/{z}/{x}/{y}"})()})[1])})()
+    monkeypatch.setattr(Q, "pipeline", lambda: (FakeLandsat(), cfg))
+    monkeypatch.setattr(Q, "_ee", lambda: ee)
+    monkeypatch.setattr(P.provider, "initialize", lambda: None)
+
+
+def test_map_layers_are_built_from_the_same_images_as_the_measurement(monkeypatch):
+    _landsat, cfg = Q.pipeline()
+    seen, map_ids = [], []
+    _fake_ee(monkeypatch, cfg, seen, map_ids)
+    monkeypatch.setattr(_Expr, "getInfo", lambda self: {}, raising=False)
+    Q.measure({"type": "Polygon", "coordinates": []}, 2025, "jja")
+    Q.layer_image("lst", {"type": "Polygon", "coordinates": []}, 2025, "jja", (20.0, 40.0))
+    assert seen[0] == seen[1] == (("LC08", "LC09"), [("2025-06-01", "2025-09-01")])
+    with pytest.raises(P.EarthEngineError):
+        Q.layer_image("lst", {"type": "Polygon", "coordinates": []}, 2025, "jja", None)
+    with pytest.raises(P.EarthEngineError):
+        Q.layer_image("ndvi", {"type": "Polygon", "coordinates": []}, 2025, "jja")
+
+
+def test_tile_url_builds_each_map_id_once(monkeypatch):
+    _landsat, cfg = Q.pipeline()
+    seen, map_ids = [], []
+    _fake_ee(monkeypatch, cfg, seen, map_ids)
+    geom = {"type": "Polygon", "coordinates": []}
+    a = Q.tile_url("aoi-test-once", "landcover", 2024, "all", geom)
+    b = Q.tile_url("aoi-test-once", "landcover", 2024, "all", geom)
+    assert a == b == "https://earthengine.example/qs/{z}/{x}/{y}" and len(map_ids) == 1
+    Q.tile_url("aoi-test-once", "lst", 2024, "all", geom, (20.0, 40.0))
+    Q.tile_url("aoi-test-once", "lst", 2024, "all", geom, (21.0, 40.0))   # another colour range = another map ID
+    assert len(map_ids) == 3
+    with pytest.raises(P.EarthEngineError):
+        Q.tile_url("aoi-test-once", "ndvi", 2024, "all", geom)

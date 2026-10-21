@@ -54,6 +54,16 @@ SEASONS: dict[str, tuple[str, str, int]] = {
 SEASON_LABELS = {"all": "whole year", "mam": "March–May", "jja": "June–August", "son": "September–November",
                  "djf": "December–February"}
 
+# Map layers (served through /api/tiles; built from the SAME images as the measurement).
+LAYERS = ("lst", "landcover", "carbon")
+# Dynamic World's published class colours, in DW_LABELS order.
+DW_PALETTE = ["419bdf", "397d49", "88b053", "7a87c6", "e49635", "dfc35a", "c4281b", "a59b8f", "b39fe1"]
+# Temperature: inferno, stretched over the area's own 2nd–98th percentile (from the stored scan).
+LST_PALETTE = ["000004", "1b0c41", "4a0c6b", "781c6d", "a52c60", "cf4446", "ed6925", "fb9b06", "f7d13d", "fcffa4"]
+# Biomass carbon density: one fixed range for every area, so maps are comparable.
+CARBON_RANGE_T_PER_HA = (0.0, 150.0)
+CARBON_PALETTE = ["f7fcf5", "c7e9c0", "74c476", "238b45", "00441b"]
+
 
 def season_range(year: int, season: str) -> tuple[str, str]:
     """Date range [start, end) of a season of a scan year."""
@@ -95,6 +105,30 @@ def method_version(extra: dict[str, Any] | None = None) -> str:
     return "qs-1-" + hashlib.sha256(blob.encode()).hexdigest()[:8]
 
 
+def _lst(ee, landsat, cfg, geom, year: int, season: str):
+    """(scenes, LST composite): the research pipeline's scenes and masking; median of the season's clear scenes. With
+    fewer than MIN_SCENES scenes the composite is an empty (fully masked) image — never a composite of too few scenes."""
+    scenes = landsat.scenes(cfg, geom, SENSORS, [season_range(year, season)])
+    lst = ee.Image(ee.Algorithms.If(scenes.size().gte(MIN_SCENES), scenes.select("lst").median(),
+                                    ee.Image.constant(0).updateMask(0))).rename("lst")
+    return scenes, lst
+
+
+def _dynamic_world(ee, geom, year: int):
+    """(collection, native 10 m projection, mean probabilities, top class at 10 m) of the scan year."""
+    dw = ee.ImageCollection(DW).filterBounds(geom).filterDate(f"{year}-01-01", f"{year + 1}-01-01")
+    native = ee.Image(dw.first()).projection()
+    probs = dw.select(DW_LABELS).mean().setDefaultProjection(native)
+    top = probs.toArray().arrayArgmax().arrayGet([0]).int().setDefaultProjection(native).rename("label")
+    return dw, native, probs, top
+
+
+def _cci(ee):
+    """(collection, image) of ESA CCI biomass for CCI_YEAR, mosaicked with its own projection."""
+    col = ee.ImageCollection(CCI_AGB).filterDate(f"{CCI_YEAR}-01-01", f"{CCI_YEAR + 1}-01-01")
+    return col, col.mosaic().setDefaultProjection(ee.Image(col.first()).projection())
+
+
 def measure(geometry: dict[str, Any], year: int, season: str) -> dict[str, Any]:
     """RAW quick-scan measurements over an area — one Earth Engine request (services/quickscan.py interprets them)."""
     landsat, cfg = pipeline()
@@ -103,20 +137,14 @@ def measure(geometry: dict[str, Any], year: int, season: str) -> dict[str, Any]:
     geom = ee.Geometry(geometry)
     area = ee.Image.pixelArea().divide(1e4).rename("area_ha")
 
-    # Landsat LST: the research pipeline's scenes and masking.
-    scenes = landsat.scenes(cfg, geom, SENSORS, [season_range(year, season)])
+    scenes, lst = _lst(ee, landsat, cfg, geom, year, season)
     n_scenes = scenes.size()
-    lst = ee.Image(ee.Algorithms.If(n_scenes.gte(MIN_SCENES), scenes.select("lst").median(),
-                                    ee.Image.constant(0).updateMask(0))).rename("lst")
 
     # Dynamic World: annual mean probability, top class, mode to 30 m.
-    dw = ee.ImageCollection(DW).filterBounds(geom).filterDate(f"{year}-01-01", f"{year + 1}-01-01")
+    dw, native, probs, top = _dynamic_world(ee, geom, year)
     n_dw = dw.size()
-    native = ee.Image(dw.first()).projection()
     grid = native.atScale(SCALE)
-    probs = dw.select(DW_LABELS).mean().setDefaultProjection(native)
-    label = (probs.toArray().arrayArgmax().arrayGet([0]).int().setDefaultProjection(native)
-             .reduceResolution(ee.Reducer.mode(), maxPixels=64).reproject(grid).rename("label"))
+    label = top.reduceResolution(ee.Reducer.mode(), maxPixels=64).reproject(grid).rename("label")
     low = (probs.reduce(ee.Reducer.max()).lt(LOW_CONFIDENCE).setDefaultProjection(native)
            .reduceResolution(ee.Reducer.mean(), maxPixels=64).reproject(grid))   # share of low-confidence 10 m pixels
 
@@ -134,10 +162,9 @@ def measure(geometry: dict[str, Any], year: int, season: str) -> dict[str, Any]:
         scale=SCALE, **rr)
         .combine(area.updateMask(lst.mask()).rename("valid_ha").reduceRegion(ee.Reducer.sum(), scale=SCALE, **rr)))
 
-    # ESA CCI biomass (one global image per year; mosaicked with its own projection).
-    cci_col = ee.ImageCollection(CCI_AGB).filterDate(f"{CCI_YEAR}-01-01", f"{CCI_YEAR + 1}-01-01")
+    # ESA CCI biomass.
+    cci_col, cci = _cci(ee)
     n_cci = cci_col.size()
-    cci = cci_col.mosaic().setDefaultProjection(ee.Image(cci_col.first()).projection())
     agb, sd = cci.select("agb"), cci.select("agb_sd")
     carbon = ee.Image.cat([
         area, area.updateMask(agb.mask()).unmask(0).rename("covered_ha"),
@@ -166,3 +193,49 @@ def measure(geometry: dict[str, Any], year: int, season: str) -> dict[str, Any]:
     })
     with EETimer("quickscan")("quick_scan [getInfo]"):
         return req.getInfo()
+
+
+# ----------------------------------------------------------------------------- map layers
+def layer_image(layer: str, geometry: dict[str, Any], year: int, season: str, lst_range: tuple[float, float] | None = None):
+    """Styled map layer, clipped to the area — built by the same functions as the measurement."""
+    landsat, cfg = pipeline()
+    ee = _ee()
+    geom = ee.Geometry(geometry)
+    if layer == "lst":
+        if lst_range is None:
+            raise EarthEngineError("unknown_layer", "The temperature layer needs the stored scan's colour range.")
+        _scenes, lst = _lst(ee, landsat, cfg, geom, year, season)
+        img = lst.visualize(min=lst_range[0], max=lst_range[1], palette=LST_PALETTE)
+    elif layer == "landcover":
+        _dw, _native, _probs, top = _dynamic_world(ee, geom, year)
+        img = top.visualize(min=0, max=len(DW_PALETTE) - 1, palette=DW_PALETTE)
+    elif layer == "carbon":
+        _col, cci = _cci(ee)
+        img = cci.select("agb").multiply(CARBON_FRACTION).visualize(
+            min=CARBON_RANGE_T_PER_HA[0], max=CARBON_RANGE_T_PER_HA[1], palette=CARBON_PALETTE)
+    else:
+        raise EarthEngineError("unknown_layer", f"Unknown quick-scan layer {layer!r}.")
+    return img.clip(geom)
+
+
+def mapid_key(aid: str, layer: str, year: int, season: str, lst_range: tuple[float, float] | None = None) -> tuple:
+    return (aid, f"qs:{layer}:{season}:{lst_range}", year)
+
+
+def tile_url(aid: str, layer: str, year: int, season: str, geometry: dict[str, Any],
+             lst_range: tuple[float, float] | None = None) -> str:
+    """Tile template of a quick-scan layer (map IDs cached; one build per layer at a time)."""
+    if layer not in LAYERS:
+        raise EarthEngineError("unknown_layer", f"Unknown quick-scan layer {layer!r}.")
+    key = mapid_key(aid, layer, year, season, lst_range)
+    cached = provider.cached_mapid(key)
+    if cached:
+        return cached
+    with provider.mapid_lock(key):
+        cached = provider.cached_mapid(key)
+        if cached:
+            return cached
+        provider.initialize()
+        url = _ee().data.getMapId({"image": layer_image(layer, geometry, year, season, lst_range)})["tile_fetcher"].url_format
+        provider.store_mapid(key, url)
+        return url
