@@ -1,13 +1,14 @@
-import { useState, type ReactNode } from 'react';
-import { Flame, Leaf, Loader2, ScanSearch, Trees } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AlertTriangle, Flame, Leaf, Loader2, RotateCcw, ScanSearch, Trees } from 'lucide-react';
 import { Button, Menu, Switch } from '../../design';
 import { useQuickScan, useRunQuickScan } from '../../data/queries';
+import { ApiError } from '../../data/client';
 import type { QuickScan, QuickScanLayer, QuickScanSeason, QuickScanSource } from '../../data/contracts';
 import { useUi } from '../../state/store';
 import { TierBadge } from '../shell/TierBadge';
 
 const SEASONS: { value: QuickScanSeason; label: string }[] = [
-  { value: 'all', label: 'Whole year' }, { value: 'mam', label: 'Mar–May' }, { value: 'jja', label: 'Jun–Aug' },
+  { value: 'all', label: 'All months' }, { value: 'mam', label: 'Mar–May' }, { value: 'jja', label: 'Jun–Aug' },
   { value: 'son', label: 'Sep–Nov' }, { value: 'djf', label: 'Dec–Feb' },
 ];
 
@@ -47,6 +48,42 @@ function Unavailable({ reason }: { reason?: string | null }) {
   return <p className="text-[12px] leading-relaxed text-ink-3">{reason ?? 'Not available for this area.'}</p>;
 }
 
+/**
+ * What a quick scan could not do, in quick-scan words, with the next step. `code` is the backend's reason code; the
+ * backend's own sentence is shown as the detail. Never the forest-analysis wording.
+ */
+const NEXT_STEP: Record<string, { title: string; next: string }> = {
+  quota_restricted: { title: 'Earth Engine quota used up', next: 'Quick scans are paused while the free Earth Engine quota is exhausted. Stored scans still open; try again once the quota has reset.' },
+  ee_unconfigured: { title: 'Earth Engine is off on this server', next: 'Quick scans need live Earth Engine. Ask whoever runs this server to configure it.' },
+  area_too_large: { title: 'Area too large for a quick scan', next: 'Draw a smaller area (up to 1,500 km²) and run the quick scan there.' },
+  ee_throttled: { title: 'Earth Engine is busy', next: 'Wait a few minutes, then run the quick scan again.' },
+  ee_timeout: { title: 'Earth Engine took too long', next: 'Run it again; All months or a smaller area usually finishes faster.' },
+  quickscan_failed: { title: 'The quick scan could not be computed', next: 'Run it again in a few minutes. Nothing was stored, so no stale values are shown.' },
+  quickscan_unavailable: { title: 'Quick scan not installed on this server', next: "This server is missing the research pipeline's Landsat code (analysis/), so quick scans cannot run here." },
+  rate_limited: { title: 'Too many quick scans in a short time', next: 'Wait a minute, then run it again.' },
+  service: { title: 'The quick-scan service did not answer', next: 'The server may be offline or running an older version without quick scans. Check back once it has been restarted.' },
+};
+
+const SHOW_DETAIL = new Set(['area_too_large', 'rate_limited']);
+
+function Notice({ code, detail, onRetry }: { code: string; detail?: string | null; onRetry?: () => void }) {
+  const n = NEXT_STEP[code] ?? NEXT_STEP.quickscan_failed;
+  return (
+    <div className="rounded-md bg-warn/[0.06] p-3 shadow-[0_0_0_1px_rgba(227,164,63,0.28)]" data-testid="qs-notice" data-code={code}>
+      <div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><AlertTriangle size={14} className="shrink-0 text-warn" />{n.title}</div>
+      <p className="mt-1 text-[12px] leading-relaxed text-ink-2">{n.next}</p>
+      {/* The backend's sentence only where it adds facts (e.g. the area's size); otherwise it would repeat the above. */}
+      {detail && SHOW_DETAIL.has(code) && <p className="mt-1 text-[11px] leading-snug text-ink-3">{detail}</p>}
+      {onRetry && <Button size="sm" variant="secondary" className="mt-2" icon={<RotateCcw size={13} />} onClick={onRetry}>Check again</Button>}
+    </div>
+  );
+}
+
+const fmtEstimate = (e?: { seconds: number | null; basis: string }) =>
+  !e || e.seconds === null
+    ? 'Estimated time: usually under a minute (not yet measured on this server); several minutes when Earth Engine is busy.'
+    : `Estimated time: about ${e.seconds < 90 ? `${e.seconds} s` : `${Math.round(e.seconds / 60)} min`} (${e.basis}); longer when Earth Engine is busy.`;
+
 function LandCover({ d }: { d: QuickScan }) {
   const lc = d.landcover!;
   if (lc.status !== 'READY' || !lc.classes) return <Section icon={<Trees size={14} className="text-forest" />} title="Land cover" testId="qs-landcover"><Unavailable reason={lc.reason} /><Source source={lc.source} /></Section>;
@@ -77,8 +114,27 @@ function LandCover({ d }: { d: QuickScan }) {
 
 function Heat({ d }: { d: QuickScan }) {
   const lst = d.lst!;
+  const setQs = useUi((s) => s.setQuickScan);
   const scenes = `${lst.source.scenes as number} scenes`;
-  if (lst.status !== 'READY') return <Section icon={<Flame size={14} className="text-warn" />} title="Surface temperature" testId="qs-lst"><Unavailable reason={lst.reason} /><Source source={lst.source} extra={scenes} /></Section>;
+  if (lst.status !== 'READY') {
+    return (
+      <Section icon={<Flame size={14} className="text-warn" />} title="Surface temperature" testId="qs-lst">
+        {lst.reason_code === 'too_few_scenes' ? (
+          <div data-testid="qs-too-few-scenes">
+            <p className="text-[12px] leading-relaxed text-ink-2">
+              Too few clear Landsat scenes: <b className="t-data text-ink">{lst.scenes_found}</b> found for {d.season_label} {d.year}, at least <b className="t-data text-ink">{lst.min_scenes}</b> needed. No temperature is shown rather than one from too few scenes.
+            </p>
+            {lst.suggest_season && (
+              <Button size="sm" variant="secondary" className="mt-2" onClick={() => setQs({ season: lst.suggest_season ?? 'all', layer: null })} data-testid="qs-switch-all-months">
+                Try All months (more clear scenes)
+              </Button>
+            )}
+          </div>
+        ) : <Unavailable reason={lst.reason} />}
+        <Source source={lst.source} extra={scenes} />
+      </Section>
+    );
+  }
   const per = [...(lst.per_class ?? [])].filter((c) => !c.water && c.area_km2 >= 0.05).sort((a, b) => b.mean_c - a.mean_c);
   const u = lst.uhi;
   return (
@@ -130,15 +186,17 @@ export function QuickScanPanel() {
   const aoi = useUi((s) => s.investigation.study?.id ?? null);
   const qs = useUi((s) => s.quickScan);
   const setQs = useUi((s) => s.setQuickScan);
+  // A new area starts from the defaults (latest year, all months, no layer) — choices never carry over between areas.
+  useEffect(() => { if (qs.aoi !== aoi) setQs({ aoi, year: null, season: null, layer: null }); }, [aoi, qs.aoi, setQs]);
   const q = useQuickScan(aoi, qs.year, qs.season);
   const run = useRunQuickScan(aoi, qs.year, qs.season);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<{ code: string; message: string } | null>(null);
   const d = q.data;
   const years = d ? Array.from({ length: d.last_year - d.first_year + 1 }, (_, i) => d.last_year - i) : [];
   const start = async () => {
     setBusy(true); setErr(null);
-    try { await run(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    try { await run(); } catch (e) { setErr({ code: e instanceof ApiError && e.code === 'rate_limited' ? 'rate_limited' : 'service', message: (e as Error).message }); } finally { setBusy(false); }
   };
   return (
     <div className="space-y-3" data-testid="quickscan-panel" data-status={d?.status ?? 'loading'}>
@@ -148,23 +206,35 @@ export function QuickScanPanel() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {d && <Menu<number> label="Scan year" value={d.year} onChange={(y) => setQs({ year: y })} options={years.map((y) => ({ value: y, label: String(y) }))} />}
-        <Menu<QuickScanSeason> label="Season (temperature)" value={qs.season} onChange={(s) => setQs({ season: s })} options={SEASONS} />
+        <Menu<QuickScanSeason> label="Season (temperature)" value={d?.season ?? qs.season ?? 'all'} onChange={(s) => setQs({ season: s, layer: null })} options={SEASONS} />
       </div>
+      {d?.season_hint && <p className="text-[11px] leading-snug text-warn" data-testid="qs-season-hint">{d.season_hint}</p>}
       {q.isLoading && <p className="text-[12px] text-ink-3">Loading…</p>}
-      {q.isError && <p className="text-[12px] text-warn">{(q.error as Error).message}</p>}
-      {d && (d.status === 'NOT_RUN' || (d.status === 'UNAVAILABLE' && !d.landcover)) && (
-        <div className="space-y-2.5" data-testid="qs-not-run">
-          <p className="text-[12px] leading-relaxed text-ink-2">
-            {d.status === 'UNAVAILABLE' ? d.reason : <>Land cover (Dynamic World), surface temperature (Landsat) and above-ground tree biomass carbon (ESA CCI) for {d.year}{d.season !== 'all' ? `, temperature for ${d.season_label}` : ''}. One Earth Engine request; the result is stored and opens instantly afterwards.</>}
-          </p>
-          {(d.status === 'NOT_RUN' || d.retryable) && (
-            <Button variant="brand" icon={busy ? <Loader2 size={15} className="animate-spin" /> : <ScanSearch size={15} />} disabled={busy} onClick={start} data-testid="run-quick-scan">
-              Run quick scan
-            </Button>
-          )}
-          {err && <p className="text-[11.5px] text-warn">{err}</p>}
+      {/* The service did not answer at all: a quick-scan message, never the forest-analysis text. */}
+      {q.isError && (
+        <div className="space-y-2.5" data-testid="qs-service-error">
+          <Notice code="service" onRetry={() => q.refetch()} />
+          <Button variant="brand" icon={<ScanSearch size={15} />} disabled data-testid="run-quick-scan">Run quick scan</Button>
         </div>
       )}
+      {d && (d.status === 'NOT_RUN' || (d.status === 'UNAVAILABLE' && !d.landcover)) && (() => {
+        // No stored scan: the button is always shown; disabled only when a run cannot succeed on this server.
+        const problem = d.status === 'UNAVAILABLE' ? { reason_code: d.reason_code ?? 'quickscan_failed', reason: d.reason ?? null, retryable: !!d.retryable } : d.blocked;
+        const canRun = !problem || problem.retryable;
+        return (
+          <div className="space-y-2.5" data-testid="qs-not-run" data-blocked={problem?.reason_code ?? ''}>
+            {problem && <Notice code={problem.reason_code} detail={problem.reason} />}
+            <p className="text-[12px] leading-relaxed text-ink-2">
+              Not scanned yet for {d.year}{d.season !== 'all' ? ` (temperature: ${d.season_label})` : ''}. A quick scan measures land cover (Dynamic World), surface temperature (Landsat) and above-ground tree biomass carbon (ESA CCI) in one Earth Engine request; the result is stored and opens instantly afterwards.
+            </p>
+            <Button variant="brand" icon={busy ? <Loader2 size={15} className="animate-spin" /> : <ScanSearch size={15} />} disabled={busy || !canRun} onClick={start} data-testid="run-quick-scan">
+              Run quick scan
+            </Button>
+            <p className="text-[10.5px] leading-snug text-ink-4" data-testid="qs-estimate">{fmtEstimate(d.estimate)}</p>
+            {err && <Notice code={err.code} detail={err.code === 'service' ? null : err.message} />}
+          </div>
+        );
+      })()}
       {d?.status === 'PROCESSING' && (
         <p className="flex items-center gap-2 text-[12px] text-ink-2" data-testid="qs-processing"><Loader2 size={14} className="animate-spin text-accent" />Scanning Landsat, Dynamic World and ESA CCI for {d.year}…</p>
       )}

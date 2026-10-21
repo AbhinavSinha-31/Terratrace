@@ -456,3 +456,54 @@ def test_tile_url_builds_each_map_id_once(monkeypatch):
     assert len(map_ids) == 3
     with pytest.raises(P.EarthEngineError):
         Q.tile_url("aoi-test-once", "ndvi", 2024, "all", geom)
+
+
+# ----------------------------------------------------------------------------- states shown in the tab (2026-10-22)
+def test_not_run_tells_what_would_block_a_run_without_calling_earth_engine(ee_scan, monkeypatch):
+    d = client.get("/api/quickscan/hasdeo-arand?year=2025").json()
+    assert d["status"] == "NOT_RUN" and "blocked" not in d
+    assert d["estimate"] == {"seconds": None, "basis": "not yet measured on this server"}
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - 10)
+    d = client.get("/api/quickscan/hasdeo-arand?year=2025").json()
+    assert d["status"] == "NOT_RUN" and d["blocked"]["reason_code"] == "quota_restricted" and d["blocked"]["retryable"] is True
+    monkeypatch.setattr(P.EarthEngineProvider, "credentials_configured", staticmethod(lambda: False))
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", None)
+    assert client.get("/api/quickscan/hasdeo-arand?year=2025").json()["blocked"]["reason_code"] == "ee_unconfigured"
+    assert ee_scan == []
+
+
+def test_the_estimate_is_the_median_of_timed_scans(ee_scan):
+    assert client.post("/api/quickscan/hasdeo-arand?year=2025").json()["status"] == "READY"
+    path = next(quickscan.CACHE.glob("hasdeo-arand-2025-all-*.json"))
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "elapsed_s": 42.0}), encoding="utf-8")
+    e = client.get("/api/quickscan/similipal?year=2025").json()["estimate"]
+    assert e == {"seconds": 42, "basis": "median of 1 scan on this server"}
+
+
+def test_too_few_scenes_reports_the_count_and_suggests_all_months():
+    raw = json.loads(json.dumps(RAW))
+    raw["counts"]["landsat_scenes"], raw["lst"] = 2, None
+    lst = quickscan.parse(raw, year=2025, season="jja")["lst"]
+    assert (lst["reason_code"], lst["scenes_found"], lst["min_scenes"], lst["suggest_season"]) == ("too_few_scenes", 2, 5, "all")
+    assert quickscan.parse(raw, year=2025, season="all")["lst"]["suggest_season"] is None
+
+
+def test_near_the_equator_a_single_season_gets_a_hint(ee_scan):
+    from app.services.geometry import bbox_polygon
+    aid, _doc = analysis.register_aoi(bbox_polygon((15.88, 3.84, 15.97, 3.93)), "Congo test area")
+    assert client.get(f"/api/quickscan/{aid}?year=2025").json()["season_hint"] is None          # default: all months
+    hint = client.get(f"/api/quickscan/{aid}?year=2025&season=jja").json()["season_hint"]
+    assert "Near the equator (3.9°N)" in hint and "All months is recommended" in hint
+    assert client.get("/api/quickscan/silent-valley?year=2025&season=jja").json()["season_hint"]   # 11°N: tropics too
+    assert client.get("/api/quickscan/hasdeo-arand?year=2025&season=jja").json()["season_hint"] is None   # 22.8°N
+
+
+def test_a_timeout_has_its_own_public_reason(monkeypatch):
+    monkeypatch.setattr(Q, "measure", lambda *a: (_ for _ in ()).throw(RuntimeError("Deadline exceeded after 180 s")))
+    r = client.post("/api/quickscan/hasdeo-arand?year=2025").json()
+    assert r["reason_code"] == "ee_timeout" and r["retryable"] is True and "All months or a smaller area" in r["reason"]
+
+
+def test_the_default_season_is_all_months():
+    d = client.get("/api/quickscan/hasdeo-arand").json()
+    assert d["season"] == "all" and d["season_label"] == "all months"

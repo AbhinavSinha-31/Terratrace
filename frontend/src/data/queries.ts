@@ -31,8 +31,8 @@ export function useBackendRecovery(): void {
 
 /** Quick scan of an area (land cover, surface temperature, biomass carbon from public datasets). Read-only: it polls
  *  while a scan is PROCESSING and never starts one — that is `useRunQuickScan`, behind the "Run quick scan" button. */
-export const quickScanKey = (aoi: string | null, year: number | null, season: QuickScanSeason) => ['quickscan', aoi, year, season] as const;
-export const useQuickScan = (aoi: string | null, year: number | null, season: QuickScanSeason) => {
+export const quickScanKey = (aoi: string | null, year: number | null, season: QuickScanSeason | null) => ['quickscan', aoi, year, season] as const;
+export const useQuickScan = (aoi: string | null, year: number | null, season: QuickScanSeason | null) => {
   const backend = useHealth().data?.backend;
   return useQuery({
     queryKey: quickScanKey(aoi, year, season),
@@ -43,7 +43,7 @@ export const useQuickScan = (aoi: string | null, year: number | null, season: Qu
   });
 };
 
-export function useRunQuickScan(aoi: string | null, year: number | null, season: QuickScanSeason) {
+export function useRunQuickScan(aoi: string | null, year: number | null, season: QuickScanSeason | null) {
   const qc = useQueryClient();
   return async (): Promise<QuickScan | null> => {
     if (!aoi) return null;

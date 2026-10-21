@@ -38,6 +38,8 @@ UHI_MIN_SHARE = 0.05                  # built-up land must be ≥ 5 % of the lan
 UHI_MIN_HA = 200.0                    # … and ≥ 2 km² (and the rest of the land ≥ 2 km² too)
 FAILURE_TTL_S = 120.0                 # a failed scan is not retried by itself; a new request after this runs again
 RESTRICTED_RECENT_S = 3600.0          # restricted mode seen within this window → new scans are refused
+TROPICS_LAT = 15.0                    # |latitude| below this: single seasons are often too cloudy → recommend all months
+ESTIMATE_SAMPLE = 50                  # stored scans used for the time estimate (most recent first)
 
 # Dynamic World classes (index = label value) with display names; colours are the map layer's own (Q.DW_PALETTE).
 _DW_NAMES = ["Water", "Trees", "Grass", "Flooded vegetation", "Crops", "Shrub and scrub", "Built area", "Bare ground",
@@ -83,6 +85,34 @@ def validate(year: int | None, season: str | None) -> tuple[int, str]:
     if s not in Q.SEASONS:
         raise QuickScanError("invalid_season", f"Season must be one of: {', '.join(Q.SEASONS)}.")
     return y, s
+
+
+def season_hint(aoi: dict[str, Any], season: str) -> str | None:
+    """Near the equator single seasons are often too cloudy for 5 clear Landsat scenes: recommend all months."""
+    bbox = analysis.analysis_target(aoi).get("bbox") or aoi.get("bbox")
+    if not bbox or season == "all":
+        return None
+    lat = (float(bbox[1]) + float(bbox[3])) / 2
+    if abs(lat) < TROPICS_LAT:
+        return (f"Near the equator ({abs(lat):.1f}°{'N' if lat >= 0 else 'S'}) clouds often leave too few clear Landsat scenes "
+                "in a single season; All months is recommended.")
+    return None
+
+
+def estimate() -> dict[str, Any]:
+    """Expected run time from the scans this server has actually timed (never invented)."""
+    times = []
+    for f in sorted(CACHE.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:ESTIMATE_SAMPLE] if CACHE.exists() else []:
+        try:
+            t = json.loads(f.read_text(encoding="utf-8")).get("elapsed_s")
+        except (OSError, ValueError):
+            continue
+        if isinstance(t, (int, float)) and t > 0:
+            times.append(float(t))
+    if not times:
+        return {"seconds": None, "basis": "not yet measured on this server"}
+    times.sort()
+    return {"seconds": round(times[len(times) // 2]), "basis": f"median of {len(times)} scan{'s' if len(times) != 1 else ''} on this server"}
 
 
 def version() -> str:
@@ -149,7 +179,9 @@ def parse(raw: dict[str, Any], *, year: int, season: str) -> dict[str, Any]:
                "first_scene": _date(counts.get("landsat_first_ms")), "last_scene": _date(counts.get("landsat_last_ms"))}
     stats = raw.get("lst")
     if n_scenes < Q.MIN_SCENES or stats is None:
-        lst: dict[str, Any] = {"status": "UNAVAILABLE", "source": lst_src,
+        lst: dict[str, Any] = {"status": "UNAVAILABLE", "source": lst_src, "reason_code": "too_few_scenes",
+                               "scenes_found": n_scenes, "min_scenes": Q.MIN_SCENES,
+                               "suggest_season": "all" if season != "all" else None,
                                "reason": f"Only {n_scenes} usable Landsat scene{'s' if n_scenes != 1 else ''} over this area for "
                                          f"{season_label} {year}; a quick scan needs at least {Q.MIN_SCENES}."}
     elif stats.get("lst_mean") is None:
@@ -302,9 +334,14 @@ def status(aid: str, year: int | None = None, season: str | None = None) -> dict
     if fut is not None and not fut.done():
         return _envelope(aid, y, s, "PROCESSING")
     fail = _failures.get(key)
+    aoi = analysis.aoi_doc(aid)
+    extra = {"estimate": estimate(), "season_hint": season_hint(aoi, s)}
     if fail and time.monotonic() - fail[2] < FAILURE_TTL_S:
-        return _envelope(aid, y, s, "UNAVAILABLE", reason=fail[0], reason_code=fail[1], retryable=True)
-    return _envelope(aid, y, s, "NOT_RUN")
+        return _envelope(aid, y, s, "UNAVAILABLE", reason=fail[0], reason_code=fail[1], retryable=True, **extra)
+    blocked = _refusal(aid, y, s, analysis.analysis_target(aoi))   # what a run would meet right now (no Earth Engine call)
+    if blocked is not None:
+        extra["blocked"] = {k: blocked[k] for k in ("reason_code", "reason", "retryable")}
+    return _envelope(aid, y, s, "NOT_RUN", **extra)
 
 
 def _refusal(aid: str, y: int, s: str, target: dict[str, Any]) -> dict[str, Any] | None:
@@ -358,6 +395,8 @@ def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2:
             reason, code = e.message, e.code
         elif "Too Many Requests" in text or "429" in text:
             reason, code = "Earth Engine is throttling requests right now; run the quick scan again in a few minutes.", "ee_throttled"
+        elif any(w in text.lower() for w in ("deadline", "timed out", "timeout")):
+            reason, code = "Earth Engine took too long to answer; run the quick scan again, or choose All months or a smaller area.", "ee_timeout"
         elif "quota" in text.lower() or "restricted" in text.lower():
             reason, code = "Earth Engine's free compute quota is used up right now; run the quick scan again later.", "quota_restricted"
         else:

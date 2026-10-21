@@ -51,7 +51,7 @@ SEASONS: dict[str, tuple[str, str, int]] = {
     "all": ("01-01", "01-01", 1), "mam": ("03-01", "06-01", 0), "jja": ("06-01", "09-01", 0),
     "son": ("09-01", "12-01", 0), "djf": ("12-01", "03-01", 0),
 }
-SEASON_LABELS = {"all": "whole year", "mam": "March–May", "jja": "June–August", "son": "September–November",
+SEASON_LABELS = {"all": "all months", "mam": "March–May", "jja": "June–August", "son": "September–November",
                  "djf": "December–February"}
 
 # Map layers (served through /api/tiles; built from the SAME images as the measurement).

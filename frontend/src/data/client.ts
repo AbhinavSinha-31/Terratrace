@@ -221,14 +221,14 @@ export const client = {
   },
 
   /** Quick scan of an area: the stored scan, PROCESSING, a recent failure or NOT_RUN — never starts Earth Engine work. */
-  quickScan(id: string, year: number | null, season: QuickScanSeason): Promise<QuickScan> {
-    const q = new URLSearchParams({ season, ...(year ? { year: String(year) } : {}) });
+  quickScan(id: string, year: number | null, season: QuickScanSeason | null): Promise<QuickScan> {
+    const q = new URLSearchParams({ ...(season ? { season } : {}), ...(year ? { year: String(year) } : {}) });
     return request<QuickScan>(`${API}/quickscan/${encodeURIComponent(id)}?${q}`, { timeoutMs: 15000 });
   },
 
   /** "Run quick scan": starts the background scan (or joins it) and returns its state at once. */
-  runQuickScan(id: string, year: number | null, season: QuickScanSeason): Promise<QuickScan> {
-    const q = new URLSearchParams({ season, ...(year ? { year: String(year) } : {}) });
+  runQuickScan(id: string, year: number | null, season: QuickScanSeason | null): Promise<QuickScan> {
+    const q = new URLSearchParams({ ...(season ? { season } : {}), ...(year ? { year: String(year) } : {}) });
     return request<QuickScan>(`${API}/quickscan/${encodeURIComponent(id)}?${q}`, { method: 'POST', timeoutMs: 30000 });
   },
 

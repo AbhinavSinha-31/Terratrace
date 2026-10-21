@@ -703,6 +703,7 @@ export interface QuickScanUhi {
   built_km2?: number; built_share?: number; other_km2?: number;
 }
 export interface QuickScanLst extends QuickScanSection {
+  reason_code?: string; scenes_found?: number; min_scenes?: number; suggest_season?: QuickScanSeason | null;
   mean_c?: number; p2_c?: number; median_c?: number; p98_c?: number; valid_share?: number | null;
   per_class?: { key: string; name: string; mean_c: number; area_km2: number; water: boolean }[];
   uhi?: QuickScanUhi;
@@ -732,4 +733,9 @@ export interface QuickScan {
   lst?: QuickScanLst;
   carbon?: { status: 'READY' | 'UNAVAILABLE'; label: string; scope: string; components: QuickScanCarbonComponent[] };
   layers?: QuickScanLayer[];
+  /** NOT_RUN only: what a run would meet right now (checked without Earth Engine). */
+  blocked?: { reason_code: string; reason: string; retryable: boolean };
+  /** Expected run time from scans this server has timed; seconds null = not yet measured. */
+  estimate?: { seconds: number | null; basis: string };
+  season_hint?: string | null;
 }

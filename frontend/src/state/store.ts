@@ -162,10 +162,11 @@ interface UiState {
   /** Reference context map layers (hillshade, slope, Hansen tree cover 2000, Hansen loss year), off by default. */
   contextLayers: Record<string, boolean>;
   setContextLayer(id: string, on: boolean): void;
-  /** Quick scan (public datasets, on request): the year (null = the latest complete year) and season shown, and the one
-   *  quick-scan map layer that is visible (null = none; the three layers cover each other, so one at a time). */
-  quickScan: { year: number | null; season: QuickScanSeason; layer: QuickScanLayer['id'] | null };
-  setQuickScan(p: Partial<{ year: number | null; season: QuickScanSeason; layer: QuickScanLayer['id'] | null }>): void;
+  /** Quick scan (public datasets, on request) of ONE area: the year (null = latest complete year) and season (null = the
+   *  backend's default, all months) shown, and the one visible quick-scan map layer (null = none). Reset when the area
+   *  changes, so a season picked for one area never carries over to another. */
+  quickScan: { aoi: string | null; year: number | null; season: QuickScanSeason | null; layer: QuickScanLayer['id'] | null };
+  setQuickScan(p: Partial<{ aoi: string | null; year: number | null; season: QuickScanSeason | null; layer: QuickScanLayer['id'] | null }>): void;
   setForestOpacity(v: number): void;
   setSelection(s: Selection | null): void;
   setDrawTool(t: DrawTool): void;
@@ -404,7 +405,7 @@ export const useUi = create<UiState>((set, get) => ({
   setLayer: (k, on) => set((s) => ({ layers: { ...s.layers, [k]: on } })),
   contextLayers: {},
   setContextLayer: (id, on) => set((s) => ({ contextLayers: { ...s.contextLayers, [id]: on } })),
-  quickScan: { year: null, season: 'all', layer: null },
+  quickScan: { aoi: null, year: null, season: null, layer: null },
   setQuickScan: (p) => set((s) => ({ quickScan: { ...s.quickScan, ...p } })),
   setForestOpacity: (v) => set((s) => ({ layers: { ...s.layers, forestOpacity: v } })),
   // Candidate AOI (drawn / searched / clicked) while no study is open. A new AOI resets the analysis.
