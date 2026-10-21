@@ -676,3 +676,60 @@ export interface ChatReply {
   /** shown = every translation passed its checks; dropped = the checked English answer is shown instead. */
   translation?: 'shown' | 'dropped' | 'none' | null;
 }
+
+// ----------------------------------------------------------------------------- quick scan (backend services/quickscan.py)
+/** Tier "Quick scan": land cover, surface temperature and biomass carbon from PUBLIC datasets, on request — not
+ *  validated for the area, never a TerraTrace classification, never counted in the forest totals. */
+export type QuickScanSeason = 'all' | 'mam' | 'jja' | 'son' | 'djf';
+export interface QuickScanSource { dataset: string; id?: string; ids?: string[]; year?: number; resolution_m: number; [k: string]: unknown }
+export interface QuickScanClass { key: string; name: string; color: string; area_km2: number; share: number; low_confidence_share: number | null }
+export interface QuickScanLayer {
+  id: 'lst' | 'landcover' | 'carbon';
+  label: string;
+  tiles: string[];
+  source: QuickScanSource;
+  legend:
+    | { type: 'gradient'; unit: string; min: number; max: number; palette: string[]; note: string }
+    | { type: 'classes'; classes: { key: string; name: string; color: string }[]; note: string };
+}
+interface QuickScanSection { status: 'READY' | 'UNAVAILABLE'; reason?: string; label?: string; source: QuickScanSource; method?: string }
+export interface QuickScanLandCover extends QuickScanSection {
+  classified_km2?: number; coverage_share?: number | null; low_confidence_share?: number; low_confidence_rule?: string;
+  classes?: QuickScanClass[];
+  worldcover_agreement?: { share: number; compared_km2: number; source: QuickScanSource; note: string } | null;
+}
+export interface QuickScanUhi {
+  status: 'READY' | 'UNAVAILABLE'; label: string; reason?: string; value_c?: number; built_mean_c?: number; other_mean_c?: number;
+  built_km2?: number; built_share?: number; other_km2?: number;
+}
+export interface QuickScanLst extends QuickScanSection {
+  mean_c?: number; p2_c?: number; median_c?: number; p98_c?: number; valid_share?: number | null;
+  per_class?: { key: string; name: string; mean_c: number; area_km2: number; water: boolean }[];
+  uhi?: QuickScanUhi;
+}
+export interface QuickScanCarbonComponent extends QuickScanSection {
+  id: string; density_t_per_ha?: number; total_t?: number; range_t?: [number, number]; coverage_share?: number;
+  carbon_fraction?: number; range_rule?: string; excludes?: string;
+}
+export interface QuickScan {
+  aoi_id: string;
+  status: 'NOT_RUN' | 'PROCESSING' | 'READY' | 'UNAVAILABLE';
+  tier: 'quick_scan';
+  label: string;
+  year: number;
+  season: QuickScanSeason;
+  season_label: string;
+  first_year: number;
+  last_year: number;
+  reason?: string | null;
+  reason_code?: string;
+  retryable?: boolean;
+  area_km2?: number;
+  computed_at?: string;
+  elapsed_s?: number;
+  quickscan_version?: string;
+  landcover?: QuickScanLandCover;
+  lst?: QuickScanLst;
+  carbon?: { status: 'READY' | 'UNAVAILABLE'; label: string; scope: string; components: QuickScanCarbonComponent[] };
+  layers?: QuickScanLayer[];
+}

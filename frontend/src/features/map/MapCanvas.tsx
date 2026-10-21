@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ChangeEvent, ChangeType, Severity, StudyArea } from '../../data/contracts';
-import { useAreaContext, useBasemaps, useCandidateAoi, useCurrentBundle, useImageryDecision, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
+import { useAreaContext, useBasemaps, useCandidateAoi, useCurrentBundle, useImageryDecision, useQuickScan, useReadyResults, useSelectedAoi, useStudyAreas } from '../../data/queries';
 import { selectCandidate, useUi } from '../../state/store';
 import { EXPLORE_REGIONS } from '../../lib/regions';
 import { squareAround } from '../../lib/geo';
@@ -40,6 +40,10 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   // Reference context layers of the open study only (shown whatever the analysis status; off until toggled).
   const contextLayers = useAreaContext(aoiId).data?.layers ?? null;
   const contextOn = useUi((s) => s.contextLayers);
+  // Quick-scan layers of the open area (only once its scan is READY; nothing is drawn before).
+  const qs = useUi((s) => s.quickScan);
+  const quickLayers = useQuickScan(aoiId, qs.year, qs.season).data?.layers ?? null;
+  const quickOn = qs.layer;
   const sevFilter = useUi((s) => s.severityFilter);
   const typeFilter = useUi((s) => s.typeFilter);
   const selectedId = useUi((s) => s.selectedEventId);
@@ -62,7 +66,7 @@ export function MapCanvas({ role, year, onReady, style }: Props) {
   );
 
   const state = {
-    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, imageryAoi, events, hotspots, year, imagery, layers, contextLayers, contextOn, severities, types,
+    areas, regions: EXPLORE_REGIONS, aoi, catalog, basemaps, yearImagery, imageryAoi, events, hotspots, year, imagery, layers, contextLayers, contextOn, quickLayers, quickOn, severities, types,
     selectedId, hoveredId, hoveredAoiId,
     draft: drawTool ? draft : aoiId ? null : selection?.geometry ?? null,
     pin: drawTool || aoiId ? null : selection?.point ?? null,

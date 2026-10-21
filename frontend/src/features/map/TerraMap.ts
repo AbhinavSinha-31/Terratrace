@@ -7,7 +7,7 @@ import maplibregl, {
   type StyleSpecification,
 } from 'maplibre-gl';
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
-import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, ContextLayer, ImageryDecision, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
+import type { AoiGeometry, BaseLayer, Basemaps, ChangeEvent, ChangeType, ContextLayer, QuickScanLayer, ImageryDecision, LayerCatalog, Severity, StudyArea } from '../../data/contracts';
 import type { ImageryMode, LayerToggles } from '../../state/store';
 import type { ExploreRegion } from '../../lib/regions';
 import { SEVERITY_COLOR, SEVERITY_LINE } from '../../lib/palette';
@@ -42,6 +42,9 @@ export interface MapState {
   /** Reference context layers of the open area (backend templates; never TerraTrace results) and their toggles. */
   contextLayers: ContextLayer[] | null;
   contextOn: Record<string, boolean>;
+  /** Quick-scan layers of the open area (public datasets, on request) and the one shown (null = none). */
+  quickLayers: QuickScanLayer[] | null;
+  quickOn: QuickScanLayer['id'] | null;
   severities: Severity[];
   types: ChangeType[];
   selectedId: string | null;
@@ -402,6 +405,9 @@ export class TerraMap {
     const ctxKey = `${s.aoi?.id ?? ''}|${(s.contextLayers ?? []).map((l) => `${l.id}:${!!s.contextOn[l.id]}`).join(',')}`;
     if (this.changed('context', ctxKey)) this.applyContextLayers();
 
+    const qsKey = `${s.aoi?.id ?? ''}|${(s.quickLayers ?? []).map((l) => l.tiles[0]).join(',')}|${s.quickOn ?? ''}`;
+    if (this.changed('quickscan', qsKey)) this.applyQuickScanLayers();
+
     if (this.changed('labels', `${s.layers.labels}|${this.basemapsAdded}`) && m.getLayer('labels')) m.setLayoutProperty('labels', 'visibility', s.layers.labels ? 'visible' : 'none');
 
     if (this.changed('events', s.events)) {
@@ -631,6 +637,28 @@ export class TerraMap {
         m.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 200 } }, 'anchor-overlays');
       }
       m.setLayoutProperty(id, 'visibility', s.contextOn[l.id] ? 'visible' : 'none');
+    }
+  }
+
+  /**
+   * Quick-scan layers (Landsat surface temperature, Dynamic World land cover, ESA CCI biomass carbon): raster tiles from
+   * the backend's quick-scan route through the same bounded tile loader, clipped to the open area, drawn like the
+   * reference context layers (above imagery, below analysis overlays). One is visible at a time; layers of another
+   * area or another scan are removed.
+   */
+  private applyQuickScanLayers() {
+    const m = this.map;
+    const s = this.state;
+    const wanted = new Map((s.aoi ? s.quickLayers ?? [] : []).map((l) => [`qs-${s.aoi!.id}-${l.id}-${l.tiles[0]}`, l]));
+    for (const l of m.getStyle().layers) {
+      if (l.id.startsWith('qs-') && !wanted.has(l.id)) { m.removeLayer(l.id); if (m.getSource(l.id)) m.removeSource(l.id); }
+    }
+    for (const [id, l] of wanted) {
+      if (!m.getSource(id)) {
+        m.addSource(id, { type: 'raster', tiles: l.tiles.map(eeTiles), tileSize: 256, maxzoom: 15, attribution: `${l.source.dataset}`, ...(s.aoi ? { bounds: s.aoi.bbox } : {}) });
+        m.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 200 } }, 'anchor-overlays');
+      }
+      m.setLayoutProperty(id, 'visibility', s.quickOn === l.id ? 'visible' : 'none');
     }
   }
 

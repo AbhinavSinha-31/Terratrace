@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { skipToken, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, client } from './client';
-import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, StudyArea } from './contracts';
+import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, QuickScan, QuickScanSeason, StudyArea } from './contracts';
 import { selectCandidate, useUi } from '../state/store';
 import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
 import { fmtKm2 } from '../lib/format';
@@ -27,6 +27,30 @@ export function useBackendRecovery(): void {
     if (prev.current === false && up === true) void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'health' });
     prev.current = up;
   }, [up, qc]);
+}
+
+/** Quick scan of an area (land cover, surface temperature, biomass carbon from public datasets). Read-only: it polls
+ *  while a scan is PROCESSING and never starts one — that is `useRunQuickScan`, behind the "Run quick scan" button. */
+export const quickScanKey = (aoi: string | null, year: number | null, season: QuickScanSeason) => ['quickscan', aoi, year, season] as const;
+export const useQuickScan = (aoi: string | null, year: number | null, season: QuickScanSeason) => {
+  const backend = useHealth().data?.backend;
+  return useQuery({
+    queryKey: quickScanKey(aoi, year, season),
+    queryFn: aoi && backend !== false ? () => client.quickScan(aoi, year, season) : skipToken,
+    staleTime: (q) => (q.state.data?.status === 'READY' ? Infinity : 0),
+    refetchInterval: (q) => (q.state.data?.status === 'PROCESSING' ? 3000 : false),
+    retry: false,
+  });
+};
+
+export function useRunQuickScan(aoi: string | null, year: number | null, season: QuickScanSeason) {
+  const qc = useQueryClient();
+  return async (): Promise<QuickScan | null> => {
+    if (!aoi) return null;
+    const doc = await client.runQuickScan(aoi, year, season);
+    qc.setQueryData(quickScanKey(aoi, year, season), doc);
+    return doc;
+  };
 }
 
 export const useBasemaps = () => useQuery({ queryKey: ['basemaps'], queryFn: () => client.basemaps(), staleTime: Infinity, retry: false });

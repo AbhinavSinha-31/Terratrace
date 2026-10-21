@@ -6,6 +6,7 @@ import { fmtDelta } from '../../lib/format';
 import { useUi } from '../../state/store';
 import { caseStudyAsset, caseStudyMeta, useCaseStudy, yearSpan, type CaseStudyDoc, type ImageRef } from './data';
 import { CaseStudyMap } from './CaseStudyMap';
+import { TierBadge } from '../shell/TierBadge';
 import { DownloadCard } from './DownloadCard';
 
 // Number formats match results_summary.md (1 decimal for km² and %, 2 for UHI, 3 for r and kappa).
@@ -91,7 +92,8 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
         <IconButton label="Close case study" onClick={onClose}><X size={17} /></IconButton>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Badge tone="accent" icon={<BookOpenText size={11} />}>Case study · Landsat {years}</Badge>
+        <TierBadge tier="research" />
+        <Badge tone="accent" icon={<BookOpenText size={11} />}>Landsat {years}</Badge>
         <span className="inline-flex items-center gap-1">
           <Badge>Precomputed analysis · interactive map</Badge>
           <Tooltip content={`Computed from Landsat satellite data with TerraTrace's analysis pipeline. Results are fixed for ${d.study.years.join(' and ')}; live re-analysis is coming later.`}>

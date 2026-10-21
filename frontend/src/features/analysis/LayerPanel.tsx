@@ -1,5 +1,6 @@
 import { ChevronsLeft, Flame, Layers, Map as MapIcon, Mountain, Satellite, Scan, SquareDashed, TreePine, Type } from 'lucide-react';
-import { useAreaContext, useCurrentBundle } from '../../data/queries';
+import { useAreaContext, useCurrentBundle, useQuickScan } from '../../data/queries';
+import type { QuickScanLayer } from '../../data/contracts';
 import { useUi } from '../../state/store';
 import { useImageryState } from '../../data/viewState';
 import { SEVERITIES, type GradientLegend } from '../../data/contracts';
@@ -15,6 +16,30 @@ function Gradient({ legend }: { legend: GradientLegend }) {
       <div className="mb-1 flex justify-between text-[10.5px] text-ink-2"><span>{legend.title}</span>{legend.note && <span className="text-ink-4">{legend.note}</span>}</div>
       <div className="h-1.5 rounded-full" style={{ background: `linear-gradient(90deg, ${css})` }} />
       <div className="t-data mt-1 flex justify-between text-[9.5px] text-ink-3"><span>{legend.min_label}</span><span>{legend.max_label}</span></div>
+    </div>
+  );
+}
+
+/** Legend of a quick-scan layer, from the backend's own legend (palette, range, unit, classes). */
+function QuickScanLegend({ layer }: { layer: QuickScanLayer }) {
+  const lg = layer.legend;
+  if (lg.type === 'classes') {
+    return (
+      <div data-testid="quickscan-legend">
+        <div className="mb-1.5 text-[10.5px] text-ink-2">{layer.label}</div>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+          {lg.classes.map((c) => <div key={c.key} className="flex items-center gap-1.5 text-[10.5px] text-ink-2"><span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: c.color }} />{c.name}</div>)}
+        </div>
+        <div className="mt-1.5 text-[9.5px] leading-snug text-ink-4">{lg.note}</div>
+      </div>
+    );
+  }
+  const n = lg.palette.length - 1;
+  const stops = lg.palette.map((c, i): [number, string] => [lg.min + ((lg.max - lg.min) * i) / n, c]);
+  return (
+    <div data-testid="quickscan-legend">
+      <Gradient legend={{ type: 'gradient', title: layer.label, note: 'quick scan', stops, min_label: `${lg.min.toFixed(lg.unit === '°C' ? 1 : 0)} ${lg.unit}`, max_label: `${lg.max.toFixed(lg.unit === '°C' ? 1 : 0)} ${lg.unit}+` }} />
+      <div className="mt-1 text-[9.5px] leading-snug text-ink-4">{lg.note}</div>
     </div>
   );
 }
@@ -39,6 +64,11 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
   const ctxLayers = useAreaContext(studyId).data?.layers ?? [];
   const ctxOn = useUi((s) => s.contextLayers);
   const setCtx = useUi((s) => s.setContextLayer);
+  // Quick-scan layers (public datasets, on request): offered once the open area's scan is READY; one shown at a time.
+  const qs = useUi((s) => s.quickScan);
+  const setQs = useUi((s) => s.setQuickScan);
+  const qsLayers = useQuickScan(studyId, qs.year, qs.season).data?.layers ?? [];
+  const qsShown = qsLayers.find((l) => l.id === qs.layer) ?? null;
 
   return (
     <div>
@@ -76,6 +106,16 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
             ))}
           </div>
         )}
+        {qsLayers.length > 0 && (
+          <div className="pt-2" data-testid="quickscan-layers">
+            <div className="t-label px-1 pb-1 pt-1 !text-[9px] text-ink-4">Quick scan · public datasets</div>
+            {qsLayers.map((l) => (
+              <LayerToggle key={l.id} icon={l.id === 'lst' ? <Flame size={14} /> : <TreePine size={14} />}
+                label={l.id === 'lst' ? 'Surface temperature' : l.id === 'landcover' ? 'Land cover (Dynamic World)' : 'Biomass carbon (ESA CCI)'}
+                hint={l.label} on={qs.layer === l.id} onChange={(v) => setQs({ layer: v ? l.id : null })} />
+            ))}
+          </div>
+        )}
         <LayerToggle icon={<MapIcon size={14} />} label="Study boundary" hint="Analysed area and outside mask" on={layers.boundary} onChange={(v) => set('boundary', v)} />
         <LayerToggle icon={<Type size={14} />} label="Place labels" hint="Boundaries and place names (Esri)" on={layers.labels} onChange={(v) => set('labels', v)} />
       </div>
@@ -89,6 +129,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
           {ctxOn.treecover2000 && <Gradient legend={{ type: 'gradient', title: 'Tree canopy · Hansen v1.13 · year 2000', note: 'reference', stops: [[30, '#c7e9c0'], [65, '#41ab5d'], [100, '#00441b']], min_label: '30 %', max_label: '100 %' }} />}
           {ctxOn.lossyear && <Gradient legend={{ type: 'gradient', title: 'Tree cover loss year · Hansen v1.13', note: 'reference', stops: [[2001, '#ffffb2'], [2013, '#fd8d3c'], [2025, '#bd0026']], min_label: '2001', max_label: '2025' }} />}
           {layers.ndvi && ndviLegend && <Gradient legend={ndviLegend} />}
+          {qsShown && <QuickScanLegend layer={qsShown} />}
           {analysis && layers.change && (
             <div>
               <div className="mb-1.5 text-[10.5px] text-ink-2">Detected change · severity</div>

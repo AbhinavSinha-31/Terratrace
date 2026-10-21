@@ -80,6 +80,14 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
   between areas, said in the legend); land cover = Dynamic World's class colours at 10 m; carbon = one fixed range,
   0–150 t C/ha, for every area. A READY scan lists its `layers` (tile template, legend, source); not stored on disk.
 
+- **Phase C (done):** "Land, heat & carbon" tab in the analysis drawer (also shown below the status panel when an
+  area has no READY forest analysis): year and season pickers, the "Run quick scan" button (the only way a scan
+  starts), PROCESSING polling, and per-section values or reasons — land cover with class areas, low-confidence share
+  and the WorldCover cross-check; surface temperature with per-class means and the simple UHI; carbon density, total
+  and range. Every value shows dataset · year · resolution. One quick-scan map layer at a time (switch in each section
+  and in the layer panel), with the backend's legend. Tier badges: "Research case study" (Noida page and card),
+  "Live analysis" (forest Overview), "Quick scan · public datasets, not validated for this area" (the tab).
+
 ## Backlog (not part of the quick-scan phases; do later)
 
 1. **Integrity script end to end.** `frontend/scripts/check-data-integrity.mjs` stops at the Hasdeo step that waits for a

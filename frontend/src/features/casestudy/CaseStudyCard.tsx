@@ -53,7 +53,7 @@ export function CaseStudyCard({ meta, index, cell }: { meta: CaseStudyMeta; inde
         {/* Precomputed results: a fixed label instead of a live-analysis status. */}
         <div className="mt-2.5 flex min-w-0 items-center gap-2 border-t border-line pt-2" data-testid="case-study-badge">
           <BookOpenText size={13} className="shrink-0 text-accent" />
-          <span className="t-data min-w-0 text-[12.5px] font-medium leading-tight text-accent">Case study · Landsat{years ? ` ${years}` : ''}</span>
+          <span className="t-data min-w-0 text-[12.5px] font-medium leading-tight text-accent">Research case study{years ? ` · ${years}` : ''}</span>
         </div>
       </div>
     </motion.button>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { TierBadge } from '../shell/TierBadge';
 import { AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { useCurrentAnalysis, useFilteredEvents, useSelectedAoi } from '../../data/queries';
 import { useAnalysisWindow, useUi } from '../../state/store';
@@ -55,6 +56,7 @@ export function Overview() {
 
   return (
     <div className="space-y-6">
+      <TierBadge tier="live" />
       <section>
         <div className="t-label text-ink-3">Analysis window</div>
         <div className="mt-1.5 flex items-baseline justify-between gap-3">

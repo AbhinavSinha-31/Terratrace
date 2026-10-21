@@ -9,6 +9,7 @@
 import type {
   AnalysisEnvelope, AnalysisResult, AreaContext, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
   AnalysisHistory, AnalysisJob, ChatReply, ChatStage, ChatTurn, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
+  QuickScan, QuickScanSeason,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -217,6 +218,18 @@ export const client = {
   async areaContext(id: string): Promise<AreaContext> {
     const doc = await request<StudyArea & { context: AreaContext }>(`${API}/aoi/${encodeURIComponent(id)}?include=context`, { timeoutMs: 120000 });
     return doc.context;
+  },
+
+  /** Quick scan of an area: the stored scan, PROCESSING, a recent failure or NOT_RUN — never starts Earth Engine work. */
+  quickScan(id: string, year: number | null, season: QuickScanSeason): Promise<QuickScan> {
+    const q = new URLSearchParams({ season, ...(year ? { year: String(year) } : {}) });
+    return request<QuickScan>(`${API}/quickscan/${encodeURIComponent(id)}?${q}`, { timeoutMs: 15000 });
+  },
+
+  /** "Run quick scan": starts the background scan (or joins it) and returns its state at once. */
+  runQuickScan(id: string, year: number | null, season: QuickScanSeason): Promise<QuickScan> {
+    const q = new URLSearchParams({ season, ...(year ? { year: String(year) } : {}) });
+    return request<QuickScan>(`${API}/quickscan/${encodeURIComponent(id)}?${q}`, { method: 'POST', timeoutMs: 30000 });
   },
 
   getAoi(id: string): Promise<StudyArea> {
