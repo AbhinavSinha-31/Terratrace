@@ -41,6 +41,10 @@ class Fact:
     years: tuple[int, ...] = ()
     direction: str | None = None                          # "loss" | "gain" | "signed" | None
     phrases: tuple[str, ...] = ()                         # proportion words the fact's own text uses (reference facts)
+    # What a fact may NOT be presented as (quick scan, 2026-10-22): "quick_scan" (public datasets — never a TerraTrace
+    # classification), "dw_trees" (Dynamic World land-cover class "Trees" — never forest cover), "biomass_carbon"
+    # (above-ground tree biomass only — never total / ecosystem / soil carbon).
+    tags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -121,6 +125,9 @@ ALLOWED_NAMES = {
     # ESA WorldCover class names, as the facts write them ("Tree cover", "Built-up", "Snow and ice", ...)
     "tree", "shrubland", "grassland", "cropland", "built-up", "bare", "snow", "permanent", "herbaceous", "mangroves",
     "moss",
+    # Quick scan (2026-10-22): Dynamic World class names, ESA CCI, temperature and carbon units — never places.
+    "trees", "grass", "flooded", "vegetation", "crops", "shrub", "scrub", "built", "area", "ground", "ice", "water",
+    "wri", "cci", "biomass", "above-ground", "lst", "uhi", "ndbi", "mndwi", "celsius", "c", "kt", "mt", "t",
 }
 # Ordinary English words that may start a sentence. A capitalised sentence-initial word NOT in here (and not seen in
 # lower case elsewhere in the answer) is treated as a possible name: the check prefers withholding to missing a place.
@@ -287,9 +294,24 @@ def _quant(d: Decimal, places: int) -> Decimal:
     return d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
+_CARBON_UNIT = re.compile(
+    r"\s*(?P<scale>(?:t|tonnes?|tons?|kt|kilotonnes?|mt|megatonnes?|million\s+tonnes?)\b\s*(?:of\s+)?)"
+    r"(?:c\b|carbon\b)(?P<per>\s*(?:/|per)\s*(?:ha\b|hectares?\b))?", re.I)
+_CELSIUS = re.compile(r"\s*(?:°\s*c\b|degrees?\s+c(?:elsius)?\b|deg\s*c\b)", re.I)
+
+
 def _unit_of(text: str, end: int) -> str | None:
+    rest = text[end:]
+    if _CELSIUS.match(rest):
+        return "C"
+    c = _CARBON_UNIT.match(rest)
+    if c:
+        scale = c.group("scale").strip().lower()
+        if c.group("per"):
+            return "tC/ha" if scale.startswith(("t", "ton")) else None
+        return "MtC" if scale.startswith(("mt", "mega", "million")) else "ktC" if scale.startswith(("kt", "kilo")) else "tC"
     m = re.match(r"\s*(%|percent(?:age\s+points?)?\b|per\s*cent\b|points?\b|ha\b|hectares?\b|km\s*2\b|km2\b|"
-                 r"square\s+kilomet(?:er|re)s?\b|m\b|metres?\b|meters?\b|°|degrees?\b)", text[end:], re.I)
+                 r"square\s+kilomet(?:er|re)s?\b|m\b|metres?\b|meters?\b|°|degrees?\b)", rest, re.I)
     if not m:
         return None
     u = m.group(1).lower()
@@ -330,16 +352,47 @@ def _direction(seg: str, m: re.Match[str], depth: int = 0) -> tuple[bool, bool]:
     return loss or sign == "-", gain or sign == "+"
 
 
+# Sentence breaks for the quick-scan checks: a "." between digits ("12.5 km²") is a decimal point, not a break.
+_BREAK = re.compile(r"(?<!\d)[.!?;\n]|[.!?;\n](?!\d)")
+
+
+def _sentence_of(text: str, pos: int) -> str:
+    starts = [m.end() for m in _BREAK.finditer(text, 0, pos)]
+    end = _BREAK.search(text, pos)
+    return text[(starts[-1] if starts else 0):(end.start() if end else len(text))]
+
+
+WARM_WORDS = re.compile(_W + r"(?:warm\w*|hott?\w*|heat\s+island|higher|above)" + _E, re.I)
+COOL_WORDS = re.compile(_W + r"(?:cool\w*|cold\w*|cooler|cool\s+island|lower|below)" + _E, re.I)
+
+
+def _says_warmth(seg: str, m: re.Match[str]) -> tuple[bool, bool]:
+    """(states warmer, states cooler) for a temperature difference: its sentence's words, or its sign."""
+    sentence = _sentence_of(seg, m.start())
+    tok = m.group(0).strip()
+    warm, cool = bool(WARM_WORDS.search(sentence)), bool(COOL_WORDS.search(sentence))
+    return warm or tok[:1] == "+", cool or tok[:1] in "-−"
+
+
 def _number_supported(seg: str, m: re.Match[str], facts: list[Fact]) -> bool:
+    return bool(supporting_facts(seg, m, facts))
+
+
+def supporting_facts(seg: str, m: re.Match[str], facts: list[Fact]) -> list[Fact]:
+    """The facts that support the number `m` as written (value at its precision, unit, direction). Empty = unsupported.
+    A token that is not a number is supported by every fact (nothing to check)."""
     nv = _num_value(m.group(0))
     if nv is None:
-        return True
+        return list(facts) or [Fact("none")]
     v, dec = nv
     unit = _unit_of(seg, m.end())
     says_loss, says_gain = _direction(seg, m)
-    if unit is None and _is_year(v, dec) and any(int(v) in f.years for f in facts):
-        return True
+    if unit is None and _is_year(v, dec):
+        years = [f for f in facts if int(v) in f.years]
+        if years:
+            return years
     target = _quant(Decimal(repr(v)), dec)
+    found: list[Fact] = []
     for f in facts:
         for fv, fu in f.values:
             if unit is not None and fu is not None and unit != fu:
@@ -356,8 +409,13 @@ def _number_supported(seg: str, m: re.Match[str], facts: list[Fact]) -> bool:
                 continue
             if f.direction == "signed" and not ((fv < 0 and says_loss and not says_gain) or (fv > 0 and says_gain and not says_loss)):
                 continue
-            return True
-    return False
+            if f.direction == "warmth":
+                warm, cool = _says_warmth(seg, m)
+                if not ((fv > 0 and warm and not cool) or (fv < 0 and cool and not warm)):
+                    continue
+            found.append(f)
+            break
+    return found
 
 
 # ----------------------------------------------------------------------------- checks per segment kind
@@ -456,6 +514,35 @@ def check_general(text: str) -> str | None:
     return None
 
 
+FOREST_WORD = re.compile(_W + r"(?:forest\w*|deforest\w*|reforest\w*|woodlands?|jungles?|rain-?forests?)" + _E, re.I)
+CARBON_OVERCLAIM = re.compile(_W + r"(?:(?:total|ecosystem|soil|all)\s+(?:organic\s+)?carbon|carbon\s+in\s+(?:the\s+)?soil|"
+                              r"(?:including|includes?|with)\s+(?:the\s+)?(?:roots|soil|dead\s+wood|litter))" + _E, re.I)
+NEGATION = re.compile(_W + r"(?:not|no|excludes?|excluding|without|except|only)" + _E, re.I)
+TERRATRACE_CLASSIFICATION = re.compile(r"\bterratrace(?:'s|’s)?\s+(?:own\s+)?(?:classif\w*|land[\s-]cover|lulc|map\w*|measure\w*|"
+                                       r"analys[ie]s|results?)\b", re.I)
+
+
+def quick_scan_misuse(text: str, facts: list[Fact]) -> str | None:
+    """How a segment citing quick-scan facts may NOT present them (checked per sentence that states a number)."""
+    if not any("quick_scan" in f.tags for f in facts):
+        return None
+    t = _DATASET_TOKENS.sub(" ", text)
+    for m in NUMBER.finditer(t):
+        support = supporting_facts(t, m, facts)
+        if not support or not all("quick_scan" in f.tags for f in support):
+            continue
+        sentence = _sentence_of(t, m.start())
+        if TERRATRACE_CLASSIFICATION.search(sentence):
+            return "quick_scan_as_terratrace"
+        if all("dw_trees" in f.tags for f in support) and FOREST_WORD.search(sentence):
+            return "trees_as_forest"
+        if all("biomass_carbon" in f.tags for f in support):
+            over = CARBON_OVERCLAIM.search(sentence)
+            if over and not NEGATION.search(sentence[:over.start()]):
+                return "carbon_overclaim"
+    return None
+
+
 def check_numbers(text: str, facts: list[Fact]) -> bool:
     t = _DATASET_TOKENS.sub(" ", text)
     for m in NUMBER.finditer(t):
@@ -488,7 +575,9 @@ def check_place(text: str, cited: list[str], place_facts: dict[str, Fact], ref_f
         up, down = bool(GAIN_WORDS.search(text)), bool(LOSS_WORDS.search(text))
         if (all(v < 0 for v in signed) and up and not down) or (all(v > 0 for v in signed) and down and not up):
             return "unsupported_number"
-    return None if check_numbers(text, facts) else "unsupported_number"
+    if not check_numbers(text, facts):
+        return "unsupported_number"
+    return quick_scan_misuse(text, facts)
 
 
 def check_reference(text: str, cited: list[str], place_facts: dict[str, Fact], ref_facts: dict[str, Fact]) -> str | None:

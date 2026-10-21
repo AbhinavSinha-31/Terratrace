@@ -88,6 +88,17 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
   and in the layer panel), with the backend's legend. Tier badges: "Research case study" (Noida page and card),
   "Live analysis" (forest Overview), "Quick scan · public datasets, not validated for this area" (the tab).
 
+- **Phase D (done):** stored quick scans (latest 3 per area) are offered to the chat as place facts of a third kind,
+  "Quick scan from public datasets — not validated for this area, not a TerraTrace classification", each with dataset
+  and year. The validator understands °C, t C/ha and t/kt/Mt C, requires a heat-island figure to be stated as warmer
+  (positive) or cooler (negative), and withholds a segment when a number supported only by quick-scan facts is
+  presented as a TerraTrace classification (`quick_scan_as_terratrace`), a number supported only by Dynamic World
+  "Trees" sits in a sentence that calls it forest (`trees_as_forest`), or biomass carbon is called total, ecosystem or
+  soil carbon (`carbon_overclaim`; "not including soil carbon" is fine). Prompt `chat-4` states the same rules.
+- **Earth Engine quota (2026-10-22):** project terratrace-509821 is in restricted mode — per Google, requests still
+  run with reduced concurrency and workers; quotas reset on the 1st of each month at 00:00 Pacific Time. The quick scan
+  currently REFUSES new scans in restricted mode (decision above); revisit if the user wants scans to run slowly instead.
+
 ## Backlog (not part of the quick-scan phases; do later)
 
 1. **Integrity script end to end.** `frontend/scripts/check-data-integrity.mjs` stops at the Hasdeo step that waits for a

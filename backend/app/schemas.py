@@ -237,7 +237,7 @@ class ChatCitation(BaseModel):
     value: str | None = None
     dataset: str | None = None
     year: str | None = None
-    kind: Literal["terratrace_result", "reference_context", "method", "dataset"]
+    kind: Literal["terratrace_result", "reference_context", "quick_scan", "method", "dataset"]
     source: str | None = None
 
 

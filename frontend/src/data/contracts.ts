@@ -649,7 +649,7 @@ export interface ChatCitation {
   dataset: string | null;
   year: string | null;
   /** terratrace_result / reference_context: this area's data; method / dataset: the curated reference library. */
-  kind: 'terratrace_result' | 'reference_context' | 'method' | 'dataset';
+  kind: 'terratrace_result' | 'reference_context' | 'quick_scan' | 'method' | 'dataset';
   source: string | null;
 }
 /** general = AI explanation (no forest figures); place = this area, from TerraTrace data; reference = method/dataset fact. */

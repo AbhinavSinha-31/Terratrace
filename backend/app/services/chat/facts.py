@@ -14,13 +14,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .. import analysis, context as area_context, science as sc
+from .. import analysis, context as area_context, quickscan, science as sc
 from ..units import fmt_share
 from .validator import NUMBER, PROPORTION, QUANTIFIER, Fact, _num_value, _unit_of
 
 REFERENCE_FILE = Path(__file__).resolve().parents[2] / "data" / "reference_facts.json"
 RESULT = "terratrace_result"
 CONTEXT = "reference_context"
+QUICK = "quick_scan"
+KIND_TEXT = {RESULT: "TerraTrace result", CONTEXT: "Reference context, not a TerraTrace result",
+             QUICK: "Quick scan from public datasets — not validated for this area, not a TerraTrace classification"}
+MAX_QUICK_SCANS = 3        # most recent stored scans of an area offered to the chat
 
 
 def _ha(v: float) -> str:
@@ -34,12 +38,12 @@ class _Builder:
         self.public: dict[str, dict[str, Any]] = {}  # what the UI shows as a citation
 
     def add(self, label: str, display: str | None, *, values: tuple[tuple[float, str | None], ...] = (),
-            years: tuple[int, ...] = (), dataset: str, year: str | None, kind: str, direction: str | None = None) -> None:
+            years: tuple[int, ...] = (), dataset: str, year: str | None, kind: str, direction: str | None = None,
+            tags: tuple[str, ...] = ()) -> None:
         fid = f"P{len(self.prompt) + 1}"
-        item = {"id": fid, "label": label, "value": display, "dataset": dataset, "year": year,
-                "kind": "TerraTrace result" if kind == RESULT else "Reference context, not a TerraTrace result"}
+        item = {"id": fid, "label": label, "value": display, "dataset": dataset, "year": year, "kind": KIND_TEXT[kind]}
         self.prompt.append(item)
-        self.index[fid] = Fact(fid, values, years, direction)
+        self.index[fid] = Fact(fid, values, years, direction, (), tags + ((QUICK,) if kind == QUICK else ()))
         self.public[fid] = {"id": fid, "label": label, "value": display, "dataset": dataset, "year": year, "kind": kind,
                             "source": None}
 
@@ -186,6 +190,104 @@ def _context_facts(b: _Builder, aoi: dict[str, Any]) -> None:
               kind=CONTEXT)
 
 
+def _km2(v: float) -> str:
+    return f"{v:,.1f} km²" if v >= 10 else f"{v:,.2f} km²"
+
+
+def _quickscan_facts(b: _Builder, aoi: dict[str, Any]) -> None:
+    """The area's stored quick scans (most recent first). Each value carries its dataset and year; the tags keep them
+    from being presented as forest cover, total carbon or a TerraTrace classification (validator.quick_scan_misuse)."""
+    try:
+        version = quickscan.version()
+    except Exception:  # noqa: BLE001 — quick scan unavailable on this server: no facts, nothing else changes
+        return
+    files = sorted(quickscan.CACHE.glob(f"{aoi['id']}-[0-9][0-9][0-9][0-9]-*-{version}.json"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)[:MAX_QUICK_SCANS] if quickscan.CACHE.exists() else []
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        y, season = d.get("year"), d.get("season_label") or "all months"
+        if not isinstance(y, int) or d.get("quickscan_version") != version:
+            continue
+        b.add(f"Quick scan {y} ({season}): land cover from Dynamic World, surface temperature from Landsat, carbon from ESA CCI. "
+              "Public datasets, not validated for this area; Dynamic World 'Trees' is a land-cover class, not TerraTrace's forest measure.",
+              None, years=(y,), dataset="Dynamic World V1, Landsat 8/9 Collection 2, ESA CCI Biomass v6.0", year=str(y), kind=QUICK)
+        lc = d.get("landcover") or {}
+        if lc.get("status") == "READY":
+            ds = lc["source"]["dataset"]
+            for c in lc.get("classes") or []:
+                if not c.get("area_km2"):
+                    continue
+                a, sh = c["area_km2"], c["share"] * 100
+                note = " (a land-cover class, not forest cover)" if c["key"] == "trees" else ""
+                b.add(f"Dynamic World {y} land cover: {c['name']}{note}", f"{_km2(a)} ({sh:.1f} %)",
+                      values=((a, "km2"), (a * 100, "ha"), (sh, "%")), years=(y,), dataset=ds, year=str(y), kind=QUICK,
+                      tags=("dw_trees",) if c["key"] == "trees" else ())
+            if lc.get("low_confidence_share") is not None:
+                v = lc["low_confidence_share"] * 100
+                b.add(f"Dynamic World {y}: share of the area with low confidence (top probability below 0.5)", f"{v:.1f} %",
+                      values=((v, "%"), (0.5, None)), years=(y,), dataset=ds, year=str(y), kind=QUICK)
+            wc = lc.get("worldcover_agreement")
+            if wc:
+                v = wc["share"] * 100
+                b.add(f"Dynamic World {y} agrees with ESA WorldCover 2021 on this share of the area (a cross-check, not accuracy)",
+                      f"{v:.1f} %", values=((v, "%"),), years=(y, 2021), dataset=f"{ds}; ESA WorldCover v200", year=str(y), kind=QUICK)
+        else:
+            b.add(f"Quick scan {y}: land cover unavailable — {lc.get('reason') or 'no Dynamic World data'}", None, years=(y,),
+                  dataset="Dynamic World V1", year=str(y), kind=QUICK)
+        lst = d.get("lst") or {}
+        if lst.get("status") == "READY":
+            ds = lst["source"]["dataset"]
+            n = lst["source"].get("scenes")
+            when = f"{season} {y}"
+            for key, label in (("mean_c", "mean of land"), ("p2_c", "2nd percentile"), ("p98_c", "98th percentile")):
+                if lst.get(key) is not None:
+                    b.add(f"Land surface temperature, {when}, {label} ({n} Landsat scenes, ~10:30 local overpass)",
+                          f"{lst[key]:.1f} °C", values=((lst[key], "C"), (float(n or 0), None)), years=(y,), dataset=ds,
+                          year=when, kind=QUICK)
+            for c in lst.get("per_class") or []:
+                if c.get("water"):
+                    continue
+                b.add(f"Land surface temperature, {when}, mean over Dynamic World '{c['name']}'", f"{c['mean_c']:.1f} °C",
+                      values=((c["mean_c"], "C"),), years=(y,), dataset=f"{ds}; Dynamic World V1", year=when, kind=QUICK)
+            u = lst.get("uhi") or {}
+            if u.get("status") == "READY":
+                b.add(f"{u['label']}, {when}: built-up land minus other land (positive = built-up land is warmer)",
+                      f"{u['value_c']:+.1f} °C", values=((u["value_c"], "C"),), years=(y,), dataset=f"{ds}; Dynamic World V1",
+                      year=when, kind=QUICK, direction="warmth")
+                b.add(f"Mean surface temperature of built-up land / other land, {when}", f"{u['built_mean_c']:.1f} °C / {u['other_mean_c']:.1f} °C",
+                      values=((u["built_mean_c"], "C"), (u["other_mean_c"], "C")), years=(y,), dataset=ds, year=when, kind=QUICK)
+            elif u.get("reason"):
+                b.add(f"No surface heat-island figure for {when}: {u['reason']}", None, years=(y,), dataset=ds, year=when, kind=QUICK)
+        elif lst:
+            b.add(f"Land surface temperature, {season} {y}: unavailable — {lst.get('reason') or 'not measured'}", None,
+                  years=(y,), dataset="Landsat 8/9 Collection 2", year=str(y), kind=QUICK)
+        for comp in (d.get("carbon") or {}).get("components") or []:
+            src = comp.get("source") or {}
+            cy = src.get("year")
+            if comp.get("status") != "READY":
+                b.add(f"Above-ground tree biomass carbon: unavailable — {comp.get('reason') or 'not measured'}", None,
+                      years=(cy,) if cy else (), dataset=src.get("dataset") or "ESA CCI", year=str(cy or ""), kind=QUICK)
+                continue
+            scope = "above-ground tree biomass carbon only (roots, dead wood, litter and soil not included)"
+            tot, lo, hi = comp["total_t"], comp["range_t"][0], comp["range_t"][1]
+
+            def scaled(v: float) -> tuple[tuple[float, str], ...]:
+                return ((v, "tC"), (v / 1e3, "ktC"), (v / 1e6, "MtC"))
+            b.add(f"Carbon density, {scope}, ESA CCI {cy} × {comp['carbon_fraction']}", f"{comp['density_t_per_ha']:.1f} t C/ha",
+                  values=((comp["density_t_per_ha"], "tC/ha"), (comp["carbon_fraction"], None)), years=(cy,),
+                  dataset=src["dataset"], year=str(cy), kind=QUICK, tags=("biomass_carbon",))
+            b.add(f"Carbon in the area, {scope}, ESA CCI {cy}, with its range", f"{tot:,.0f} t C (range {lo:,.0f}–{hi:,.0f} t C)",
+                  values=scaled(tot) + scaled(lo) + scaled(hi), years=(cy,), dataset=src["dataset"], year=str(cy), kind=QUICK,
+                  tags=("biomass_carbon",))
+            if comp.get("coverage_share") is not None:
+                v = comp["coverage_share"] * 100
+                b.add(f"Share of the area with ESA CCI biomass values ({cy})", f"{v:.0f} %", values=((v, "%"),), years=(cy,),
+                      dataset=src["dataset"], year=str(cy), kind=QUICK)
+
+
 def place_facts(aid: str, window: tuple[int, int]) -> tuple[list[dict[str, Any]], dict[str, Fact], dict[str, dict[str, Any]], set[str], str]:
     """(facts for the prompt, validator index, public citations, area names, area display name). Read-only.
     Raises analysis.AnalysisNotFound for an unknown id."""
@@ -195,6 +297,7 @@ def place_facts(aid: str, window: tuple[int, int]) -> tuple[list[dict[str, Any]]
     b.area("Area analysed (geodesic)", area, dataset="TerraTrace", year=None, kind=RESULT)
     _result_facts(b, aoi, window)
     _context_facts(b, aoi)
+    _quickscan_facts(b, aoi)
     names = {n for n in (aoi.get("name"), aoi.get("short_name"), aoi.get("region"), aoi.get("country")) if n}
     return b.prompt, b.index, b.public, names, aoi.get("name") or "the selected area"
 

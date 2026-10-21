@@ -24,6 +24,7 @@ export function useChatAvailability(): { ready: boolean | null; message: string 
 const KIND_LABEL: Record<ChatCitation['kind'], string> = {
   terratrace_result: 'TerraTrace result',
   reference_context: 'Reference context, not a TerraTrace result',
+  quick_scan: 'Quick scan · public datasets, not validated',
   method: 'TerraTrace method',
   dataset: 'Dataset documentation',
 };
