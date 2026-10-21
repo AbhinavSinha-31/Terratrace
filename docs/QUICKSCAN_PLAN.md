@@ -53,8 +53,8 @@ second component without changing the others.
   a public reason and is **not** cached. A method change bumps `QUICKSCAN_VERSION`.
 - **Background job** after the user presses *Run quick scan*; one at a time on the analysis workers; its own rate limit.
   Same interactive area limit as the analysis (1,500 km²).
-- **Restricted mode** (Earth Engine noncommercial quota exceeded): new scans are refused with an honest reason; stored
-  results still open.
+- **Restricted mode** (Earth Engine noncommercial quota exceeded): scans still run, one at a time and more slowly, with a
+  longer request deadline and an explicit notice (changed 2026-10-22; see Implementation status).
 - **Map layers** (LST, Dynamic World land cover, biomass carbon) are served through the existing `/api/tiles` proxy and
   disk cache; tiles are created lazily on first view. No credentials reach the browser.
 
@@ -96,8 +96,14 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
   "Trees" sits in a sentence that calls it forest (`trees_as_forest`), or biomass carbon is called total, ecosystem or
   soil carbon (`carbon_overclaim`; "not including soil carbon" is fine). Prompt `chat-4` states the same rules.
 - **Earth Engine quota (2026-10-22):** project terratrace-509821 is in restricted mode — per Google, requests still
-  run with reduced concurrency and workers; quotas reset on the 1st of each month at 00:00 Pacific Time. The quick scan
-  currently REFUSES new scans in restricted mode (decision above); revisit if the user wants scans to run slowly instead.
+  run with reduced concurrency and workers; quotas reset on the 1st of each month at 00:00 Pacific Time.
+- **Restricted mode changed (user, 2026-10-22):** quick scans now RUN in restricted mode instead of being refused — one
+  at a time on their own single worker (a second request waits, shown as queued), with the Earth Engine request
+  deadline raised to `TT_QUICKSCAN_RESTRICTED_DEADLINE_S` (default 900 s) for that one request and restored after (never
+  shortened). Restricted mode counts as active for the rest of the quota month once seen (it cannot reset earlier). The
+  tab shows "Earth Engine is in its slower restricted mode this month. A quick scan still works but may take several
+  minutes. Full speed returns on {1st of next month}." and a restricted-mode estimate (measured restricted scans, else
+  5–6× the normal median, else "several minutes"). Rate limit, area limit, caching and no auto-start unchanged.
 
 ## Backlog (not part of the quick-scan phases; do later)
 

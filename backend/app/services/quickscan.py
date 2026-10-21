@@ -14,11 +14,13 @@ while Earth Engine reports restricted mode (quota exhausted); stored scans still
 
 from __future__ import annotations
 
+import concurrent.futures
+import contextlib
 import json
 import logging
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..config import settings
@@ -37,7 +39,7 @@ DEFAULT_SEASON = "all"
 UHI_MIN_SHARE = 0.05                  # built-up land must be ≥ 5 % of the land …
 UHI_MIN_HA = 200.0                    # … and ≥ 2 km² (and the rest of the land ≥ 2 km² too)
 FAILURE_TTL_S = 120.0                 # a failed scan is not retried by itself; a new request after this runs again
-RESTRICTED_RECENT_S = 3600.0          # restricted mode seen within this window → new scans are refused
+RESTRICTED_SLOWDOWN = (5, 6)          # forest analyses ran ~5–6× slower in restricted mode (2026-10-07: ~100 s → ~580 s)
 TROPICS_LAT = 15.0                    # |latitude| below this: single seasons are often too cloudy → recommend all months
 ESTIMATE_SAMPLE = 50                  # stored scans used for the time estimate (most recent first)
 
@@ -60,9 +62,55 @@ SOURCES = {
 _memory: LRUDict = LRUDict(settings.memory_cache_entries)
 _failures: LRUDict = LRUDict(settings.memory_cache_entries)      # key -> (public reason, code, monotonic time)
 _running: dict[str, Any] = {}                                    # key -> Future
+_started: set[str] = set()                                       # keys whose scan has left the queue
 _lock = threading.Lock()
-# Background execution on the analysis workers (one Earth Engine computation at a time across analyses and scans).
-_submit: Callable[..., Any] = lambda fn, *a: analysis._POOL.submit(fn, *a)   # noqa: E731 — replaced in tests
+# Quick scans run ONE AT A TIME on their own worker (a second request waits in the queue, shown as queued), separate
+# from the forest analyses' workers.
+_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tt-quickscan")
+_submit: Callable[..., Any] = lambda fn, *a: _POOL.submit(fn, *a)   # noqa: E731 — replaced in tests
+
+
+# ----------------------------------------------------------------------------- Earth Engine restricted mode
+def _pacific_offset_h(utc: datetime) -> int:
+    """UTC offset of US Pacific time (−7 in daylight time, −8 otherwise): DST from the second Sunday of March 02:00
+    local to the first Sunday of November 02:00 local (US rule since 2007). No tz database needed."""
+    y = utc.year
+
+    def nth_sunday(month: int, n: int) -> datetime:
+        d = datetime(y, month, 1, tzinfo=timezone.utc)
+        first = d + timedelta(days=(6 - d.weekday()) % 7)
+        return first + timedelta(weeks=n - 1)
+    start = nth_sunday(3, 2) + timedelta(hours=2 + 8)    # 02:00 PST = 10:00 UTC
+    end = nth_sunday(11, 1) + timedelta(hours=2 + 7)     # 02:00 PDT = 09:00 UTC
+    return -7 if start <= utc < end else -8
+
+
+def quota_month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """(start, end) in UTC of the current Earth Engine quota month: quotas reset on the 1st at 00:00 Pacific Time."""
+    now = now or datetime.now(timezone.utc)
+    local = now + timedelta(hours=_pacific_offset_h(now))
+    start_local = datetime(local.year, local.month, 1, tzinfo=timezone.utc)
+    end_local = datetime(local.year + (local.month == 12), local.month % 12 + 1, 1, tzinfo=timezone.utc)
+
+    def to_utc(d: datetime) -> datetime:
+        return d - timedelta(hours=_pacific_offset_h(d + timedelta(hours=8)))
+    return to_utc(start_local), to_utc(end_local)
+
+
+def restricted_mode() -> dict[str, Any] | None:
+    """Restricted mode seen in THIS quota month (it cannot end before the monthly reset, unless the tier changes).
+    Requests still run in restricted mode, more slowly: a quick scan gets a longer deadline and a slower estimate."""
+    seen = P.RESTRICTED_MODE.get("seen_at")
+    if seen is None:
+        return None
+    start, end = quota_month_bounds()
+    if datetime.fromtimestamp(seen, tz=timezone.utc) < start:
+        return None
+    reset = end + timedelta(hours=_pacific_offset_h(end))            # the reset as a Pacific calendar date
+    return {"active": True, "until": end.isoformat(timespec="minutes"), "until_label": f"{reset.day} {reset.strftime('%B')}",
+            "deadline_s": settings.quickscan_restricted_deadline_s,
+            "message": "Earth Engine is in its slower restricted mode this month. A quick scan still works but may take several "
+                       f"minutes. Full speed returns on {reset.day} {reset.strftime('%B')}."}
 
 
 class QuickScanError(ValueError):
@@ -99,20 +147,31 @@ def season_hint(aoi: dict[str, Any], season: str) -> str | None:
     return None
 
 
-def estimate() -> dict[str, Any]:
-    """Expected run time from the scans this server has actually timed (never invented)."""
-    times = []
+def estimate(restricted: bool = False) -> dict[str, Any]:
+    """Expected run time from the scans this server has actually timed (never invented), in the matching mode. With no
+    restricted-mode timing yet, the restricted estimate is the normal one × the slowdown the forest analyses showed."""
+    times: dict[bool, list[float]] = {False: [], True: []}
     for f in sorted(CACHE.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:ESTIMATE_SAMPLE] if CACHE.exists() else []:
         try:
-            t = json.loads(f.read_text(encoding="utf-8")).get("elapsed_s")
+            d = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        t = d.get("elapsed_s")
         if isinstance(t, (int, float)) and t > 0:
-            times.append(float(t))
-    if not times:
-        return {"seconds": None, "basis": "not yet measured on this server"}
-    times.sort()
-    return {"seconds": round(times[len(times) // 2]), "basis": f"median of {len(times)} scan{'s' if len(times) != 1 else ''} on this server"}
+            times[bool(d.get("restricted_mode"))].append(float(t))
+
+    def median(v: list[float]) -> int:
+        v = sorted(v)
+        return round(v[len(v) // 2])
+    n = len(times[restricted])
+    if n:
+        return {"seconds": median(times[restricted]), "restricted": restricted,
+                "basis": f"median of {n} {'restricted-mode ' if restricted else ''}scan{'s' if n != 1 else ''} on this server"}
+    if restricted and times[False]:
+        lo, hi = (median(times[False]) * k for k in RESTRICTED_SLOWDOWN)
+        return {"seconds": None, "range_s": [lo, hi], "restricted": True,
+                "basis": f"{RESTRICTED_SLOWDOWN[0]}–{RESTRICTED_SLOWDOWN[1]}× the normal median, the slowdown forest analyses showed in restricted mode"}
+    return {"seconds": None, "restricted": restricted, "basis": "not yet measured on this server"}
 
 
 def version() -> str:
@@ -330,12 +389,13 @@ def status(aid: str, year: int | None = None, season: str | None = None) -> dict
         key = _key(aid, y, s)
     except P.EarthEngineError as e:
         return _envelope(aid, y, s, "UNAVAILABLE", reason=e.message, reason_code=e.code, retryable=False)
+    slow = restricted_mode()
     fut = _running.get(key)
     if fut is not None and not fut.done():
-        return _envelope(aid, y, s, "PROCESSING")
+        return _envelope(aid, y, s, "PROCESSING", queued=key not in _started, restricted_mode=slow, estimate=estimate(bool(slow)))
     fail = _failures.get(key)
     aoi = analysis.aoi_doc(aid)
-    extra = {"estimate": estimate(), "season_hint": season_hint(aoi, s)}
+    extra = {"estimate": estimate(bool(slow)), "season_hint": season_hint(aoi, s), "restricted_mode": slow}
     if fail and time.monotonic() - fail[2] < FAILURE_TTL_S:
         return _envelope(aid, y, s, "UNAVAILABLE", reason=fail[0], reason_code=fail[1], retryable=True, **extra)
     blocked = _refusal(aid, y, s, analysis.analysis_target(aoi))   # what a run would meet right now (no Earth Engine call)
@@ -352,12 +412,7 @@ def _refusal(aid: str, y: int, s: str, target: dict[str, Any]) -> dict[str, Any]
     if not P.provider.credentials_configured():
         return _envelope(aid, y, s, "UNAVAILABLE", reason_code="ee_unconfigured", retryable=False,
                          reason="Live Earth Engine is not configured on this server, so quick scans cannot run.")
-    seen = P.RESTRICTED_MODE.get("seen_at")
-    if seen is not None and time.time() - seen < RESTRICTED_RECENT_S:
-        return _envelope(aid, y, s, "UNAVAILABLE", reason_code="quota_restricted", retryable=True,
-                         reason="Earth Engine's free compute quota is used up right now, so new quick scans are paused. "
-                                "Stored scans still open; try again later.")
-    return None
+    return None   # restricted mode is NOT a refusal: the scan runs, slower (restricted_mode())
 
 
 def start(aid: str, year: int | None = None, season: str | None = None) -> dict[str, Any]:
@@ -385,9 +440,12 @@ def start(aid: str, year: int | None = None, season: str | None = None) -> dict[
 
 
 def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2: float | None) -> None:
+    _started.add(key)
     t0 = time.monotonic()
+    slow = restricted_mode()
     try:
-        raw = Q.measure(geometry, y, s)
+        with Q.request_deadline(slow["deadline_s"]) if slow else contextlib.nullcontext():
+            raw = Q.measure(geometry, y, s)
         doc = parse(raw, year=y, season=s)
     except Exception as e:  # noqa: BLE001 — Earth Engine / network; the public reason never carries raw error text
         text = str(e)
@@ -396,7 +454,9 @@ def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2:
         elif "Too Many Requests" in text or "429" in text:
             reason, code = "Earth Engine is throttling requests right now; run the quick scan again in a few minutes.", "ee_throttled"
         elif any(w in text.lower() for w in ("deadline", "timed out", "timeout")):
-            reason, code = "Earth Engine took too long to answer; run the quick scan again, or choose All months or a smaller area.", "ee_timeout"
+            reason, code = ("Earth Engine took too long to answer"
+                            + (f" even with the {slow['deadline_s'] / 60:.0f}-minute restricted-mode limit" if slow else "")
+                            + "; run the quick scan again, or choose All months or a smaller area.", "ee_timeout")
         elif "quota" in text.lower() or "restricted" in text.lower():
             reason, code = "Earth Engine's free compute quota is used up right now; run the quick scan again later.", "quota_restricted"
         else:
@@ -404,14 +464,17 @@ def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2:
         log.warning("[quickscan] FAILED aoi=%s year=%s season=%s after %.1fs: %s: %s", aid, y, s, time.monotonic() - t0,
                     type(e).__name__, text[:300])
         _failures[key] = (reason, code, time.monotonic())
+        _started.discard(key)
         return
     doc = {**_envelope(aid, y, s, doc["status"]), **doc, "aoi_id": aid, "quickscan_version": version(),
            "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "elapsed_s": round(time.monotonic() - t0, 1),
-           "analysed_area_km2": area_km2}
+           "analysed_area_km2": area_km2, "restricted_mode": bool(slow or restricted_mode())}
     _memory[key] = doc
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         _path(key).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     except OSError as e:
         log.warning("[quickscan] cache write failed: %s", e)
-    log.info("[quickscan] %s aoi=%s year=%s season=%s in %.1fs", doc["status"], aid, y, s, doc["elapsed_s"])
+    _started.discard(key)
+    log.info("[quickscan] %s aoi=%s year=%s season=%s in %.1fs%s", doc["status"], aid, y, s, doc["elapsed_s"],
+             " (restricted mode)" if doc["restricted_mode"] else "")

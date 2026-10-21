@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, Flame, Leaf, Loader2, RotateCcw, ScanSearch, Trees } from 'lucide-react';
+import { AlertTriangle, Flame, Gauge, Leaf, Loader2, RotateCcw, ScanSearch, Trees } from 'lucide-react';
 import { Button, Menu, Switch } from '../../design';
 import { useQuickScan, useRunQuickScan } from '../../data/queries';
 import { ApiError } from '../../data/client';
@@ -53,7 +53,7 @@ function Unavailable({ reason }: { reason?: string | null }) {
  * backend's own sentence is shown as the detail. Never the forest-analysis wording.
  */
 const NEXT_STEP: Record<string, { title: string; next: string }> = {
-  quota_restricted: { title: 'Earth Engine quota used up', next: 'Quick scans are paused while the free Earth Engine quota is exhausted. Stored scans still open; try again once the quota has reset.' },
+  quota_restricted: { title: 'Earth Engine refused the request (quota)', next: 'Run the quick scan again in a few minutes. Stored scans still open.' },
   ee_unconfigured: { title: 'Earth Engine is off on this server', next: 'Quick scans need live Earth Engine. Ask whoever runs this server to configure it.' },
   area_too_large: { title: 'Area too large for a quick scan', next: 'Draw a smaller area (up to 1,500 km²) and run the quick scan there.' },
   ee_throttled: { title: 'Earth Engine is busy', next: 'Wait a few minutes, then run the quick scan again.' },
@@ -79,10 +79,27 @@ function Notice({ code, detail, onRetry }: { code: string; detail?: string | nul
   );
 }
 
-const fmtEstimate = (e?: { seconds: number | null; basis: string }) =>
-  !e || e.seconds === null
+const dur = (s: number) => (s < 90 ? `${s} s` : `${Math.round(s / 60)} min`);
+const fmtEstimate = (e?: QuickScan['estimate']) => {
+  if (e?.restricted) {
+    if (e.seconds !== null) return `Estimated time in restricted mode: about ${dur(e.seconds)} (${e.basis}).`;
+    if (e.range_s) return `Estimated time in restricted mode: about ${dur(e.range_s[0])}–${dur(e.range_s[1])} (${e.basis}).`;
+    return 'Estimated time in restricted mode: several minutes (not yet measured on this server; forest analyses ran about 5–6× slower in restricted mode).';
+  }
+  return !e || e.seconds === null
     ? 'Estimated time: usually under a minute (not yet measured on this server); several minutes when Earth Engine is busy.'
-    : `Estimated time: about ${e.seconds < 90 ? `${e.seconds} s` : `${Math.round(e.seconds / 60)} min`} (${e.basis}); longer when Earth Engine is busy.`;
+    : `Estimated time: about ${dur(e.seconds)} (${e.basis}); longer when Earth Engine is busy.`;
+};
+
+/** Earth Engine restricted mode: information, not a refusal — the button stays enabled and says the scan is slower. */
+function SlowMode({ message }: { message: string }) {
+  return (
+    <div className="flex gap-2 rounded-md bg-white/[0.03] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.1)]" data-testid="qs-slow-mode">
+      <Gauge size={14} className="mt-0.5 shrink-0 text-accent" />
+      <p className="text-[12px] leading-relaxed text-ink-2">{message}</p>
+    </div>
+  );
+}
 
 function LandCover({ d }: { d: QuickScan }) {
   const lc = d.landcover!;
@@ -224,11 +241,12 @@ export function QuickScanPanel() {
         return (
           <div className="space-y-2.5" data-testid="qs-not-run" data-blocked={problem?.reason_code ?? ''}>
             {problem && <Notice code={problem.reason_code} detail={problem.reason} />}
+            {!problem && d.restricted_mode && <SlowMode message={d.restricted_mode.message} />}
             <p className="text-[12px] leading-relaxed text-ink-2">
               Not scanned yet for {d.year}{d.season !== 'all' ? ` (temperature: ${d.season_label})` : ''}. A quick scan measures land cover (Dynamic World), surface temperature (Landsat) and above-ground tree biomass carbon (ESA CCI) in one Earth Engine request; the result is stored and opens instantly afterwards.
             </p>
             <Button variant="brand" icon={busy ? <Loader2 size={15} className="animate-spin" /> : <ScanSearch size={15} />} disabled={busy || !canRun} onClick={start} data-testid="run-quick-scan">
-              Run quick scan
+              {d.restricted_mode && !problem ? 'Run quick scan (slower this month)' : 'Run quick scan'}
             </Button>
             <p className="text-[10.5px] leading-snug text-ink-4" data-testid="qs-estimate">{fmtEstimate(d.estimate)}</p>
             {err && <Notice code={err.code} detail={err.code === 'service' ? null : err.message} />}
@@ -236,7 +254,14 @@ export function QuickScanPanel() {
         );
       })()}
       {d?.status === 'PROCESSING' && (
-        <p className="flex items-center gap-2 text-[12px] text-ink-2" data-testid="qs-processing"><Loader2 size={14} className="animate-spin text-accent" />Scanning Landsat, Dynamic World and ESA CCI for {d.year}…</p>
+        <div className="space-y-1.5" data-testid="qs-processing" data-queued={d.queued ? 'true' : 'false'}>
+          <p className="flex items-center gap-2 text-[12px] text-ink-2">
+            <Loader2 size={14} className="animate-spin text-accent" />
+            {d.queued ? 'Waiting for another quick scan to finish (they run one at a time)…' : `Scanning Landsat, Dynamic World and ESA CCI for ${d.year}…`}
+          </p>
+          {d.restricted_mode && <p className="text-[11px] leading-snug text-ink-3">Earth Engine is in its slower restricted mode this month, so this may take several minutes. You can leave this tab open or come back later: the result is stored.</p>}
+          <p className="text-[10.5px] leading-snug text-ink-4">{fmtEstimate(d.estimate)}</p>
+        </div>
       )}
       {/* A stored scan (READY, or measured with every dataset unavailable): each section shows its value or its reason. */}
       {d && d.landcover && d.lst && d.carbon && (

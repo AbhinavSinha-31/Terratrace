@@ -21,10 +21,12 @@ so a missing dataset is reported as unavailable — never computed from an empty
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,29 @@ LST_PALETTE = ["000004", "1b0c41", "4a0c6b", "781c6d", "a52c60", "cf4446", "ed69
 # Biomass carbon density: one fixed range for every area, so maps are comparable.
 CARBON_RANGE_T_PER_HA = (0.0, 150.0)
 CARBON_PALETTE = ["f7fcf5", "c7e9c0", "74c476", "238b45", "00441b"]
+
+
+_deadline_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def request_deadline(seconds: float):
+    """Raise Earth Engine's request deadline to at least `seconds` for the duration of one quick scan, then restore it.
+    The client keeps ONE global deadline, so requests running at the same moment also get the longer deadline — only
+    ever longer, never shorter. Quick scans run one at a time, so only one of them changes it."""
+    ee = _ee()
+    from ee import _state   # noqa: PLC0415 — the client's own state, read to restore the previous deadline
+    with _deadline_lock:
+        before = float(_state.get_state().deadline_ms or 0)
+        wanted = seconds * 1000.0
+        if before == 0 or wanted <= before:      # 0 = no limit at all; never shorten an existing deadline
+            yield
+            return
+        ee.data.setDeadline(wanted)
+        try:
+            yield
+        finally:
+            ee.data.setDeadline(before)
 
 
 def season_range(year: int, season: str) -> tuple[str, str]:

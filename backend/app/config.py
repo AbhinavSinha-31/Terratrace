@@ -124,6 +124,8 @@ class Settings:
     rate_explain_per_min: int = _bounded_int("TT_RATE_EXPLAIN_PER_MIN", 20, 0, 10_000)
     # Quick scans (POST /api/quickscan/{aid}): each one is an Earth Engine request over a year of Landsat and Dynamic World.
     rate_quickscan_per_min: int = _bounded_int("TT_RATE_QUICKSCAN_PER_MIN", 6, 0, 10_000)
+    # Earth Engine request deadline for ONE quick scan while the project is in restricted mode (slower, not blocked).
+    quickscan_restricted_deadline_s: float = _float("TT_QUICKSCAN_RESTRICTED_DEADLINE_S", 900.0)
 
     # AI chat (POST /api/chat). Off by default: Gemini API users must be 18+ and the free tier may not serve EEA / UK /
     # Swiss users (docs/PRE_DEPLOYMENT.md). The key is read from GEMINI_API_KEY at call time and never stored here.

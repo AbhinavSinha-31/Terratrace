@@ -735,7 +735,12 @@ export interface QuickScan {
   layers?: QuickScanLayer[];
   /** NOT_RUN only: what a run would meet right now (checked without Earth Engine). */
   blocked?: { reason_code: string; reason: string; retryable: boolean };
-  /** Expected run time from scans this server has timed; seconds null = not yet measured. */
-  estimate?: { seconds: number | null; basis: string };
+  /** Expected run time from scans this server has timed (in the current mode); seconds null = not yet measured;
+   *  range_s = restricted-mode range derived from the normal timing. */
+  estimate?: { seconds: number | null; range_s?: [number, number]; restricted?: boolean; basis: string };
+  /** Earth Engine restricted mode this quota month: scans still run, slower (never a refusal). */
+  restricted_mode?: { active: true; until: string; until_label: string; deadline_s: number; message: string } | null;
+  /** PROCESSING only: still waiting behind another quick scan (they run one at a time). */
+  queued?: boolean;
   season_hint?: string | null;
 }

@@ -264,16 +264,107 @@ def test_throttling_has_its_own_public_reason(monkeypatch):
     assert r["reason_code"] == "ee_throttled" and "throttling" in r["reason"]
 
 
-def test_restricted_mode_refuses_new_scans_but_stored_scans_still_open(ee_scan, monkeypatch):
-    assert client.post("/api/quickscan/hasdeo-arand?year=2025").json()["status"] == "READY"
+@pytest.fixture
+def deadlines(monkeypatch):
+    """Records the request deadlines a scan asks for (Earth Engine is never touched)."""
+    import contextlib
+    asked = []
+
+    @contextlib.contextmanager
+    def fake(seconds):
+        asked.append(seconds)
+        yield
+    monkeypatch.setattr(Q, "request_deadline", fake)
+    return asked
+
+
+def test_restricted_mode_runs_the_scan_slower_with_a_longer_deadline(ee_scan, deadlines, monkeypatch):
     monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - 60)
     r = client.post("/api/quickscan/similipal?year=2025").json()
-    assert r["status"] == "UNAVAILABLE" and r["reason_code"] == "quota_restricted" and r["retryable"] is True
-    assert client.get("/api/quickscan/hasdeo-arand?year=2025").json()["status"] == "READY"
-    assert ee_scan == [(2025, "all")]
-    # an old restricted-mode warning (outside the window) no longer blocks
-    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - quickscan.RESTRICTED_RECENT_S - 5)
-    assert client.post("/api/quickscan/similipal?year=2025").json()["status"] == "READY"
+    assert r["status"] == "READY" and r["restricted_mode"] is True, r
+    assert ee_scan == [(2025, "all")] and deadlines == [900.0]
+    # normal mode: no deadline change
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", None)
+    assert client.post("/api/quickscan/hasdeo-arand?year=2025").json()["restricted_mode"] is False and deadlines == [900.0]
+
+
+def test_restricted_mode_lasts_until_the_monthly_reset_not_one_hour(monkeypatch):
+    start, end = quickscan.quota_month_bounds()
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", start.timestamp() + 60)        # seen early this quota month
+    slow = quickscan.restricted_mode()
+    assert slow and slow["active"] and slow["until"] == end.isoformat(timespec="minutes")
+    assert slow["message"].startswith("Earth Engine is in its slower restricted mode this month. A quick scan still works")
+    assert slow["message"].endswith(f"Full speed returns on {slow['until_label']}.")
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", start.timestamp() - 60)        # seen last month: reset since
+    assert quickscan.restricted_mode() is None
+
+
+@pytest.mark.parametrize("now,start,end,label", [
+    ("2026-10-22T12:00", "2026-10-01T07:00", "2026-11-01T07:00", "1 November"),   # PDT both ends (DST ends 02:00 on Nov 1)
+    ("2026-11-15T12:00", "2026-11-01T07:00", "2026-12-01T08:00", "1 December"),   # PDT start, PST end
+    ("2026-03-20T12:00", "2026-03-01T08:00", "2026-04-01T07:00", "1 April"),      # PST start, PDT end
+    ("2026-12-31T23:00", "2026-12-01T08:00", "2027-01-01T08:00", "1 January"),
+    ("2026-11-01T06:59", "2026-10-01T07:00", "2026-11-01T07:00", "1 November"),   # one minute before the reset
+])
+def test_quota_month_bounds_follow_pacific_midnight(now, start, end, label, monkeypatch):
+    from datetime import datetime, timezone
+    t = datetime.fromisoformat(now).replace(tzinfo=timezone.utc)
+    s0, e0 = quickscan.quota_month_bounds(t)
+    assert (s0.isoformat(timespec="minutes"), e0.isoformat(timespec="minutes")) == (start + "+00:00", end + "+00:00")
+
+
+def test_the_estimate_in_restricted_mode(ee_scan, deadlines, monkeypatch):
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - 60)
+    e = client.get("/api/quickscan/hasdeo-arand?year=2025").json()["estimate"]
+    assert e == {"seconds": None, "restricted": True, "basis": "not yet measured on this server"}
+    # one normal-mode timing → the restricted estimate is that × the slowdown forest analyses showed
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", None)
+    assert client.post("/api/quickscan/hasdeo-arand?year=2025").json()["status"] == "READY"
+    path = next(quickscan.CACHE.glob("hasdeo-arand-2025-all-*.json"))
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "elapsed_s": 40.0}), encoding="utf-8")
+    monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - 60)
+    e = client.get("/api/quickscan/similipal?year=2025").json()["estimate"]
+    assert e["range_s"] == [200, 240] and e["restricted"] is True and "5–6×" in e["basis"]
+    # a measured restricted-mode scan replaces the derived range
+    assert client.post("/api/quickscan/similipal?year=2025").json()["restricted_mode"] is True
+    path = next(quickscan.CACHE.glob("similipal-2025-all-*.json"))
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "elapsed_s": 300.0}), encoding="utf-8")
+    e = client.get("/api/quickscan/silent-valley?year=2025").json()["estimate"]
+    assert e == {"seconds": 300, "restricted": True, "basis": "median of 1 restricted-mode scan on this server"}
+
+
+def test_quick_scans_run_one_at_a_time():
+    assert quickscan._POOL._max_workers == 1
+    assert quickscan._POOL is not analysis._POOL
+
+
+def test_a_queued_scan_says_so(monkeypatch):
+    import concurrent.futures
+    pending = concurrent.futures.Future()                  # never started: waits behind another scan
+    monkeypatch.setattr(quickscan, "_submit", lambda fn, *a: pending)
+    d = client.post("/api/quickscan/hasdeo-arand?year=2025").json()
+    assert d["status"] == "PROCESSING" and d["queued"] is True
+    quickscan._started.add(quickscan._key("hasdeo-arand", 2025, "all"))
+    assert client.get("/api/quickscan/hasdeo-arand?year=2025").json()["queued"] is False
+    quickscan._started.clear()
+
+
+def test_the_request_deadline_is_raised_then_restored_and_never_shortened(monkeypatch):
+    from ee import _state
+    calls = []
+    monkeypatch.setattr(Q, "_ee", lambda: type("E", (), {"data": type("D", (), {"setDeadline": staticmethod(calls.append)})()})())
+    state = _state.get_state()
+    monkeypatch.setattr(state, "deadline_ms", 180_000)
+    with Q.request_deadline(900):
+        pass
+    assert calls == [900_000.0, 180_000.0]
+    calls.clear()
+    with Q.request_deadline(60):            # shorter than the current deadline: unchanged
+        pass
+    monkeypatch.setattr(state, "deadline_ms", 0)
+    with Q.request_deadline(900):           # 0 = no limit: unchanged
+        pass
+    assert calls == []
 
 
 def test_area_over_the_interactive_limit_is_refused(oversized_aoi, ee_scan):
@@ -462,10 +553,12 @@ def test_tile_url_builds_each_map_id_once(monkeypatch):
 def test_not_run_tells_what_would_block_a_run_without_calling_earth_engine(ee_scan, monkeypatch):
     d = client.get("/api/quickscan/hasdeo-arand?year=2025").json()
     assert d["status"] == "NOT_RUN" and "blocked" not in d
-    assert d["estimate"] == {"seconds": None, "basis": "not yet measured on this server"}
+    assert d["estimate"] == {"seconds": None, "restricted": False, "basis": "not yet measured on this server"}
+    assert d["restricted_mode"] is None
     monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", time.time() - 10)
     d = client.get("/api/quickscan/hasdeo-arand?year=2025").json()
-    assert d["status"] == "NOT_RUN" and d["blocked"]["reason_code"] == "quota_restricted" and d["blocked"]["retryable"] is True
+    # restricted mode is a notice, never a block: the run would go ahead, slower
+    assert d["status"] == "NOT_RUN" and "blocked" not in d and d["restricted_mode"]["active"] is True
     monkeypatch.setattr(P.EarthEngineProvider, "credentials_configured", staticmethod(lambda: False))
     monkeypatch.setitem(P.RESTRICTED_MODE, "seen_at", None)
     assert client.get("/api/quickscan/hasdeo-arand?year=2025").json()["blocked"]["reason_code"] == "ee_unconfigured"
@@ -477,7 +570,7 @@ def test_the_estimate_is_the_median_of_timed_scans(ee_scan):
     path = next(quickscan.CACHE.glob("hasdeo-arand-2025-all-*.json"))
     path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "elapsed_s": 42.0}), encoding="utf-8")
     e = client.get("/api/quickscan/similipal?year=2025").json()["estimate"]
-    assert e == {"seconds": 42, "basis": "median of 1 scan on this server"}
+    assert e == {"seconds": 42, "restricted": False, "basis": "median of 1 scan on this server"}
 
 
 def test_too_few_scenes_reports_the_count_and_suggests_all_months():
