@@ -47,7 +47,8 @@ function Figure({ id, img, alt, caption }: { id: string; img: ImageRef | undefin
 
 function Table({ children, minWidth = 520 }: { children: ReactNode; minWidth?: number }) {
   return (
-    <div className="no-scrollbar -mx-1 overflow-x-auto px-1">
+    // Focusable so keyboard users can scroll a table wider than the screen (axe scrollable-region-focusable).
+    <div className="no-scrollbar -mx-1 overflow-x-auto px-1" tabIndex={0} role="region" aria-label="Table (scrolls sideways)">
       <table className="w-full border-collapse text-[12.5px]" style={{ minWidth }}>{children}</table>
     </div>
   );

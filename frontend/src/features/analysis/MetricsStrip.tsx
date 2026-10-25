@@ -61,7 +61,7 @@ export function MetricsStrip() {
           <span className={`t-data text-[20px] font-medium uppercase leading-none ${dominant === 'high' ? 'text-forest' : dominant === 'medium' ? 'text-warn' : dominant === 'low' ? 'text-[#ff8a80]' : 'text-ink-3'}`}>{dominant ?? '—'}</span>
           {dominant && <span className="text-[11px] text-ink-3">dominant level</span>}
         </div>
-        <div className="mt-2 flex h-1.5 w-[150px] overflow-hidden rounded-full bg-white/[0.06]" aria-label={`Evidence: ${dist.high} high, ${dist.medium} medium, ${dist.low} low`}>
+        <div className="mt-2 flex h-1.5 w-[150px] overflow-hidden rounded-full bg-white/[0.06]" role="img" aria-label={`Evidence: ${dist.high} high, ${dist.medium} medium, ${dist.low} low`}>
           <motion.span className="bg-forest" animate={{ width: `${(dist.high / total) * 100}%` }} />
           <motion.span className="bg-warn" animate={{ width: `${(dist.medium / total) * 100}%` }} />
           <motion.span className="bg-bad" animate={{ width: `${(dist.low / total) * 100}%` }} />

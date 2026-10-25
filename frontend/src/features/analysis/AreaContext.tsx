@@ -34,7 +34,7 @@ function LossBars({ years }: { years: { year: number; loss_ha: number }[] }) {
   const w = 6, gap = 2, h = 38;
   return (
     <figure className="px-3.5 pb-2.5" aria-label="Hansen tree cover loss per year, 2001 to 2025">
-      <svg width={years.length * (w + gap)} height={h + 12} className="block" role="img">
+      <svg width={years.length * (w + gap)} height={h + 12} className="block" role="img" aria-label={`Hansen tree cover loss per year, 2001 to 2025; peak ${fmtHa(max)} hectares per year`}>
         {years.map((y, i) => {
           const bh = max > 0 ? Math.max(y.loss_ha > 0 ? 1 : 0, (y.loss_ha / max) * h) : 0;
           return (
@@ -106,7 +106,7 @@ function Body({ ctx }: { ctx: AreaContext }) {
                   <span className="t-data w-[52px] text-right text-ink">{fmtShare(k.share_pct)}</span>
                 </li>
               ))}
-              <Src s={lc.source} extra="share of the mapped area" />
+              <li className="list-none"><Src s={lc.source} extra="share of the mapped area" /></li>
             </ul>
           ) : (
             <div className="px-3.5 py-2.5" data-testid="context-row">
