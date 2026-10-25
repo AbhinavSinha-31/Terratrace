@@ -99,6 +99,10 @@ interface UiState {
   caseStudy: string | null;
   openCaseStudy(id: string): void;
   closeCaseStudy(): void;
+  /** The account page (#/profile): sign in, or see and edit your profile. Full page over the map; replaces a case study. */
+  profileOpen: boolean;
+  openProfile(): void;
+  closeProfile(): void;
   /** The active investigation — the only source of study / AOI / years / analysis state. */
   investigation: InvestigationState;
   /** Selectable timeline years (UI option list; per-year availability comes from the backend later). */
@@ -223,6 +227,9 @@ export const useUi = create<UiState>((set, get) => ({
   caseStudy: null,
   openCaseStudy: (id) => set({ caseStudy: id }),
   closeCaseStudy: () => set({ caseStudy: null }),
+  profileOpen: false,
+  openProfile: () => set({ profileOpen: true, caseStudy: null }),
+  closeProfile: () => set({ profileOpen: false }),
   investigation: EMPTY_INVESTIGATION,
   years: DEFAULT_YEARS,
   playing: false,

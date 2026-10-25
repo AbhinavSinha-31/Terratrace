@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, ChevronDown, RotateCcw, Info, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
+import { Bell, ChevronDown, RotateCcw, Info, LogIn, LogOut, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
@@ -9,6 +9,9 @@ import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
 import { useChat } from '../../state/chat';
+import { signOut, useAuth } from '../../state/auth';
+import { identity, useProfile } from '../account/profile';
+import { UserAvatar } from '../account/ProfilePage';
 
 type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'ask' | 'about';
 const NAV: { key: NavKey; label: string }[] = [
@@ -190,30 +193,73 @@ function SettingsMenu() {
 }
 
 
+function openProfile() {
+  useChat.getState().closeAsk();
+  useUi.getState().openProfile();
+}
+
+const menuItem = 'tt-press flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink';
+
 function Avatar() {
+  const status = useAuth((s) => s.status);
+  const user = useAuth((s) => s.session?.user ?? null);
+  const { data: profile } = useProfile();
+  const who = user ? identity(user, profile) : null;
   return (
     <Popover
-      label="Session"
+      label="Account"
       width={260}
       trigger={(p) => (
-        <button {...p} aria-label="Session menu" className="tt-press grid h-9 w-9 place-items-center rounded-full bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20">
-          <UserRound size={16} />
+        <button {...p} aria-label={who ? `Account menu — ${who.name}` : 'Account menu'} data-testid="account-button" className="tt-press grid h-9 w-9 place-items-center rounded-full bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20">
+          {who ? <UserAvatar name={who.name} src={who.avatar} size={36} /> : <UserRound size={16} />}
         </button>
       )}
     >
       {(close) => (
         <div className="p-2">
-          <div className="px-2.5 py-2">
-            <div className="text-[12.5px] font-medium text-ink">Local session</div>
-            <div className="text-[11px] text-ink-3">Not signed in · prototype build</div>
-          </div>
+          {who ? (
+            <div className="flex items-center gap-2.5 px-2.5 py-2">
+              <UserAvatar name={who.name} src={who.avatar} size={32} />
+              <div className="min-w-0">
+                <div className="truncate text-[12.5px] font-medium text-ink">{who.name}</div>
+                {who.email && <div className="truncate text-[11px] text-ink-3">{who.email}</div>}
+              </div>
+            </div>
+          ) : (
+            <div className="px-2.5 py-2">
+              <div className="text-[12.5px] font-medium text-ink">{status === 'unconfigured' ? 'Local session' : 'Not signed in'}</div>
+              <div className="text-[11px] text-ink-3">{status === 'unconfigured' ? 'Accounts are not available yet' : status === 'loading' ? 'Checking your session…' : 'Sign in to keep a profile'}</div>
+            </div>
+          )}
           <div className="my-1 h-px bg-line" />
-          <button className="tt-press flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink" onClick={() => { close(); useUi.getState().setAboutOpen(true); }}>
+          {who ? (
+            <>
+              <button className={menuItem} onClick={() => { close(); openProfile(); }}><UserRound size={15} /> Your profile</button>
+              <button className={menuItem} onClick={() => { close(); void signOut().catch(() => openProfile()); }} data-testid="menu-sign-out"><LogOut size={15} /> Sign out</button>
+            </>
+          ) : status === 'signed-out' && (
+            <button className={menuItem} onClick={() => { close(); openProfile(); }} data-testid="menu-sign-in"><LogIn size={15} /> Sign in</button>
+          )}
+          <button className={menuItem} onClick={() => { close(); useUi.getState().setAboutOpen(true); }}>
             <Info size={15} /> About TERRATRACE
           </button>
         </div>
       )}
     </Popover>
+  );
+}
+
+/** The phone/tablet menu has no avatar: the account page is reached from here. */
+function AccountMenuEntry({ onPick }: { onPick(): void }) {
+  const status = useAuth((s) => s.status);
+  const user = useAuth((s) => s.session?.user ?? null);
+  const { data: profile } = useProfile();
+  if (status === 'unconfigured' || status === 'loading') return null;
+  const who = user ? identity(user, profile) : null;
+  return (
+    <button onClick={() => { onPick(); openProfile(); }} data-testid="menu-account" className="tt-press mt-auto flex h-14 w-full items-center gap-3 rounded-md border-t border-line px-3 text-[14px] text-ink-2">
+      {who ? <><UserAvatar name={who.name} src={who.avatar} size={30} /><span className="min-w-0 truncate">{who.name}</span></> : <><LogIn size={17} /> Sign in</>}
+    </button>
   );
 }
 
@@ -282,6 +328,7 @@ export function Header() {
                   </button>
                 ))}
               </div>
+              <AccountMenuEntry onPick={() => setMenu(false)} />
             </motion.nav>
           </motion.div>
         )}

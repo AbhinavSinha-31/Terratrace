@@ -52,6 +52,7 @@ export default defineConfig({
         manualChunks: {
           maplibre: ['maplibre-gl'],
           echarts: ['echarts'],
+          supabase: ['@supabase/supabase-js'],
         },
       },
     },

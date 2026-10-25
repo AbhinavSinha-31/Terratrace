@@ -8,7 +8,9 @@ import { AboutModal } from '../features/shell/AboutModal';
 import { BootSplash } from '../features/shell/BootSplash';
 import { AskPage } from '../features/chat/AskPage';
 import { CaseStudyPage } from '../features/casestudy/CaseStudyPage';
+import { ProfilePage } from '../features/account/ProfilePage';
 import { useUi } from '../state/store';
+import { useAuthSync } from '../state/auth';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
 import { useAnalysisRunner } from '../data/analysisRunner';
@@ -47,6 +49,7 @@ export function App() {
   useAnalysisRunner();   // the only executor of analysis requests
   useImagerySync();      // imagery status (independent of analysis)
   useBackendRecovery();  // a backend that comes back after an outage is used again without a reload
+  useAuthSync();         // Supabase session → useAuth (no-op when the build has no Supabase settings)
   const view = useUi((s) => s.view);
   const hasStudy = useUi((s) => !!s.investigation.study);
   const drawerOpen = useUi((s) => s.drawerOpen);
@@ -70,6 +73,7 @@ export function App() {
         <AnalysisProgressOverlay />
         <AskPage />
         <CaseStudyPage />
+        <ProfilePage />
       </main>
       <AboutModal />
       <BootSplash />

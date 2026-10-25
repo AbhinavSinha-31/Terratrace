@@ -1,0 +1,11 @@
+{
+  "name": "terratrace-supabase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/rls_check.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11"
+  }
+}
