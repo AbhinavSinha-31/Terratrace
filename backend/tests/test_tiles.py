@@ -122,3 +122,16 @@ def test_a_full_queue_answers_503_immediately(layer, monkeypatch):
     monkeypatch.setattr(tiles, "MAX_QUEUED", 0)
     r = tile()
     assert r.status_code == 503 and r.json()["detail"]["retryable"] is True
+
+
+def test_uncached_tiles_are_rate_limited_per_client_but_cached_tiles_never(layer, fake_ee_tiles, monkeypatch):
+    """docs/PRE_DEPLOYMENT.md #1: one client must not take every Earth Engine tile slot. Only cache misses count."""
+    from app import ratelimit
+    monkeypatch.setattr(ratelimit, "limit_for", lambda group: 2 if group == "tiles" else 1000)
+    assert tile(x=1).status_code == 200 and tile(x=2).status_code == 200
+    refused = tile(x=3)
+    d = refused.json()["detail"]
+    assert refused.status_code == 429 and d["code"] == "rate_limited" and d["retryable"] is True
+    assert int(refused.headers["Retry-After"]) >= 1
+    assert len(fake_ee_tiles.urls) == 2, "a refused tile never reaches Earth Engine"
+    assert tile(x=1).status_code == 200, "a cached tile is served even over the limit"

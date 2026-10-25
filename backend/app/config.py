@@ -124,6 +124,10 @@ class Settings:
     rate_explain_per_min: int = _bounded_int("TT_RATE_EXPLAIN_PER_MIN", 20, 0, 10_000)
     # Quick scans (POST /api/quickscan/{aid}): each one is an Earth Engine request over a year of Landsat and Dynamic World.
     rate_quickscan_per_min: int = _bounded_int("TT_RATE_QUICKSCAN_PER_MIN", 6, 0, 10_000)
+    # Map tiles that need Earth Engine (cache misses) per client; cached tiles are never limited. The whole backend fetches
+    # at most TT_EE_TILE_CONCURRENCY tiles at once (~1 s each), i.e. roughly 180 per minute: 120 keeps one client from
+    # taking every slot while a normal map view (20-60 new tiles) is never refused.
+    rate_tiles_per_min: int = _bounded_int("TT_RATE_TILES_PER_MIN", 120, 0, 100_000)
     # Earth Engine request deadline for ONE quick scan while the project is in restricted mode (slower, not blocked).
     quickscan_restricted_deadline_s: float = _float("TT_QUICKSCAN_RESTRICTED_DEADLINE_S", 900.0)
 

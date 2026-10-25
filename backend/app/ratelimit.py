@@ -2,7 +2,9 @@
 
 A sliding one-minute window per (client address, endpoint group). Over the limit the request is refused with an
 explicit 429 public error (`rate_limited`, retryable, Retry-After header) — never dropped silently, never queued.
-Cheap reads (job polling, stored status, tiles, imagery decisions, health) are not limited.
+Cheap reads (job polling, stored status, imagery decisions, health) are not limited. Map tiles are limited only when
+they need Earth Engine: group `tiles` is checked by the tile routes on a cache miss (api/routes.py `_serve_tile`), so a
+cached tile is never refused.
 
 Limits come from settings (TT_RATE_*_PER_MIN; 0 disables a group). In-process only: behind several workers or
 processes each keeps its own counters, which is acceptable for a single-instance prototype (see docs).
@@ -40,7 +42,13 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
 def limit_for(group: str) -> int:
     return {"analysis": settings.rate_analysis_per_min, "compute": settings.rate_compute_per_min,
             "search": settings.rate_search_per_min, "explain": settings.rate_explain_per_min,
-            "chat": settings.rate_chat_per_min, "quickscan": settings.rate_quickscan_per_min}[group]
+            "chat": settings.rate_chat_per_min, "quickscan": settings.rate_quickscan_per_min,
+            "tiles": settings.rate_tiles_per_min}[group]
+
+
+def client_of(request) -> str:
+    """The address limits are counted for (the real client only when uvicorn runs with --proxy-headers)."""
+    return request.client.host if request.client else "unknown"
 
 
 def group_of(method: str, path: str) -> str | None:
