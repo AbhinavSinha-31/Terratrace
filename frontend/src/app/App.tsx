@@ -13,10 +13,11 @@ import { useImagerySync } from '../data/imagerySync';
 import { useBackendRecovery } from '../data/queries';
 import { useBreakpoint, CHROME } from '../lib/useLayout';
 
-// Loaded on demand, so the first paint does not wait for MapLibre (~1 MB), ECharts or pages nobody has opened yet.
-const loadAnalysisView = () => import('../features/analysis/AnalysisView');
+// Loaded on demand, so the first paint does not wait for MapLibre (~1 MB) or pages nobody has opened yet. (ECharts is
+// loaded by the first chart: components/charts/EChart.tsx.) No idle prefetch: evaluating a prefetched view on the main
+// thread raised desktop Total Blocking Time from 0.7 s to 1.6 s (Lighthouse, 2026-10-25).
 const MapStage = lazy(() => import('../features/map/MapStage').then((m) => ({ default: m.MapStage })));
-const AnalysisView = lazy(() => loadAnalysisView().then((m) => ({ default: m.AnalysisView })));
+const AnalysisView = lazy(() => import('../features/analysis/AnalysisView').then((m) => ({ default: m.AnalysisView })));
 const AskPage = lazy(() => import('../features/chat/AskPage').then((m) => ({ default: m.AskPage })));
 const CaseStudyPage = lazy(() => import('../features/casestudy/CaseStudyPage').then((m) => ({ default: m.CaseStudyPage })));
 const AboutModal = lazy(() => import('../features/shell/AboutModal').then((m) => ({ default: m.AboutModal })));
@@ -26,20 +27,6 @@ function useOpenedOnce(flag: boolean): boolean {
   const [opened, setOpened] = useState(flag);
   if (flag && !opened) setOpened(true);
   return opened || flag;
-}
-
-/** Fetches the analysis view while the browser is idle, so opening an investigation does not wait for it. */
-function usePrefetchAnalysisView() {
-  useEffect(() => {
-    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void };
-    const prefetch = () => { void loadAnalysisView(); };
-    if (w.requestIdleCallback) {
-      const id = w.requestIdleCallback(prefetch);
-      return () => w.cancelIdleCallback?.(id);
-    }
-    const t = window.setTimeout(prefetch, 2000);
-    return () => window.clearTimeout(t);
-  }, []);
 }
 
 function ViewLoading() {
@@ -81,7 +68,6 @@ export function App() {
   useAnalysisRunner();   // the only executor of analysis requests
   useImagerySync();      // imagery status (independent of analysis)
   useBackendRecovery();  // a backend that comes back after an outage is used again without a reload
-  usePrefetchAnalysisView();
   const askMounted = useOpenedOnce(useChat((s) => s.askOpen));
   const caseStudyMounted = useOpenedOnce(useUi((s) => !!s.caseStudy));
   const aboutMounted = useOpenedOnce(useUi((s) => s.aboutOpen));

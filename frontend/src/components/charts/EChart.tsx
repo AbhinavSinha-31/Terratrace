@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
-import * as echarts from 'echarts/core';
-import { BarChart, LineChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, AriaComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-import type { EChartsCoreOption } from 'echarts/core';
+import type { ECharts, EChartsCoreOption } from 'echarts/core';
 import { INK } from '../../lib/palette';
 
-echarts.use([BarChart, LineChart, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, AriaComponent, CanvasRenderer]);
+type EChartsCore = typeof import('echarts/core');
+let loading: Promise<EChartsCore> | null = null;
+
+/** ECharts (~175 kB gzip) is fetched when the first chart mounts, never as part of a page's own chunk. */
+function loadECharts(): Promise<EChartsCore> {
+  return (loading ??= import('./echartsSetup').then((m) => m.echarts).catch((e) => { loading = null; throw e; }));
+}
 
 /** Shared axis/tooltip styling: recessive grid, muted axis ink, glass tooltip. */
 export const chartBase = {
@@ -36,13 +38,26 @@ interface Props {
 
 export function EChart({ option, height, onClickData, ariaLabel }: Props) {
   const el = useRef<HTMLDivElement>(null);
-  const chart = useRef<echarts.ECharts | null>(null);
+  const chart = useRef<ECharts | null>(null);
   const clickRef = useRef(onClickData);
   clickRef.current = onClickData;
+  const optionRef = useRef(option);
+  optionRef.current = option;
 
   useEffect(() => {
-    const c = echarts.init(el.current!, undefined, { renderer: 'canvas' });
+    let disposed = false;
+    let cleanup = () => {};
+    loadECharts().then((echarts) => {
+      if (disposed || !el.current) return;
+      cleanup = mount(echarts, el.current);
+    }).catch(() => {});   // the chart's aria-label still describes it; the rest of the view is unaffected
+    return () => { disposed = true; cleanup(); };
+  }, []);
+
+  function mount(echarts: EChartsCore, node: HTMLDivElement): () => void {
+    const c = echarts.init(node, undefined, { renderer: 'canvas' });
     chart.current = c;
+    c.setOption(optionRef.current, { notMerge: true });
     // Axis-level clicks: anywhere in a column selects it (hit target larger than the mark).
     c.getZr().on('click', (e) => {
       if (!clickRef.current) return;
@@ -57,13 +72,13 @@ export function EChart({ option, height, onClickData, ariaLabel }: Props) {
       }
     });
     const ro = new ResizeObserver(() => c.resize());
-    ro.observe(el.current!);
+    ro.observe(node);
     return () => {
       ro.disconnect();
       c.dispose();
       chart.current = null;
     };
-  }, []);
+  }
 
   useEffect(() => {
     chart.current?.setOption(option, { notMerge: true });
