@@ -28,7 +28,8 @@ def _g(cls, area, low, lst_ha, mean):
 # 100 km² area: water 2 km², trees 30, crops 40, built 20, bare 8 (ha below). LST means 30 / 32 / 36 / 38 / 40 °C.
 RAW = {
     "counts": {"landsat_scenes": 12, "landsat_by_spacecraft": {"LANDSAT_8": 7, "LANDSAT_9": 5},
-               "landsat_first_ms": 1735776000000, "landsat_last_ms": 1766880000000, "dw_images": 60, "cci_images": 1},
+               "landsat_first_ms": 1735776000000, "landsat_last_ms": 1766880000000, "dw_images": 60, "dw_first_ms": 1735689600000,
+               "dw_last_ms": 1767139200000, "cci_images": 1},
     "aoi": {"area_ha": 10000.0},
     "classes": {"groups": [_g(0, 200, 10, 200, 30.0), _g(1, 3000, 300, 3000, 32.0), _g(4, 4000, 400, 3900, 36.0),
                            _g(6, 2000, 100, 2000, 38.0), _g(7, 800, 80, 800, 40.0)]},
@@ -218,6 +219,31 @@ def test_every_value_carries_its_dataset_year_and_is_never_a_terratrace_classifi
     for section in (d["landcover"], d["lst"], d["carbon"]["components"][0]):
         src = section["source"]
         assert src.get("dataset") and src.get("year") and src.get("resolution_m"), src
+
+
+@pytest.mark.parametrize("season,landsat", [
+    ("all", {"start": "2025-01-01", "end": "2025-12-31", "label": "1 Jan 2025 – 31 Dec 2025"}),
+    ("djf", {"start": "2024-12-01", "end": "2025-02-28", "label": "1 Dec 2024 – 28 Feb 2025"}),
+])
+def test_every_served_result_has_its_date_window_and_the_agreement_not_accuracy_disclaimer(ee_scan, season, landsat):
+    doc = client.post(f"/api/quickscan/hasdeo-arand?year=2025&season={season}").json()
+    assert doc["status"] == "READY"
+    assert doc["disclaimer"] == quickscan.DISCLAIMER and "Agreement, not accuracy" in doc["disclaimer"]
+    assert doc["lst"]["source"]["period"] == landsat
+    assert doc["landcover"]["source"]["period"] == {"start": "2025-01-01", "end": "2025-12-31", "label": "1 Jan 2025 – 31 Dec 2025"}
+    assert (doc["landcover"]["source"]["first_image"], doc["landcover"]["source"]["last_image"]) == ("2025-01-01", "2025-12-31")
+    assert doc["landcover"]["worldcover_agreement"]["source"]["period"]["label"] == "2021 (annual map)"
+    assert doc["carbon"]["components"][0]["source"]["period"] == {"start": "2022-01-01", "end": "2022-12-31", "label": "2022 (annual map)"}
+    # The window is added when served, never stored: a scan stored before it existed gets it too.
+    stored = json.loads(next(quickscan.CACHE.glob("hasdeo-arand-2025-*.json")).read_text(encoding="utf-8"))
+    assert "disclaimer" not in stored and "period" not in stored["lst"]["source"]
+
+
+def test_period_windows_match_the_earth_engine_filters():
+    for season in Q.SEASONS:
+        start, end = Q.season_range(2025, season)
+        p = quickscan.periods(2025, season)["landsat"]
+        assert p["start"] == start and p["end"] < end
 
 
 # ----------------------------------------------------------------------------- service: jobs, cache, refusals

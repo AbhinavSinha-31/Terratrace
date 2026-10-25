@@ -681,7 +681,9 @@ export interface ChatReply {
 /** Tier "Quick scan": land cover, surface temperature and biomass carbon from PUBLIC datasets, on request — not
  *  validated for the area, never a TerraTrace classification, never counted in the forest totals. */
 export type QuickScanSeason = 'all' | 'mam' | 'jja' | 'son' | 'djf';
-export interface QuickScanSource { dataset: string; id?: string; ids?: string[]; year?: number; resolution_m: number; [k: string]: unknown }
+/** The date window a dataset covers (inclusive ISO dates); added by the backend to every served result. */
+export interface QuickScanPeriod { start: string; end: string; label: string }
+export interface QuickScanSource { dataset: string; id?: string; ids?: string[]; year?: number; resolution_m: number; period?: QuickScanPeriod; [k: string]: unknown }
 export interface QuickScanClass { key: string; name: string; color: string; area_km2: number; share: number; low_confidence_share: number | null }
 export interface QuickScanLayer {
   id: 'lst' | 'landcover' | 'carbon';
@@ -733,6 +735,8 @@ export interface QuickScan {
   lst?: QuickScanLst;
   carbon?: { status: 'READY' | 'UNAVAILABLE'; label: string; scope: string; components: QuickScanCarbonComponent[] };
   layers?: QuickScanLayer[];
+  /** Stored scans: "Agreement, not accuracy" — shown with every result. */
+  disclaimer?: string;
   /** NOT_RUN only: what a run would meet right now (checked without Earth Engine). */
   blocked?: { reason_code: string; reason: string; retryable: boolean };
   /** Expected run time from scans this server has timed (in the current mode); seconds null = not yet measured;

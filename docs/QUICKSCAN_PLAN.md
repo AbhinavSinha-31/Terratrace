@@ -105,6 +105,20 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
   minutes. Full speed returns on {1st of next month}." and a restricted-mode estimate (measured restricted scans, else
   5–6× the normal median, else "several minutes"). Rate limit, area limit, caching and no auto-start unchanged.
 
+## Phase 3 (user request, 2026-10-25)
+
+Decisions (user, 2026-10-25): there is no separate PLAN.md, so this request is the spec. The quick scan IS the
+"any area" generalisation of the Noida–Ghaziabad work (the custom-RF pipeline stays CLI-only, see urban-live). Carbon
+shows **both** ESA CCI (measured, trees) and an **IPCC Tier 1 estimate** (default factors per land-cover class), each
+with its own label and source. Accounts, saving and community publishing are **deferred** until after 2026-10-30.
+
+- **Step 1 (done):** every served quick-scan result carries its date window (`source.period`: Dynamic World = the scan
+  year; Landsat = the season window, plus the first and last scene used; ESA CCI and WorldCover = their map year) and the
+  disclaimer "Agreement, not accuracy: …" (`disclaimer`), shown under every READY section. Both are derived from the
+  scan's year and season when served (`services/quickscan.present`), so stored scans show them without a re-run.
+  New scans also record the first and last Dynamic World image dates. No number changed, so no method-version bump.
+- **Step 2 (proposed, waiting for approval):** IPCC Tier 1 carbon component — see below.
+
 ## Backlog (not part of the quick-scan phases; do later)
 
 1. **Integrity script end to end.** `frontend/scripts/check-data-integrity.mjs` stops at the Hasdeo step that waits for a

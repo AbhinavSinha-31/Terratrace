@@ -208,7 +208,8 @@ def measure(geometry: dict[str, Any], year: int, season: str) -> dict[str, Any]:
         "counts": ee.Dictionary({
             "landsat_scenes": n_scenes, "landsat_by_spacecraft": scenes.aggregate_histogram("SPACECRAFT_ID"),
             "landsat_first_ms": scenes.aggregate_min("system:time_start"), "landsat_last_ms": scenes.aggregate_max("system:time_start"),
-            "dw_images": n_dw, "cci_images": n_cci,
+            "dw_images": n_dw, "dw_first_ms": dw.aggregate_min("system:time_start"),
+            "dw_last_ms": dw.aggregate_max("system:time_start"), "cci_images": n_cci,
         }),
         "aoi": area.reduceRegion(ee.Reducer.sum(), scale=SCALE, **rr),
         "classes": ee.Algorithms.If(n_dw.gt(0), by_class, None),

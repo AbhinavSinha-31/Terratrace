@@ -58,6 +58,10 @@ SOURCES = {
     "cci": {"dataset": "ESA CCI Above-Ground Biomass v6.0", "id": Q.CCI_AGB, "year": Q.CCI_YEAR, "resolution_m": Q.CCI_SCALE},
     "worldcover": {"dataset": "ESA WorldCover v200", "id": P.WORLDCOVER, "year": Q.WORLDCOVER_YEAR, "resolution_m": 10},
 }
+# Shown with every quick-scan result: nothing here was checked against ground truth for the area.
+DISCLAIMER = ("Agreement, not accuracy: these values come from public datasets and were not validated for this area. "
+              "The WorldCover figure is agreement between two maps, not accuracy.")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 _memory: LRUDict = LRUDict(settings.memory_cache_entries)
 _failures: LRUDict = LRUDict(settings.memory_cache_entries)      # key -> (public reason, code, monotonic time)
@@ -196,6 +200,26 @@ def _date(ms: Any) -> str | None:
     return None if ms is None else datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).date().isoformat()
 
 
+def day_label(d: date) -> str:
+    return f"{d.day} {_MONTHS[d.month - 1]} {d.year}"
+
+
+def _period(start: str, end_exclusive: str, label: str | None = None) -> dict[str, str]:
+    """A dataset's date window [start, end) as inclusive ISO dates and a readable label."""
+    s, e = date.fromisoformat(start), date.fromisoformat(end_exclusive) - timedelta(days=1)
+    return {"start": s.isoformat(), "end": e.isoformat(), "label": label or f"{day_label(s)} – {day_label(e)}"}
+
+
+def periods(year: int, season: str) -> dict[str, dict[str, str]]:
+    """The date window each dataset of a scan covers — the same windows the Earth Engine request filters on."""
+    return {
+        "dynamic_world": _period(f"{year}-01-01", f"{year + 1}-01-01"),
+        "landsat": _period(*Q.season_range(year, season)),
+        "cci": _period(f"{Q.CCI_YEAR}-01-01", f"{Q.CCI_YEAR + 1}-01-01", f"{Q.CCI_YEAR} (annual map)"),
+        "worldcover": _period(f"{Q.WORLDCOVER_YEAR}-01-01", f"{Q.WORLDCOVER_YEAR + 1}-01-01", f"{Q.WORLDCOVER_YEAR} (annual map)"),
+    }
+
+
 def parse(raw: dict[str, Any], *, year: int, season: str) -> dict[str, Any]:
     """Interpret one raw measurement (providers/earth_engine/quickscan.measure). Nothing is estimated: a value that was
     not measured is null with a reason, never 0."""
@@ -219,7 +243,8 @@ def parse(raw: dict[str, Any], *, year: int, season: str) -> dict[str, Any]:
         compared, agree = float(wc.get("compared_ha") or 0.0), float(wc.get("agree_ha") or 0.0)
         landcover = {
             "status": "READY", "label": f"Land cover from Dynamic World (Google/WRI), {year}",
-            "source": {**SOURCES["dynamic_world"], "year": year, "images": int(counts.get("dw_images") or 0)},
+            "source": {**SOURCES["dynamic_world"], "year": year, "images": int(counts.get("dw_images") or 0),
+                       "first_image": _date(counts.get("dw_first_ms")), "last_image": _date(counts.get("dw_last_ms"))},
             "method": f"Annual mean probability per class, top class; aggregated from 10 m to {Q.SCALE} m by mode.",
             "classified_km2": _r(classified_ha / 100, 3), "coverage_share": _r(classified_ha / aoi_ha, 4) if aoi_ha else None,
             "low_confidence_share": _r(sum(v[1] for v in groups.values()) / classified_ha, 4),
@@ -349,8 +374,26 @@ def lst_range(doc: dict[str, Any]) -> tuple[float, float] | None:
     return (lst["p2_c"], lst["p98_c"]) if lst.get("status") == "READY" and lst.get("p2_c") is not None else None
 
 
-def _with_layers(doc: dict[str, Any]) -> dict[str, Any]:
-    return {**doc, "layers": layers_for(doc)} if doc.get("status") == "READY" and doc.get("quickscan_version") else doc
+def present(doc: dict[str, Any]) -> dict[str, Any]:
+    """A stored scan as the API serves it: its map layers, the date window of every dataset and the disclaimer. All are
+    derived from the scan's year and season when served, so scans stored before they existed show them too."""
+    if not doc.get("quickscan_version"):
+        return doc
+    p = periods(doc["year"], doc["season"])
+
+    def dated(section: dict[str, Any] | None, key: str) -> dict[str, Any] | None:
+        return None if section is None else {**section, "source": {**section["source"], "period": p[key]}}
+    out = {**doc, "disclaimer": DISCLAIMER, "landcover": dated(doc.get("landcover"), "dynamic_world"),
+           "lst": dated(doc.get("lst"), "landsat")}
+    agreement = (out["landcover"] or {}).get("worldcover_agreement")
+    if agreement:
+        out["landcover"]["worldcover_agreement"] = dated(agreement, "worldcover")
+    if doc.get("carbon"):
+        out["carbon"] = {**doc["carbon"], "components": [dated(c, "cci") if c.get("id") == "agb_trees" else c
+                                                         for c in doc["carbon"]["components"]]}
+    if doc.get("status") == "READY":
+        out["layers"] = layers_for(doc)
+    return out
 
 
 # ----------------------------------------------------------------------------- cache and jobs
@@ -384,7 +427,7 @@ def status(aid: str, year: int | None = None, season: str | None = None) -> dict
     y, s = validate(year, season)
     doc = stored(aid, y, s)
     if doc is not None:
-        return _with_layers(doc)
+        return present(doc)
     try:
         key = _key(aid, y, s)
     except P.EarthEngineError as e:
@@ -421,7 +464,7 @@ def start(aid: str, year: int | None = None, season: str | None = None) -> dict[
     y, s = validate(year, season)
     doc = stored(aid, y, s)
     if doc is not None:
-        return _with_layers(doc)
+        return present(doc)
     target = analysis.analysis_target(aoi)
     refused = _refusal(aid, y, s, target)
     if refused is not None:

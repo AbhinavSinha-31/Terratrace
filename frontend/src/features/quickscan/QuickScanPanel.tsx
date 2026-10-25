@@ -19,11 +19,16 @@ const signedC = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)
 /** Tonnes of carbon in a readable unit (t, kt, Mt). */
 const tonnes = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(2)} Mt` : v >= 1e3 ? `${(v / 1e3).toFixed(1)} kt` : `${Math.round(v)} t`);
 
-/** Dataset · year · resolution — printed under every value. */
+/** Dataset · date range · resolution — printed under every value. */
 function Source({ source, extra }: { source: QuickScanSource; extra?: string }) {
-  const parts = [source.dataset, source.year ? String(source.season_label ? `${source.season_label} ${source.year}` : source.year) : null,
-    `${source.resolution_m} m`, extra].filter(Boolean);
+  const when = source.period?.label ?? (source.year ? String(source.season_label ? `${source.season_label} ${source.year}` : source.year) : null);
+  const parts = [source.dataset, when, `${source.resolution_m} m`, extra].filter(Boolean);
   return <p className="mt-2 text-[10.5px] leading-snug text-ink-4" data-testid="qs-source">{parts.join(' · ')}</p>;
+}
+
+/** "Agreement, not accuracy" — under every quick-scan value. */
+function Disclaimer({ text }: { text?: string }) {
+  return text ? <p className="mt-1.5 text-[10.5px] leading-snug text-ink-4" data-testid="qs-disclaimer">{text}</p> : null;
 }
 
 function Section({ icon, title, layer, children, testId }: { icon: ReactNode; title: string; layer?: QuickScanLayer['id']; children: ReactNode; testId: string }) {
@@ -125,6 +130,7 @@ function LandCover({ d }: { d: QuickScan }) {
         {lc.worldcover_agreement && <> Agrees with ESA WorldCover 2021 on {pct(lc.worldcover_agreement.share, 0)} of the area (a cross-check, not accuracy).</>}
       </p>
       <Source source={lc.source} extra={`statistics at ${String(lc.source.statistics_resolution_m ?? 30)} m`} />
+      <Disclaimer text={d.disclaimer} />
     </Section>
   );
 }
@@ -132,7 +138,8 @@ function LandCover({ d }: { d: QuickScan }) {
 function Heat({ d }: { d: QuickScan }) {
   const lst = d.lst!;
   const setQs = useUi((s) => s.setQuickScan);
-  const scenes = `${lst.source.scenes as number} scenes`;
+  const first = lst.source.first_scene as string | null | undefined, last = lst.source.last_scene as string | null | undefined;
+  const scenes = `${lst.source.scenes as number} scenes${first && last ? ` (${first} to ${last})` : ''}`;
   if (lst.status !== 'READY') {
     return (
       <Section icon={<Flame size={14} className="text-warn" />} title="Surface temperature" testId="qs-lst">
@@ -174,6 +181,7 @@ function Heat({ d }: { d: QuickScan }) {
       </div>
       <p className="mt-2 text-[11px] leading-snug text-ink-3">Landsat passes over at about 10:30 local time; water is left out of the land statistics. Clear-sky coverage: {pct(lst.valid_share, 0)} of the area.</p>
       <Source source={lst.source} extra={scenes} />
+      <Disclaimer text={d.disclaimer} />
     </Section>
   );
 }
@@ -192,8 +200,10 @@ function Carbon({ d }: { d: QuickScan }) {
       </div>
       <p className="mt-2 text-[11px] leading-snug text-ink-3">
         Biomass × {c.carbon_fraction} (IPCC carbon fraction). {c.excludes} Biomass values cover {pct(c.coverage_share, 0)} of the area.
+        {c.source.year !== undefined && c.source.year !== d.year && <> The biomass map is from {c.source.year}, the latest ESA CCI year; the scan year is {d.year}.</>}
       </p>
       <Source source={c.source} />
+      <Disclaimer text={d.disclaimer} />
     </Section>
   );
 }
