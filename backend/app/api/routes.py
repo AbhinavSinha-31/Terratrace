@@ -104,6 +104,30 @@ async def _run(aid: str, baseline: int | None, comparison: int | None, rid: str 
         raise _err(422, e.code, e.message, False) from None
 
 
+def _cache_writable() -> bool:
+    """The durable cache directory exists (or can be created) and accepts a write."""
+    try:
+        settings.cache_dir.mkdir(parents=True, exist_ok=True)
+        probe = settings.cache_dir / ".write-probe"
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+@router.get("/health/live")
+def health_live() -> Response:
+    """Liveness for container health checks: the process answers and can write its cache. No Earth Engine call
+    (/api/health checks Earth Engine and can take seconds). 503 when the cache is not writable: every result would be
+    lost on restart, so the platform should flag the deployment."""
+    ok = _cache_writable()
+    if not ok:
+        log.error("Cache directory %s is not writable (TT_CACHE_DIR / volume permissions)", settings.cache_dir)
+    return Response(json.dumps({"status": "ok" if ok else "cache_not_writable", "version": settings.version}),
+                    status_code=200 if ok else 503, media_type="application/json")
+
+
 @router.get("/health", response_model=Health)
 def health() -> Health:
     ee_status, ee_detail = ee_provider.status()

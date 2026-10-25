@@ -78,14 +78,29 @@ and publishes `frontend/dist`; `.vercelignore` keeps `backend/` and every secret
 
 The backend does **not** fit serverless functions: analysis jobs run for minutes in background
 threads and are polled from in-memory state, registered areas and results live in `backend/.cache`,
-and rate limits are per process. Host it as one long-running process with a persistent disk
-(e.g. Render, Railway or Fly.io with a volume, or Cloud Run with max instances = 1):
+and rate limits are per process. Host it as **one** long-running process with a persistent disk.
+Hosting options are compared in [docs/PRODUCTION_PLAN.md](docs/PRODUCTION_PLAN.md#backend-hosting--options).
+
+The repository-root `Dockerfile` builds the backend image (it includes the two parts of `analysis/` the
+quick scan imports):
 
 ```sh
-uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="<your proxy's IP or *>"
+docker build -t terratrace-backend .
+docker run -p 8000:8000 -v terratrace-cache:/data --env-file backend/.env terratrace-backend
 ```
 
-`--proxy-headers` makes rate limits apply per real client instead of per proxy. On the host,
+- **Start command** (the image's default): `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+  --proxy-headers --forwarded-allow-ips=${TT_FORWARDED_ALLOW_IPS:-*}`. `--proxy-headers` makes rate limits apply
+  per real client instead of per proxy; `*` is safe only when the container is reachable solely through the
+  platform's proxy.
+- **Health checks:** `GET /api/health/live` (liveness: no Earth Engine call, 503 if the cache is not writable);
+  `GET /api/health` reports Earth Engine, chat and limits and can take several seconds.
+- **Storage:** mount the persistent volume at `TT_CACHE_DIR` (`/data` in the image). Tiles go to
+  `TT_TILE_CACHE_DIR` (default `$TT_CACHE_DIR/tiles`, disposable). The image runs as a non-root user (uid 10001):
+  if the platform mounts the volume owned by root, `/api/health/live` answers 503 — fix the volume's ownership
+  (or the platform's run-as-uid setting) before going live.
+
+On the host,
 Earth Engine needs a service account (`EE_PROJECT` + `EE_SERVICE_ACCOUNT_KEY` = path to the key
 file, uploaded as a secret file), since `earthengine authenticate` user credentials do not exist there.
 
@@ -93,6 +108,8 @@ file, uploaded as a secret file), since `earthengine authenticate` user credenti
 | --- | --- | --- |
 | Vercel | `VITE_API_BASE` | backend public URL ending in `/api` (public; baked into the bundle) |
 | Backend | `TT_CORS_ORIGINS` | your Vercel production origin, e.g. `https://<project>.vercel.app` |
+| Backend | `TT_CACHE_DIR`, `TT_TILE_CACHE_DIR` | persistent volume path (image default `/data`); optional separate tile path |
+| Backend | `TT_FORWARDED_ALLOW_IPS` | proxy address trusted for `X-Forwarded-For` (default `*`) |
 | Backend | `EE_PROJECT`, `EE_SERVICE_ACCOUNT_KEY` | Earth Engine (secret) |
 | Backend | `ANTHROPIC_API_KEY` | optional AI briefings (secret) |
 | Backend | `TT_CHAT_ENABLED`, `GEMINI_API_KEY`, `TT_LLM_MODEL` | optional AI chat, off by default; the key is a secret. Read docs/PRE_DEPLOYMENT.md items 4–7 first |

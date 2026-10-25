@@ -398,3 +398,17 @@ def test_a_slow_analysis_may_finish_in_the_background(monkeypatch):
     client.get("/api/analysis/silent-valley", params={"baseline": 2021, "comparison": 2024})
     assert 290 < seen["budget"] <= 300, f"background budget {seen['budget']:.0f} s must cover the join window, not only the 120 s wait"
     analysis._results.clear()
+
+
+def test_liveness_answers_without_earth_engine(monkeypatch):
+    from app.providers.earth_engine.provider import provider as ee_provider
+    monkeypatch.setattr(ee_provider, "status", lambda: (_ for _ in ()).throw(AssertionError("no Earth Engine call")))
+    r = client.get("/api/health/live")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_liveness_fails_when_the_cache_is_not_writable(monkeypatch):
+    from app.api import routes
+    monkeypatch.setattr(routes, "_cache_writable", lambda: False)
+    r = client.get("/api/health/live")
+    assert r.status_code == 503 and r.json()["status"] == "cache_not_writable"

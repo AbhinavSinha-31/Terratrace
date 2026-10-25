@@ -56,11 +56,18 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+_CACHE_DIR = Path(os.environ.get("TT_CACHE_DIR") or BACKEND_DIR / ".cache")
+
+
 @dataclass(frozen=True)
 class Settings:
     version: str = __version__
     frontend_dist: Path = REPO_DIR / "frontend" / "dist"
-    cache_dir: Path = Path(os.environ.get("TT_CACHE_DIR", BACKEND_DIR / ".cache"))
+    # Durable state (registered areas, stored results, quick scans): a PERSISTENT volume in production.
+    cache_dir: Path = _CACHE_DIR
+    # Fetched map tiles: disposable (rebuilt from Earth Engine on demand). Defaults to cache_dir/tiles; can point at a
+    # faster or ephemeral disk where the durable volume is slow for many small files (e.g. Cloud Storage FUSE).
+    tile_cache_dir: Path = Path(os.environ.get("TT_TILE_CACHE_DIR") or _CACHE_DIR / "tiles")
 
     # AOI limits for interactive analysis (prototype scale, not planetary scale).
     max_aoi_km2: float = _float("TT_MAX_AOI_KM2", 2500.0)

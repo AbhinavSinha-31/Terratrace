@@ -42,12 +42,12 @@ Deploy itself waits for the user's choice of backend host (see "Backend hosting"
 | 2.1 | No mock / demo data in the code | Done before this phase (demo generator deleted 2026-09-27; re-checked 2026-10-25) |
 | 2.2 | Hardcoded numbers on featured and case-study pages traced to a source | See [HARDCODED_NUMBERS_AUDIT.md](HARDCODED_NUMBERS_AUDIT.md) |
 | 2.3 | API keys server-side only; no secret in the frontend bundle | Verified 2026-10-25 (fresh build scanned; only `VITE_API_BASE` is read) |
-| 2.4 | Input validation, rate limiting, error boundaries, loading / empty states | Validation, limits, error boundary and state views exist; tile routes rate-limited (this phase) |
+| 2.4 | Input validation, rate limiting, error boundaries, loading / empty states | Validation, limits, error boundary and state views exist; tile routes rate-limited 2026-10-25 (`TT_RATE_TILES_PER_MIN`) |
 | 2.5 | Tests for the important flows | Backend: analysis, quick scan, jobs, tiles, chat, limits. Frontend unit tests (this phase). Auth / posting / voting: skipped until Phases 3–4 |
 | 2.6 | Accessibility, mobile, Lighthouse | This phase; report in [LIGHTHOUSE_REPORT.md](LIGHTHOUSE_REPORT.md) |
 | 2.7 | Bundle size: lazy-load MapLibre and heavy pages | This phase |
 | 2.8 | Gemini free tier: notice next to the chat (content may be reviewed, 18+), switch to a paid key by configuration | This phase |
-| 2.9 | Backend deploy-ready: Dockerfile, health check, `--proxy-headers`, configurable cache paths | This phase |
+| 2.9 | Backend deploy-ready: Dockerfile, health check, `--proxy-headers`, configurable cache paths | Done 2026-10-25: root `Dockerfile` + `.dockerignore`, `GET /api/health/live`, `TT_CACHE_DIR` + new `TT_TILE_CACHE_DIR`. Image not built here (no Docker on this machine); layout checked by running the app from a copy of the image's folders |
 | 2.10 | Deploy frontend to Vercel, set environment variables | Waiting for the backend host decision |
 | 2.11 | README | Updated with each step |
 
@@ -63,7 +63,7 @@ per-process), and ~250 MB of Python dependencies. HTTP requests themselves are s
 |---|---|---|---|
 | Long background jobs | Fine: a normal always-on container. Serverless sleep is opt-in; leave it off | Fine on a **paid** instance. Free instances sleep after 15 min without traffic (≈1 min to wake), which kills in-memory jobs | Needs **instance-based billing** (CPU outside requests) **and min instances = 1, max = 1**; otherwise background threads are throttled or the instance is stopped |
 | Persistent disk for the cache | Volume on Hobby (5 GB) and Pro (50 GB+); short downtime on each redeploy; no replicas with a volume | Persistent disk on paid services only; no zero-downtime deploys and no scaling beyond one instance with a disk | No block disk. Cloud Storage FUSE volume: not POSIX, no file locking, slow listings — fine for the JSON results, poor for thousands of small tiles. Put tiles on the in-memory filesystem (`TT_TILE_CACHE_DIR`, counts against RAM) |
-| Earth Engine credentials | Service-account key as a secret file | Service-account key as a secret file | Best: the service runs **as** the Earth Engine service account, so no key file exists at all |
+| Earth Engine credentials | Service-account key as a secret file | Service-account key as a secret file | Best: the service can run **as** the Earth Engine service account, so no key file exists. Needs a small backend change first: `provider.initialize` accepts only a key file or `earthengine authenticate` credentials today |
 | Rough cost | Hobby $5/month incl. $5 usage, then usage | $7/month instance + disk (per GB-month) | One always-on instance billed continuously (likely the most expensive of the three for 1 vCPU / 1–2 GiB) |
 | Fit | **Simplest.** Closest to how the backend runs today | Equally good; free tier unusable | Best security story, most configuration |
 
