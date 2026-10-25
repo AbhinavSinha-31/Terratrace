@@ -142,6 +142,11 @@ class Settings:
     # Swiss users (docs/PRE_DEPLOYMENT.md). The key is read from GEMINI_API_KEY at call time and never stored here.
     chat_enabled: bool = os.environ.get("TT_CHAT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
     chat_provider: str = os.environ.get("TT_LLM_PROVIDER", "gemini").strip().lower()
+    # Which Gemini API tier GEMINI_API_KEY belongs to (it cannot be read from the key): "free" (default) or "paid" (a key
+    # from a project with billing enabled). Decides the notice next to the chat: on the free tier Google may use inputs
+    # to improve its products and human reviewers may read them. Switching to paid = new key + TT_LLM_TIER=paid + the
+    # project's paid limits in TT_RATE_CHAT_PER_MIN / TT_CHAT_*; no code change.
+    chat_tier: str = "paid" if os.environ.get("TT_LLM_TIER", "free").strip().lower() == "paid" else "free"
     chat_model: str = os.environ.get("TT_LLM_MODEL", "gemini-3.8-flash").strip()
     # Tried ONCE when the primary model answers 503 ("high demand"; seen for every full Flash model on 2026-10-15 while
     # gemini-3.5-flash-lite answered). Empty = no fallback. Never used after a 429 (quota) or any other error.

@@ -46,7 +46,7 @@ Deploy itself waits for the user's choice of backend host (see "Backend hosting"
 | 2.5 | Tests for the important flows | Backend: analysis, quick scan, jobs, tiles, chat, limits. Frontend unit tests (this phase). Auth / posting / voting: skipped until Phases 3–4 |
 | 2.6 | Accessibility, mobile, Lighthouse | This phase; report in [LIGHTHOUSE_REPORT.md](LIGHTHOUSE_REPORT.md) |
 | 2.7 | Bundle size: lazy-load MapLibre and heavy pages | This phase |
-| 2.8 | Gemini free tier: notice next to the chat (content may be reviewed, 18+), switch to a paid key by configuration | This phase |
+| 2.8 | Gemini free tier: notice next to the chat (content may be reviewed, 18+), switch to a paid key by configuration | Done 2026-10-25: `TT_LLM_TIER=free\|paid`, notice from `/api/health` `chat.tier`; the paid tier itself is still to buy (PRE_DEPLOYMENT #4–5) |
 | 2.9 | Backend deploy-ready: Dockerfile, health check, `--proxy-headers`, configurable cache paths | Done 2026-10-25: root `Dockerfile` + `.dockerignore`, `GET /api/health/live`, `TT_CACHE_DIR` + new `TT_TILE_CACHE_DIR`. Image not built here (no Docker on this machine); layout checked by running the app from a copy of the image's folders |
 | 2.10 | Deploy frontend to Vercel, set environment variables | Waiting for the backend host decision |
 | 2.11 | README | Updated with each step |

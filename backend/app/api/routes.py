@@ -142,7 +142,7 @@ def health() -> Health:
         explainer_model=settings.llm_model if claude.configured() else None,
         geocoder={"status": "ready" if settings.geocoder_enabled else "offline", "detail": "OpenStreetMap Nominatim + offline gazetteer"},
         limits={"max_aoi_km2": settings.max_aoi_km2, "min_aoi_km2": settings.min_aoi_km2, "interactive_max_km2": settings.interactive_max_km2},
-        chat=dict(zip(("status", "detail"), chat.status())),
+        chat={**dict(zip(("status", "detail"), chat.status())), "tier": settings.chat_tier},
     )
 
 

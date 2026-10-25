@@ -577,3 +577,19 @@ def test_stream_refusal_is_an_error_event_with_the_public_message(model, monkeyp
 
 def test_stream_shares_the_chat_rate_limit():
     assert ratelimit.group_of("POST", "/api/chat/stream") == "chat" == ratelimit.group_of("POST", "/api/chat")
+
+
+def test_free_tier_notice_says_inputs_may_be_reviewed_and_18_plus(model):
+    """docs/PRE_DEPLOYMENT.md items 4-6: the free tier's terms are stated next to every answer and in /api/health."""
+    n = ask().json()["notice"]
+    assert "18+" in n and "free tier" in n and "human reviewers may read" in n and "Don't enter personal information" in n
+    assert client.get("/api/health").json()["chat"]["tier"] == "free"
+
+
+def test_paid_tier_is_a_configuration_switch(model, monkeypatch):
+    from app.api import routes
+    monkeypatch.setattr(service, "settings", dataclasses.replace(service.settings, chat_tier="paid"))
+    monkeypatch.setattr(routes, "settings", dataclasses.replace(settings, chat_tier="paid"))
+    n = ask().json()["notice"]
+    assert "18+" in n and "free tier" not in n and "reviewers" not in n
+    assert client.get("/api/health").json()["chat"]["tier"] == "paid"

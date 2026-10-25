@@ -112,7 +112,7 @@ file, uploaded as a secret file), since `earthengine authenticate` user credenti
 | Backend | `TT_FORWARDED_ALLOW_IPS` | proxy address trusted for `X-Forwarded-For` (default `*`) |
 | Backend | `EE_PROJECT`, `EE_SERVICE_ACCOUNT_KEY` | Earth Engine (secret) |
 | Backend | `ANTHROPIC_API_KEY` | optional AI briefings (secret) |
-| Backend | `TT_CHAT_ENABLED`, `GEMINI_API_KEY`, `TT_LLM_MODEL` | optional AI chat, off by default; the key is a secret. Read docs/PRE_DEPLOYMENT.md items 4–7 first |
+| Backend | `TT_CHAT_ENABLED`, `GEMINI_API_KEY`, `TT_LLM_MODEL`, `TT_LLM_TIER` | optional AI chat, off by default; the key is a secret. `TT_LLM_TIER` = `free` (default) or `paid` (key from a billed project) sets the notice shown with the chat. Read docs/PRE_DEPLOYMENT.md items 4–7 first |
 
 ## Method (tt-ee-2.1)
 
