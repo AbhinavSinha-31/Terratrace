@@ -43,7 +43,7 @@ Deploy itself waits for the user's choice of backend host (see "Backend hosting"
 | 2.2 | Hardcoded numbers on featured and case-study pages traced to a source | See [HARDCODED_NUMBERS_AUDIT.md](HARDCODED_NUMBERS_AUDIT.md) |
 | 2.3 | API keys server-side only; no secret in the frontend bundle | Verified 2026-10-25 (fresh build scanned; only `VITE_API_BASE` is read) |
 | 2.4 | Input validation, rate limiting, error boundaries, loading / empty states | Validation, limits, error boundary and state views exist; tile routes rate-limited 2026-10-25 (`TT_RATE_TILES_PER_MIN`) |
-| 2.5 | Tests for the important flows | Backend: analysis, quick scan, jobs, tiles, chat, limits. Frontend unit tests (this phase). Auth / posting / voting: skipped until Phases 3–4 |
+| 2.5 | Tests for the important flows | Backend: analysis, quick scan, jobs, tiles, chat, limits. Frontend unit tests (Vitest, `npm test`, 33 tests, 2026-10-25): READY-only measurements, public API errors, `VITE_API_BASE`, URL routes, chat turns and notice, error boundaries, state views. Auth / posting / voting: skipped until Phases 3–4 |
 | 2.6 | Accessibility, mobile, Lighthouse | This phase; report in [LIGHTHOUSE_REPORT.md](LIGHTHOUSE_REPORT.md) |
 | 2.7 | Bundle size: lazy-load MapLibre and heavy pages | This phase |
 | 2.8 | Gemini free tier: notice next to the chat (content may be reviewed, 18+), switch to a paid key by configuration | Done 2026-10-25: `TT_LLM_TIER=free\|paid`, notice from `/api/health` `chat.tier`; the paid tier itself is still to buy (PRE_DEPLOYMENT #4–5) |

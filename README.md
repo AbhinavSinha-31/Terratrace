@@ -187,7 +187,7 @@ TERRATRACE handles this without bypassing the quota:
 ```powershell
 # from the repository root
 cd backend;  .venv\Scripts\python -m pytest -q; cd ..   # offline: Earth Engine is replaced by fakes
-cd frontend; npm run typecheck; npm run build; cd ..
+cd frontend; npm test; npm run typecheck; npm run build; cd ..   # npm test = Vitest unit tests (jsdom, no backend)
 cd frontend; npm run test:integrity; cd ..              # end-to-end; needs the dev server + backend running
 ```
 

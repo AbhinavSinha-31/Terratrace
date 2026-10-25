@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:markers": "node scripts/check-map-markers.mjs",
     "test:integrity": "node scripts/check-data-integrity.mjs",
-    "test:coordinates": "node scripts/check-coordinates.mjs"
+    "test:coordinates": "node scripts/check-coordinates.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -27,13 +28,17 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^30.1.3",
     "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "vitest": "^5.0.5"
   }
 }
