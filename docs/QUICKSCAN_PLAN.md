@@ -117,7 +117,32 @@ with its own label and source. Accounts, saving and community publishing are **d
   disclaimer "Agreement, not accuracy: …" (`disclaimer`), shown under every READY section. Both are derived from the
   scan's year and season when served (`services/quickscan.present`), so stored scans show them without a re-run.
   New scans also record the first and last Dynamic World image dates. No number changed, so no method-version bump.
-- **Step 2 (proposed, waiting for approval):** IPCC Tier 1 carbon component — see below.
+- **Step 2 (proposed, waiting for approval):** IPCC Tier 1 carbon component.
+
+### Step 2 proposal — IPCC Tier 1 carbon estimate (not implemented)
+
+Second carbon component `ipcc_tier1`, "IPCC Tier 1 estimate (default biomass per land-cover class)": for each Dynamic
+World class, class area × the IPCC default above-ground biomass (t d.m./ha) for the area's FAO ecological zone ×
+0.47 → t C. It is a lookup, not a measurement, and is labelled so; its range comes from the table's own uncertainty.
+ESA CCI stays as it is; the two are shown side by side, never added.
+
+Facts found 2026-10-25 (2019 Refinement, Vol. 4 Ch. 4, Table 4.7 "Above-ground biomass in natural forests"):
+- Forest values depend on **ecological zone (FAO GEZ 2010) × continent × status** (primary / secondary > 20 y /
+  secondary ≤ 20 y). Dynamic World cannot tell primary from secondary forest; the status must be chosen.
+- Many cells are **n.a.** (e.g. temperate continental Asia secondary; boreal zones outside the Americas). There the
+  trees part is UNAVAILABLE, never filled from another zone.
+- Many subtropical and shrubland values cite Santoro et al. 2018 (GlobBiomass), the same satellite-biomass lineage as
+  ESA CCI, so Tier 1 is not an independent check on CCI there.
+- **FAO GEZ 2010 is not in the Earth Engine catalog** (no community-catalog entry found). FAO publishes it as a
+  shapefile (`gez2010.zip`, FAO catalog "Global Ecological Zones (second edition)"); using it means uploading it as an
+  asset to project terratrace-509821.
+- Non-forest classes need other tables: cropland (2006 GL Ch. 5), grassland (Ch. 6); settlements (Ch. 8) have no
+  Tier 1 default stock, and flooded vegetation falls under the Wetlands Supplement. Those values are not read yet.
+- The PDF's merged cells extract ambiguously as text; every value must be checked against the rendered page before it
+  goes into code.
+
+Decisions needed before coding: forest status to use; GEZ upload (yes/no); classes without a default
+(built, flooded vegetation): "not estimated" vs 0; above-ground only, or + below-ground (root-to-shoot, Table 4.4).
 
 ## Backlog (not part of the quick-scan phases; do later)
 
