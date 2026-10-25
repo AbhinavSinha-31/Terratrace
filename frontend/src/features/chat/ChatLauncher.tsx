@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MessageCircle, Send, X } from 'lucide-react';
 import { GENERAL, useChat } from '../../state/chat';
-import { GENERAL_STARTERS, GREETING } from './AskPage';
+import { GENERAL_STARTERS, GREETING } from './starters';
 import { ChatNotice, useChatAvailability } from './ChatPanel';
 
 /**

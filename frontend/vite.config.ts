@@ -49,9 +49,13 @@ export default defineConfig({
     chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
-        manualChunks: {
-          maplibre: ['maplibre-gl'],
-          echarts: ['echarts'],
+        // Only the libraries' own modules go into these chunks. Rollup's shared CommonJS helper gets a tiny chunk of
+        // its own: otherwise it lands in the maplibre chunk and the entry imports (and preloads) all of MapLibre.
+        manualChunks(id) {
+          if (id.includes('commonjsHelpers')) return 'cjs-helpers';
+          if (id.includes('/node_modules/maplibre-gl/')) return 'maplibre';
+          if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'echarts';
+          return undefined;
         },
       },
     },

@@ -1,20 +1,54 @@
-import { useEffect } from 'react';
-import { MapStage } from '../features/map/MapStage';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Header } from '../features/shell/Header';
 import { Landing } from '../features/explore/Landing';
-import { AnalysisView } from '../features/analysis/AnalysisView';
 import { AnalysisProgressOverlay } from '../features/analysis/AnalyzingOverlay';
-import { AboutModal } from '../features/shell/AboutModal';
 import { BootSplash } from '../features/shell/BootSplash';
-import { AskPage } from '../features/chat/AskPage';
-import { CaseStudyPage } from '../features/casestudy/CaseStudyPage';
 import { useUi } from '../state/store';
+import { useChat } from '../state/chat';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
 import { useAnalysisRunner } from '../data/analysisRunner';
 import { useImagerySync } from '../data/imagerySync';
 import { useBackendRecovery } from '../data/queries';
 import { useBreakpoint, CHROME } from '../lib/useLayout';
+
+// Loaded on demand, so the first paint does not wait for MapLibre (~1 MB), ECharts or pages nobody has opened yet.
+const loadAnalysisView = () => import('../features/analysis/AnalysisView');
+const MapStage = lazy(() => import('../features/map/MapStage').then((m) => ({ default: m.MapStage })));
+const AnalysisView = lazy(() => loadAnalysisView().then((m) => ({ default: m.AnalysisView })));
+const AskPage = lazy(() => import('../features/chat/AskPage').then((m) => ({ default: m.AskPage })));
+const CaseStudyPage = lazy(() => import('../features/casestudy/CaseStudyPage').then((m) => ({ default: m.CaseStudyPage })));
+const AboutModal = lazy(() => import('../features/shell/AboutModal').then((m) => ({ default: m.AboutModal })));
+
+/** True from the first time `flag` is true: a page stays mounted after its first opening (its own exit animation runs). */
+function useOpenedOnce(flag: boolean): boolean {
+  const [opened, setOpened] = useState(flag);
+  if (flag && !opened) setOpened(true);
+  return opened || flag;
+}
+
+/** Fetches the analysis view while the browser is idle, so opening an investigation does not wait for it. */
+function usePrefetchAnalysisView() {
+  useEffect(() => {
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (id: number) => void };
+    const prefetch = () => { void loadAnalysisView(); };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(prefetch);
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(prefetch, 2000);
+    return () => window.clearTimeout(t);
+  }, []);
+}
+
+function ViewLoading() {
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center" role="status" aria-live="polite">
+      <span className="flex items-center gap-2 rounded-md bg-base/80 px-3 py-2 text-[12.5px] text-ink-2"><Loader2 size={14} className="animate-spin" aria-hidden="true" />Loading…</span>
+    </div>
+  );
+}
 
 function useShortcuts() {
   useEffect(() => {
@@ -47,6 +81,10 @@ export function App() {
   useAnalysisRunner();   // the only executor of analysis requests
   useImagerySync();      // imagery status (independent of analysis)
   useBackendRecovery();  // a backend that comes back after an outage is used again without a reload
+  usePrefetchAnalysisView();
+  const askMounted = useOpenedOnce(useChat((s) => s.askOpen));
+  const caseStudyMounted = useOpenedOnce(useUi((s) => !!s.caseStudy));
+  const aboutMounted = useOpenedOnce(useUi((s) => s.aboutOpen));
   const view = useUi((s) => s.view);
   const hasStudy = useUi((s) => !!s.investigation.study);
   const drawerOpen = useUi((s) => s.drawerOpen);
@@ -64,14 +102,16 @@ export function App() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[300] focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-[#03201d]">Skip to content</a>
       <div className="absolute inset-x-0 top-0 z-50"><Header /></div>
       <main id="main" className="absolute inset-0">
-        <MapErrorBoundary><MapStage /></MapErrorBoundary>
+        <MapErrorBoundary><Suspense fallback={null}><MapStage /></Suspense></MapErrorBoundary>
         <div className="tt-vignette pointer-events-none absolute inset-0 z-[5]" />
-        {view === 'explore' ? <Landing /> : <AnalysisView />}
+        {view === 'explore' ? <Landing /> : <Suspense fallback={<ViewLoading />}><AnalysisView /></Suspense>}
         <AnalysisProgressOverlay />
-        <AskPage />
-        <CaseStudyPage />
+        <Suspense fallback={null}>
+          {askMounted && <AskPage />}
+          {caseStudyMounted && <CaseStudyPage />}
+        </Suspense>
       </main>
-      <AboutModal />
+      {aboutMounted && <Suspense fallback={null}><AboutModal /></Suspense>}
       <BootSplash />
     </div>
   );

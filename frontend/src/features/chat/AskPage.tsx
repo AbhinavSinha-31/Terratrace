@@ -4,14 +4,8 @@ import { MessagesSquare, X } from 'lucide-react';
 import { IconButton } from '../../design';
 import { GENERAL, useChat } from '../../state/chat';
 import { ChatPanel } from './ChatPanel';
+import { GENERAL_STARTERS, GREETING } from './starters';
 
-export const GENERAL_STARTERS = [
-  'How do satellites see forests?',
-  'What is NDVI?',
-  'How does TerraTrace decide what counts as forest?',
-  'Why does TerraTrace show only imagery before 2016?',
-];
-export const GREETING = "Hi! I'm TerraTrace's guide. Ask me about forests, satellite images or how TerraTrace measures forest change — I'll keep it simple, and go deeper if you want.";
 
 /** The "Ask me anything" page: a full page over the map (general questions; no area facts). */
 export function AskPage() {
