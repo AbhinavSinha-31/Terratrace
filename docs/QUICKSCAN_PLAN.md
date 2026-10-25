@@ -107,42 +107,50 @@ The backend imports the research pipeline's Landsat code from `analysis/` (next 
 
 ## Phase 3 (user request, 2026-10-25)
 
-Decisions (user, 2026-10-25): there is no separate PLAN.md, so this request is the spec. The quick scan IS the
-"any area" generalisation of the Noida–Ghaziabad work (the custom-RF pipeline stays CLI-only, see urban-live). Carbon
-shows **both** ESA CCI (measured, trees) and an **IPCC Tier 1 estimate** (default factors per land-cover class), each
-with its own label and source. Accounts, saving and community publishing are **deferred** until after 2026-10-30.
+Decisions (user, 2026-10-25): this request was taken as the spec (no PLAN.md existed when it was checked; the
+root `PLAN.md` production plan appeared later and has its own, different phase numbering). The quick scan IS the
+"any area" generalisation of the Noida–Ghaziabad work (the custom-RF pipeline stays CLI-only, see urban-live).
+Accounts, saving and community publishing are **deferred** until after 2026-10-30.
+
+Decision (user, 2026-10-26): **ESA CCI stays the primary — and only shown — carbon source.** The IPCC Tier 1 estimate is
+NOT built now; it is kept below as a *future cross-check*.
 
 - **Step 1 (done):** every served quick-scan result carries its date window (`source.period`: Dynamic World = the scan
   year; Landsat = the season window, plus the first and last scene used; ESA CCI and WorldCover = their map year) and the
   disclaimer "Agreement, not accuracy: …" (`disclaimer`), shown under every READY section. Both are derived from the
   scan's year and season when served (`services/quickscan.present`), so stored scans show them without a re-run.
   New scans also record the first and last Dynamic World image dates. No number changed, so no method-version bump.
-- **Step 2 (proposed, waiting for approval):** IPCC Tier 1 carbon component.
 
-### Step 2 proposal — IPCC Tier 1 carbon estimate (not implemented)
+### Future cross-check — IPCC Tier 1 carbon estimate (not built)
 
-Second carbon component `ipcc_tier1`, "IPCC Tier 1 estimate (default biomass per land-cover class)": for each Dynamic
-World class, class area × the IPCC default above-ground biomass (t d.m./ha) for the area's FAO ecological zone ×
-0.47 → t C. It is a lookup, not a measurement, and is labelled so; its range comes from the table's own uncertainty.
-ESA CCI stays as it is; the two are shown side by side, never added.
+A possible second carbon component `ipcc_tier1`, "IPCC Tier 1 estimate (default biomass per land-cover class)": for each
+Dynamic World class, class area × the IPCC default above-ground biomass (t d.m./ha) for the area's FAO ecological zone
+× 0.47 → t C. A lookup, not a measurement, labelled so, and shown as a cross-check next to ESA CCI — never added to it,
+never replacing it as the primary figure.
+
+Decisions already made for it (user, 2026-10-26):
+1. **Forest status: show the range, never one value.** Dynamic World cannot tell primary from secondary forest, so the
+   trees part spans the Table 4.7 values for the zone and continent (secondary ≤ 20 y … primary), with the low and high
+   ends labelled by status.
+2. **FAO GEZ 2010 asset: uploaded later** (to project terratrace-509821), not now.
+3. **No default value → "not estimated", never 0.** Applies to n.a. cells of Table 4.7 and to classes without a Tier 1
+   stock (e.g. built area, flooded vegetation).
+4. **Above-ground only.** Below-ground biomass (root-to-shoot ratios, Table 4.4) comes later, as a separate line, never
+   folded into the above-ground figure.
 
 Facts found 2026-10-25 (2019 Refinement, Vol. 4 Ch. 4, Table 4.7 "Above-ground biomass in natural forests"):
 - Forest values depend on **ecological zone (FAO GEZ 2010) × continent × status** (primary / secondary > 20 y /
-  secondary ≤ 20 y). Dynamic World cannot tell primary from secondary forest; the status must be chosen.
-- Many cells are **n.a.** (e.g. temperate continental Asia secondary; boreal zones outside the Americas). There the
-  trees part is UNAVAILABLE, never filled from another zone.
+  secondary ≤ 20 y).
+- Many cells are **n.a.** (e.g. temperate continental Asia secondary; boreal zones outside the Americas) → "not
+  estimated", never filled from another zone.
 - Many subtropical and shrubland values cite Santoro et al. 2018 (GlobBiomass), the same satellite-biomass lineage as
-  ESA CCI, so Tier 1 is not an independent check on CCI there.
+  ESA CCI, so Tier 1 is not an independent check on CCI there; the cross-check must say so.
 - **FAO GEZ 2010 is not in the Earth Engine catalog** (no community-catalog entry found). FAO publishes it as a
-  shapefile (`gez2010.zip`, FAO catalog "Global Ecological Zones (second edition)"); using it means uploading it as an
-  asset to project terratrace-509821.
+  shapefile (`gez2010.zip`, FAO catalog "Global Ecological Zones (second edition)").
 - Non-forest classes need other tables: cropland (2006 GL Ch. 5), grassland (Ch. 6); settlements (Ch. 8) have no
   Tier 1 default stock, and flooded vegetation falls under the Wetlands Supplement. Those values are not read yet.
 - The PDF's merged cells extract ambiguously as text; every value must be checked against the rendered page before it
   goes into code.
-
-Decisions needed before coding: forest status to use; GEZ upload (yes/no); classes without a default
-(built, flooded vegetation): "not estimated" vs 0; above-ground only, or + below-ground (root-to-shoot, Table 4.4).
 
 ## Backlog (not part of the quick-scan phases; do later)
 
