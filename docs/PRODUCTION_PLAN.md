@@ -40,12 +40,12 @@ Deploy itself waits for the user's choice of backend host (see "Backend hosting"
 | # | Item | Status |
 |---|---|---|
 | 2.1 | No mock / demo data in the code | Done before this phase (demo generator deleted 2026-09-27; re-checked 2026-10-25) |
-| 2.2 | Hardcoded numbers on featured and case-study pages traced to a source | See [HARDCODED_NUMBERS_AUDIT.md](HARDCODED_NUMBERS_AUDIT.md) |
+| 2.2 | Hardcoded numbers on featured and case-study pages traced to a source | Done 2026-10-25: all traced except 4 items listed for a decision in [HARDCODED_NUMBERS_AUDIT.md](HARDCODED_NUMBERS_AUDIT.md) |
 | 2.3 | API keys server-side only; no secret in the frontend bundle | Verified 2026-10-25 (fresh build scanned; only `VITE_API_BASE` is read) |
 | 2.4 | Input validation, rate limiting, error boundaries, loading / empty states | Validation, limits, error boundary and state views exist; tile routes rate-limited 2026-10-25 (`TT_RATE_TILES_PER_MIN`) |
 | 2.5 | Tests for the important flows | Backend: analysis, quick scan, jobs, tiles, chat, limits. Frontend unit tests (Vitest, `npm test`, 33 tests, 2026-10-25): READY-only measurements, public API errors, `VITE_API_BASE`, URL routes, chat turns and notice, error boundaries, state views. Auth / posting / voting: skipped until Phases 3–4 |
-| 2.6 | Accessibility, mobile, Lighthouse | This phase; report in [LIGHTHOUSE_REPORT.md](LIGHTHOUSE_REPORT.md) |
-| 2.7 | Bundle size: lazy-load MapLibre and heavy pages | This phase |
+| 2.6 | Accessibility, mobile, Lighthouse | Done 2026-10-25: accessibility 100 and SEO 100 on every page measured, mobile layout shift 1.18 → 0.006, no horizontal scroll at 360/390/768 px. Mobile performance still ~30 (map start-up). [LIGHTHOUSE_REPORT.md](LIGHTHOUSE_REPORT.md) |
+| 2.7 | Bundle size: lazy-load MapLibre and heavy pages | Done 2026-10-25: first-load JS 675 → 462 KiB; MapLibre, ECharts, analysis view, case study, Ask and About load on demand |
 | 2.8 | Gemini free tier: notice next to the chat (content may be reviewed, 18+), switch to a paid key by configuration | Done 2026-10-25: `TT_LLM_TIER=free\|paid`, notice from `/api/health` `chat.tier`; the paid tier itself is still to buy (PRE_DEPLOYMENT #4–5) |
 | 2.9 | Backend deploy-ready: Dockerfile, health check, `--proxy-headers`, configurable cache paths | Done 2026-10-25: root `Dockerfile` + `.dockerignore`, `GET /api/health/live`, `TT_CACHE_DIR` + new `TT_TILE_CACHE_DIR`. Image not built here (no Docker on this machine); layout checked by running the app from a copy of the image's folders |
 | 2.10 | Deploy frontend to Vercel, set environment variables | Waiting for the backend host decision |

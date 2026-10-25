@@ -56,3 +56,16 @@ def test_silent_valley_is_in_kerala_not_the_ocean():
 def test_frontend_offline_copy_matches_backend_registry():
     """The UI-preview copy (used only when the backend is down) must be identical."""
     assert json.loads(FRONTEND_COPY.read_text(encoding="utf-8")) == registry.featured()
+
+
+@pytest.mark.parametrize("area_id", sorted(KNOWN))
+def test_stated_areas_are_computed_from_the_geometry(area_id):
+    """The km² / ha shown for a featured area (and its analysis subset) are the geodesic area of its polygon, not a
+    typed-in figure (docs/HARDCODED_NUMBERS_AUDIT.md)."""
+    from app.services.geometry import validate_aoi
+    a = _areas()[area_id]
+    for part in (a, a.get("analysis_area")):
+        if part:
+            aoi = validate_aoi(part["geometry"], enforce_limits=False)
+            assert part["area_km2"] == pytest.approx(aoi.area_km2, abs=0.06)
+            assert part["area_ha"] == pytest.approx(aoi.area_km2 * 100, abs=6)
