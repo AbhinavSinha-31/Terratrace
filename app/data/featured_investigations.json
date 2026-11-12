@@ -1,0 +1,306 @@
+{
+ "schema_version": "2.0",
+ "note": "Featured investigations are predefined areas of interest only. They carry no analysis results; all measurements come from live Earth Engine analysis.",
+ "items": [
+  {
+   "id": "rondonia-frontier",
+   "code": "RON",
+   "name": "Rondônia Deforestation Frontier",
+   "short_name": "Rondônia",
+   "region": "Rondônia, Brazilian Amazon",
+   "country": "Brazil",
+   "biome": "Tropical moist broadleaf forest",
+   "description": "A classic “fishbone” frontier: side roads branch from a trunk road and pasture clearings advance into intact forest each dry season.",
+   "tags": [
+    "Deforestation frontier",
+    "Pasture conversion",
+    "Dry-season fire"
+   ],
+   "bbox": [
+    -63.62,
+    -10.05,
+    -63.18,
+    -9.72
+   ],
+   "center": [
+    -63.4,
+    -9.885
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -63.62,
+       -10.05
+      ],
+      [
+       -63.18,
+       -10.05
+      ],
+      [
+       -63.18,
+       -9.72
+      ],
+      [
+       -63.62,
+       -9.72
+      ],
+      [
+       -63.62,
+       -10.05
+      ]
+     ]
+    ]
+   },
+   "area_km2": 1772.6,
+   "area_ha": 177261.0,
+   "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/540/331.jpg",
+   "featured": true,
+   "analysis_area": {
+    "geometry": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        -63.565,
+        -10.009
+       ],
+       [
+        -63.235,
+        -10.009
+       ],
+       [
+        -63.235,
+        -9.761
+       ],
+       [
+        -63.565,
+        -9.761
+       ],
+       [
+        -63.565,
+        -10.009
+       ]
+      ]
+     ]
+    },
+    "bbox": [
+     -63.565,
+     -10.009,
+     -63.235,
+     -9.761
+    ],
+    "area_km2": 999.1,
+    "area_ha": 99910.7,
+    "basis": "Central rectangle of the region with the same proportions, about 1,000 km² — inside the 1,500 km² interactive analysis limit. Only this rectangle is analysed; the full region is shown for context."
+   }
+  },
+  {
+   "id": "hasdeo-arand",
+   "code": "HAS",
+   "name": "Hasdeo Arand Forest",
+   "short_name": "Hasdeo Arand",
+   "region": "Chhattisgarh, Central India",
+   "country": "India",
+   "biome": "Tropical dry deciduous (sal) forest",
+   "description": "Contiguous sal forest over a coalfield. Open-cast expansion replaces forest with bare ground in discrete annual blocks.",
+   "tags": [
+    "Mining expansion",
+    "Deciduous phenology",
+    "Land-use conversion"
+   ],
+   "bbox": [
+    82.6,
+    22.7,
+    82.98,
+    22.98
+   ],
+   "center": [
+    82.79,
+    22.84
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       82.6,
+       22.7
+      ],
+      [
+       82.98,
+       22.7
+      ],
+      [
+       82.98,
+       22.98
+      ],
+      [
+       82.6,
+       22.98
+      ],
+      [
+       82.6,
+       22.7
+      ]
+     ]
+    ]
+   },
+   "area_km2": 1215.1,
+   "area_ha": 121513.0,
+   "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/445/747.jpg",
+   "featured": true
+  },
+  {
+   "id": "similipal",
+   "code": "SIM",
+   "name": "Similipal Biosphere Reserve",
+   "short_name": "Similipal",
+   "region": "Odisha, Eastern India",
+   "country": "India",
+   "biome": "Tropical moist deciduous forest",
+   "description": "Large protected forest where dry-season fires leave burn scars that NBR separates from permanent clearing — and that partially recover.",
+   "tags": [
+    "Forest fire",
+    "Burn severity (dNBR)",
+    "Post-fire recovery"
+   ],
+   "bbox": [
+    86.12,
+    21.62,
+    86.56,
+    21.98
+   ],
+   "center": [
+    86.34,
+    21.8
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       86.12,
+       21.62
+      ],
+      [
+       86.56,
+       21.62
+      ],
+      [
+       86.56,
+       21.98
+      ],
+      [
+       86.12,
+       21.98
+      ],
+      [
+       86.12,
+       21.62
+      ]
+     ]
+    ]
+   },
+   "area_km2": 1822.5,
+   "area_ha": 182252.0,
+   "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/448/757.jpg",
+   "featured": true,
+   "analysis_area": {
+    "geometry": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        86.177,
+        21.667
+       ],
+       [
+        86.503,
+        21.667
+       ],
+       [
+        86.503,
+        21.933
+       ],
+       [
+        86.177,
+        21.933
+       ],
+       [
+        86.177,
+        21.667
+       ]
+      ]
+     ]
+    },
+    "bbox": [
+     86.177,
+     21.667,
+     86.503,
+     21.933
+    ],
+    "area_km2": 997.7,
+    "area_ha": 99773.8,
+    "basis": "Central rectangle of the region with the same proportions, about 1,000 km² — inside the 1,500 km² interactive analysis limit. Only this rectangle is analysed; the full region is shown for context."
+   }
+  },
+  {
+   "id": "silent-valley",
+   "code": "SLV",
+   "name": "Silent Valley (Control Site)",
+   "short_name": "Silent Valley",
+   "region": "Kerala, Western Ghats, India",
+   "country": "India",
+   "biome": "Tropical wet evergreen forest",
+   "description": "Stable, protected evergreen forest used as a control site to measure the false-alarm rate. No change is expected here.",
+   "tags": [
+    "Control site",
+    "Stable forest",
+    "False-alarm check"
+   ],
+   "bbox": [
+    76.38,
+    11.02,
+    76.56,
+    11.2
+   ],
+   "center": [
+    76.47,
+    11.11
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       76.38,
+       11.02
+      ],
+      [
+       76.56,
+       11.02
+      ],
+      [
+       76.56,
+       11.2
+      ],
+      [
+       76.38,
+       11.2
+      ],
+      [
+       76.38,
+       11.02
+      ]
+     ]
+    ]
+   },
+   "area_km2": 394.0,
+   "area_ha": 39398.0,
+   "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/480/729.jpg",
+   "featured": true
+  }
+ ]
+}

@@ -1,0 +1,45 @@
+# Only the frontend is deployed to Vercel; nothing below is ever uploaded.
+
+# --- secrets & credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.token
+access_token
+*service-account*.json
+*-ee-key*.json
+**/credentials.json
+**/*credentials*.json
+application_default_credentials.json
+kaggle.json
+**/kaggle.json
+.kaggle/
+.config/earthengine/
+
+# --- backend (hosted separately) and local environments / caches
+/backend
+.venv/
+**/.venv/
+venv/
+.cache/
+**/.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- dependencies & builds (Vercel installs and builds itself)
+node_modules/
+**/node_modules/
+frontend/dist/
+
+# --- local-only material
+/ml
+/docs
+/TERRATRACE_*.md
+*.log

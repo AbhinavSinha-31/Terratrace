@@ -1,0 +1,47 @@
+{
+"aoi": {
+"aoi_ha": 10123.421042651133
+},
+"dem_cover": {
+"dem_ha": 10123.421042651134
+},
+"elevation": {
+"elevation_max": 3111.722900390625,
+"elevation_mean": 3098.719255966582,
+"elevation_min": 3084.447265625,
+"elevation_p5": 3087.9369668637305,
+"elevation_p95": 3107.435401370968
+},
+"hansen": {
+"forest2000_ha": 0,
+"gain_ha": 0,
+"land_ha": 0
+},
+"hansen_mask": {
+"groups": [
+{
+"mask": 0,
+"sum": 10123.421042651133
+}
+]
+},
+"loss_by_year": {
+"groups": []
+},
+"slope": {
+"slope": 0.7668802605669336,
+"steep": 0
+},
+"worldcover": {
+"land_ha": 10122.150909233787,
+"tree_ha": 0
+},
+"worldcover_classes": {
+"groups": [
+{
+"class": 70,
+"sum": 10122.150909244281
+}
+]
+}
+}
