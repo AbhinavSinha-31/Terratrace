@@ -87,3 +87,23 @@ def test_failures_are_retried_but_throttled(prov, monkeypatch):
     prov._error_at -= prov.RETRY_S + 1
     fake.init_error = None
     assert prov.status()[0] == "ready" and fake.init_calls == 2
+
+
+def test_service_account_json_from_the_environment(monkeypatch):
+    """Hosts with environment variables only (Railway, Render): the key's JSON content, never written to disk or logged."""
+    key = '{"type": "service_account", "client_email": "tt@proj-sa.iam.gserviceaccount.com", "project_id": "proj-sa", "private_key": "x"}'
+    monkeypatch.setattr(p, "settings", dataclasses.replace(p.settings, ee_project=None, ee_service_account_key=None, ee_service_account_json=key))
+    fake = FakeEE()
+    seen = {}
+
+    def creds(email, key_file=None, key_data=None):
+        seen.update(email=email, key_file=key_file, key_data=key_data)
+        return "CREDS"
+    fake.ServiceAccountCredentials = creds
+    monkeypatch.setattr(p, "_ee", lambda: fake)
+    prov = p.EarthEngineProvider()
+    assert prov.credentials_configured() is True
+    status, detail = prov.status()
+    assert status == "ready" and fake.project == "proj-sa" and "environment" in detail
+    assert seen == {"email": "tt@proj-sa.iam.gserviceaccount.com", "key_file": None, "key_data": key}
+    assert "private_key" not in detail

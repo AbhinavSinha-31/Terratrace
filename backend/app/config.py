@@ -76,6 +76,8 @@ class Settings:
     # Google Earth Engine (LIVE mode). Either a service-account key file or `earthengine authenticate`.
     ee_project: str | None = os.environ.get("EE_PROJECT") or None
     ee_service_account_key: str | None = os.environ.get("EE_SERVICE_ACCOUNT_KEY") or None
+    # The same key's JSON CONTENT, for hosts that only offer environment variables (Railway, Render, Fly). Never logged.
+    ee_service_account_json: str | None = os.environ.get("EE_SERVICE_ACCOUNT_JSON") or None
     ee_timeout_s: float = _float("EE_TIMEOUT_S", 120.0)
     # Per-request HTTP deadline for Earth Engine calls (getInfo / getMapId). Without it a request can block a worker
     # forever (observed 2026-09-27: one getInfo hung 40,471 s across a network drop). Longer than any measured

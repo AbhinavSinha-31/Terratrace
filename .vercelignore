@@ -22,8 +22,15 @@ kaggle.json
 .kaggle/
 .config/earthengine/
 
-# --- backend (hosted separately) and local environments / caches
+*-key.json
+*_key.json
+sa-*.json
+
+# --- backend (hosted separately), research pipeline, database migrations, local environments / caches
 /backend
+/analysis
+/supabase
+/Dockerfile
 .venv/
 **/.venv/
 venv/

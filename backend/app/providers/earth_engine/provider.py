@@ -348,6 +348,8 @@ class EarthEngineProvider:
         key = settings.ee_service_account_key
         if key and Path(key).expanduser().exists():
             return True
+        if settings.ee_service_account_json:
+            return True
         user_creds = Path(os.environ.get("EARTHENGINE_CREDENTIALS", Path.home() / ".config" / "earthengine" / "credentials"))
         return user_creds.exists() and bool(settings.ee_project)
 
@@ -379,7 +381,13 @@ class EarthEngineProvider:
             ee = _ee()
             try:
                 key = settings.ee_service_account_key
-                if key and Path(key).expanduser().exists():
+                if settings.ee_service_account_json and not (key and Path(key).expanduser().exists()):
+                    info = json.loads(settings.ee_service_account_json)
+                    creds = ee.ServiceAccountCredentials(info["client_email"], key_data=settings.ee_service_account_json)
+                    project = settings.ee_project or info.get("project_id")
+                    ee.Initialize(creds, project=project)
+                    auth = "service-account credentials (environment)"
+                elif key and Path(key).expanduser().exists():
                     path = str(Path(key).expanduser())
                     info = json.loads(Path(path).read_text(encoding="utf-8"))
                     creds = ee.ServiceAccountCredentials(info["client_email"], key_file=path)

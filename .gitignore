@@ -36,6 +36,10 @@ access_token
 *.key
 *service-account*.json
 *-ee-key*.json
+*-key.json
+*_key.json
+sa-*.json
+*.pem
 **/credentials.json
 **/*credentials*.json
 application_default_credentials.json
