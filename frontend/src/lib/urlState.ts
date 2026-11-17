@@ -9,6 +9,7 @@ import { useUi, type InvestigationState, type View } from '../state/store';
  *   #/analysis/<aoiId>?from=2018&to=2025&year=2025
  *   #/timemachine/<aoiId>?from=1984&to=2025&year=1990
  *   #/case-study/<id>                    a static case study, full page over the overview
+ *   #/profile                            the account page (sign in / your profile), full page over the overview
  *
  * `aoiId` is either a featured investigation id or a backend analysis id for a
  * custom AOI (the backend persists registered AOIs, so they survive a refresh).
@@ -22,6 +23,7 @@ export interface UrlState {
   to?: number;
   year?: number;
   caseStudy?: string | null;
+  profile?: boolean;
 }
 
 const int = (v: string | null) => (v && /^\d{4}$/.test(v) ? Number(v) : undefined);
@@ -39,6 +41,7 @@ export function parseHash(hash: string): UrlState {
   const [path, query = ''] = hash.replace(/^#/, '').split('?');
   const parts = path.split('/').filter(Boolean).map(safeDecode);
   const q = new URLSearchParams(query);
+  if (parts[0] === 'profile') return { view: 'explore', phase: 'intro', aoiId: null, profile: true };
   if (parts[0] === 'case-study' && parts[1]) return { view: 'explore', phase: 'intro', aoiId: null, caseStudy: parts[1] };
   if ((parts[0] === 'analysis' || parts[0] === 'timemachine') && parts[1]) {
     return { view: parts[0], phase: 'explore', aoiId: parts[1], from: int(q.get('from')), to: int(q.get('to')), year: int(q.get('year')) };
@@ -48,7 +51,8 @@ export function parseHash(hash: string): UrlState {
 }
 
 /** The URL is a MIRROR of InvestigationState (study, baseline, comparison, imagery year) — never a source. */
-export function toHash(s: { view: View; phase: 'intro' | 'explore'; investigation: InvestigationState; caseStudy?: string | null }): string {
+export function toHash(s: { view: View; phase: 'intro' | 'explore'; investigation: InvestigationState; caseStudy?: string | null; profileOpen?: boolean }): string {
+  if (s.profileOpen) return '#/profile';
   if (s.caseStudy) return `#/case-study/${encodeURIComponent(s.caseStudy)}`;
   const inv = s.investigation;
   if (s.view === 'explore' || !inv.study) {
@@ -80,6 +84,10 @@ function apply(u: UrlState) {
     if (cs) ui.openCaseStudy(cs);
     else ui.closeCaseStudy();
   }
+  if (ui.profileOpen !== !!u.profile) {
+    if (u.profile) ui.openProfile();
+    else ui.closeProfile();
+  }
 }
 
 /** Restore state from the URL on load, keep the URL in sync, and honour Back/Forward. */
@@ -97,7 +105,7 @@ export function useUrlSync() {
       if (next === last || (next === '#/' && last === '')) return;
       // A new place (view / AOI / explore phase) is a history entry; scrubbing years is not.
       const navigation = s.view !== prev.view || s.investigation.study?.id !== prev.investigation.study?.id || s.phase !== prev.phase
-        || s.caseStudy !== prev.caseStudy;
+        || s.caseStudy !== prev.caseStudy || s.profileOpen !== prev.profileOpen;
       const url = `${window.location.pathname}${window.location.search.replace(/[?&]mode=(live|demo)/, '')}${next}`;
       if (navigation) window.history.pushState(null, '', url);
       else window.history.replaceState(null, '', url);

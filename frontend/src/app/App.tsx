@@ -6,6 +6,7 @@ import { AnalysisProgressOverlay } from '../features/analysis/AnalyzingOverlay';
 import { BootSplash } from '../features/shell/BootSplash';
 import { useUi } from '../state/store';
 import { useChat } from '../state/chat';
+import { useAuthSync } from '../state/auth';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
 import { useAnalysisRunner } from '../data/analysisRunner';
@@ -20,6 +21,7 @@ const MapStage = lazy(() => import('../features/map/MapStage').then((m) => ({ de
 const AnalysisView = lazy(() => import('../features/analysis/AnalysisView').then((m) => ({ default: m.AnalysisView })));
 const AskPage = lazy(() => import('../features/chat/AskPage').then((m) => ({ default: m.AskPage })));
 const CaseStudyPage = lazy(() => import('../features/casestudy/CaseStudyPage').then((m) => ({ default: m.CaseStudyPage })));
+const ProfilePage = lazy(() => import('../features/account/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const AboutModal = lazy(() => import('../features/shell/AboutModal').then((m) => ({ default: m.AboutModal })));
 
 /** True from the first time `flag` is true: a page stays mounted after its first opening (its own exit animation runs). */
@@ -71,6 +73,8 @@ export function App() {
   const askMounted = useOpenedOnce(useChat((s) => s.askOpen));
   const caseStudyMounted = useOpenedOnce(useUi((s) => !!s.caseStudy));
   const aboutMounted = useOpenedOnce(useUi((s) => s.aboutOpen));
+  const profileMounted = useOpenedOnce(useUi((s) => s.profileOpen));
+  useAuthSync();         // Supabase session → useAuth (no-op when the build has no Supabase settings)
   const view = useUi((s) => s.view);
   const hasStudy = useUi((s) => !!s.investigation.study);
   const drawerOpen = useUi((s) => s.drawerOpen);
@@ -95,6 +99,7 @@ export function App() {
         <Suspense fallback={null}>
           {askMounted && <AskPage />}
           {caseStudyMounted && <CaseStudyPage />}
+          {profileMounted && <ProfilePage />}
         </Suspense>
       </main>
       {aboutMounted && <Suspense fallback={null}><AboutModal /></Suspense>}

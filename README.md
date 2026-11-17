@@ -37,6 +37,12 @@ Then authenticate once, using **one** of these methods:
 
 `backend/.env` is git-ignored. Never commit it or any key file.
 
+## Accounts (optional)
+
+Google and email sign-in and user profiles use Supabase. Without its settings the app works as before and shows
+"Accounts are not available yet". Setup (project, migrations, Google, redirect URLs, `frontend/.env`):
+[docs/AUTH_SETUP.md](docs/AUTH_SETUP.md).
+
 ## Run
 
 One-time setup:
@@ -124,6 +130,7 @@ file, uploaded as a secret file), since `earthengine authenticate` user credenti
 | Where | Variable | Value |
 | --- | --- | --- |
 | Vercel | `VITE_API_BASE` | backend public URL ending in `/api` (public; baked into the bundle) |
+| Vercel | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | optional accounts; public by design (never the service_role key). See docs/AUTH_SETUP.md |
 | Backend | `TT_CORS_ORIGINS` | your Vercel production origin, e.g. `https://<project>.vercel.app` |
 | Backend | `TT_CACHE_DIR`, `TT_TILE_CACHE_DIR` | persistent volume path (image default `/data`); optional separate tile path |
 | Backend | `TT_FORWARDED_ALLOW_IPS` | proxy address trusted for `X-Forwarded-For` (default `*`) |
@@ -206,6 +213,7 @@ TERRATRACE handles this without bypassing the quota:
 cd backend;  .venv\Scripts\python -m pytest -q; cd ..   # offline: Earth Engine is replaced by fakes
 cd frontend; npm test; npm run typecheck; npm run build; cd ..   # npm test = Vitest unit tests (jsdom, no backend)
 cd frontend; npm run test:integrity; cd ..              # end-to-end; needs the dev server + backend running
+cd supabase; npm install; npm test; cd ..               # migrations + Row Level Security, in-memory Postgres
 ```
 
 The integrity suite never starts a live Earth Engine analysis.
@@ -249,6 +257,8 @@ backend/app/providers/earth_engine/       the Earth Engine pipeline
 frontend/src/state/store.ts               canonical InvestigationState
 frontend/src/data/                        API client, analysis runner, imagery sync
 frontend/src/features/map/                MapLibre map; eeTiles.ts = bounded Earth Engine tile loader
+frontend/src/state/auth.ts                Supabase session (sign-in / sign-out); features/account/ = #/profile page
+supabase/migrations/                      database schema + Row Level Security (docs/AUTH_SETUP.md)
 ```
 
 The method, thresholds and validity rules are documented in [docs/METHOD.md](docs/METHOD.md).
