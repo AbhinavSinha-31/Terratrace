@@ -1,10 +1,11 @@
 import { AnimatePresence } from 'framer-motion';
-import { ArrowUpRight, Trash2 } from 'lucide-react';
+import { ArrowUpRight, MessageSquarePlus, Trash2 } from 'lucide-react';
 import { Button, Skeleton, StateView } from '../../design';
 import { fmtHa, fmtKm2 } from '../../lib/format';
 import { useUi } from '../../state/store';
 import { openSignIn, useAuth } from '../../state/auth';
 import { FullPage } from '../shell/FullPage';
+import { startDiscussion } from '../community/compose';
 import { useDeleteScan, useSavedScans, type SavedScan } from './scans';
 
 const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtHa(Math.abs(v))} ha`;
@@ -29,6 +30,7 @@ function ScanRow({ scan }: { scan: SavedScan }) {
       </dl>
       <div className="flex gap-2">
         <Button size="sm" variant="brand" icon={<ArrowUpRight size={14} />} onClick={reopen} data-testid="reopen-scan">Open</Button>
+        <Button size="sm" variant="secondary" icon={<MessageSquarePlus size={14} />} onClick={() => startDiscussion({ aoiId: scan.aoi_id, name: scan.name, baseline: scan.baseline, comparison: scan.comparison, scanId: scan.id, bbox: scan.bbox })}>Discuss</Button>
         <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} disabled={del.isPending} onClick={() => { if (window.confirm(`Remove "${scan.name}" from My scans?`)) del.mutate(scan.id); }} aria-label={`Remove ${scan.name}`} />
       </div>
     </li>

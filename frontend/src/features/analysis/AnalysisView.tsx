@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Hourglass, Layers, LayoutDashboard, Leaf, ListTree, MessagesSquare, ScanSearch } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Hourglass, Layers, LayoutDashboard, Leaf, ListTree, MessageSquarePlus, MessagesSquare, ScanSearch } from 'lucide-react';
 import { useCurrentAnalysis, useSelectedAoi, useSelectedEvent, useStudyAreas } from '../../data/queries';
 import { DEFAULT_YEARS } from '../../lib/time';
 import { fmtKm2 } from '../../lib/format';
@@ -19,6 +19,7 @@ import { AreaContextPanel } from './AreaContext';
 import { AreaChat } from '../chat/AreaChat';
 import { QuickScanPanel } from '../quickscan/QuickScanPanel';
 import { SaveScanButton } from '../account/SaveScanButton';
+import { startDiscussion } from '../community/compose';
 import type { AnalysisResult } from '../../data/contracts';
 
 function DrawerBody() {
@@ -148,9 +149,17 @@ function ReadyToAnalyze({ name }: { name?: string }) {
   );
 }
 
-/** Account actions on a READY analysis (save; discuss is added by the community). */
+/** Account actions on an analysis: save it to My scans; discuss it in the community. */
 function ScanActions({ result }: { result: AnalysisResult }) {
-  return <SaveScanButton result={result} />;
+  return (
+    <>
+      {result.status === 'READY' && <SaveScanButton result={result} />}
+      <Button size="sm" variant="secondary" icon={<MessageSquarePlus size={14} />} data-testid="discuss-analysis"
+        onClick={() => startDiscussion({ aoiId: result.id, name: result.aoi.name, baseline: result.window.baseline_year, comparison: result.window.comparison_year, region: result.aoi.region ?? null, bbox: result.aoi.bbox ?? null })}>
+        Discuss
+      </Button>
+    </>
+  );
 }
 
 export function AnalysisView() {

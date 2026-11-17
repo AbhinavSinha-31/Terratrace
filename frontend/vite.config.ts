@@ -55,7 +55,6 @@ export default defineConfig({
           if (id.includes('commonjsHelpers')) return 'cjs-helpers';
           if (id.includes('/node_modules/maplibre-gl/')) return 'maplibre';
           if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'echarts';
-          if (id.includes('/node_modules/@supabase/')) return 'supabase';
           return undefined;
         },
       },

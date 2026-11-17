@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, BookOpenText, Info, ShieldCheck, X } from 'lucide-react';
-import { Badge, IconButton, Segmented, Skeleton, StateView, Tooltip } from '../../design';
+import { AlertTriangle, ArrowLeft, BookOpenText, Info, MessageSquarePlus, ShieldCheck, X } from 'lucide-react';
+import { Badge, Button, IconButton, Segmented, Skeleton, StateView, Tooltip } from '../../design';
+import { startDiscussion } from '../community/compose';
 import { fmtDelta } from '../../lib/format';
 import { useUi } from '../../state/store';
 import { caseStudyAsset, caseStudyMeta, useCaseStudy, yearSpan, type CaseStudyDoc, type ImageRef } from './data';
@@ -105,7 +106,13 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
         </span>
       </div>
       <div>
-        <h1 id="case-study-title" className="t-h1 text-ink">{meta?.name ?? d.study.short_name}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 id="case-study-title" className="t-h1 text-ink">{meta?.name ?? d.study.short_name}</h1>
+          <Button size="sm" variant="secondary" icon={<MessageSquarePlus size={14} />} data-testid="discuss-case-study"
+            onClick={() => startDiscussion({ aoiId: null, name: `Case study: ${meta?.name ?? d.study.short_name}`, region: d.study.name, tags: ['case-study', 'urban-heat', 'land-cover', 'india'] })}>
+            Discuss this study
+          </Button>
+        </div>
         <p className="mt-1 text-[13px] text-ink-2">{meta?.subtitle} — {d.study.name}</p>
       </div>
       <dl className="grid grid-cols-1 gap-3 text-[12.5px] sm:grid-cols-3">

@@ -63,11 +63,12 @@ check('sign-up creates a profile (email, no metadata)', p[plain.id] && p[plain.i
 check('blank name and non-https avatar are dropped', p[bad.id] && p[bad.id].display_name === null && p[bad.id].avatar_url === null);
 check('users from before the migration are backfilled', p[early.id]?.display_name === 'Early User');
 
-let r = await as('anon', null, 'select * from public.profiles');
-check('anon cannot read profiles', !!r.error, JSON.stringify(r));
-
-r = await as('authenticated', google.id, 'select id from public.profiles');
-check('a user sees only their own profile', r.rows?.length === 1 && r.rows[0].id === google.id, JSON.stringify(r));
+// Since the community migration, profiles (name + photo only; no email column exists) are public so authors can be shown.
+let r = await as('anon', null, 'select id, display_name, avatar_url from public.profiles');
+check('anyone can read public profile fields (community authors)', r.rows?.length >= 3, JSON.stringify(r));
+check('profiles hold no email', !(await rows(`select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name ilike '%mail%'`)).length);
+r = await as('anon', null, `update public.profiles set display_name = 'x' returning id`);
+check('anon cannot edit profiles', !!r.error || r.rows?.length === 0, JSON.stringify(r));
 
 r = await as('authenticated', google.id, `update public.profiles set display_name = 'Asha V.' where id = $1 returning updated_at, created_at`, [google.id]);
 check('a user can rename themselves', r.rows?.length === 1, JSON.stringify(r));
@@ -121,6 +122,96 @@ r = await as('authenticated', google.id, `update public.saved_scans set name = '
 check('the owner can rename a scan', r.rows?.[0]?.name === 'Renamed', JSON.stringify(r));
 r = await as('authenticated', google.id, 'delete from public.saved_scans where id = $1 returning id', [scanId]);
 check('the owner can delete a scan', r.rows?.length === 1, JSON.stringify(r));
+
+// ---- community: posts, threaded comments, votes
+const seeds = await rows(`select title, aoi_id, author_id from public.posts order by created_at`);
+check('three seed posts exist (Rondônia, Hasdeo Arand, Similipal)', seeds.length === 3 && ['rondonia-frontier', 'hasdeo-arand', 'similipal'].every((a) => seeds.some((s) => s.aoi_id === a)), JSON.stringify(seeds));
+check('seed posts contain no invented figures (no ha / km / % numbers)', !(await rows(`select 1 from public.posts where body ~ '[0-9]+([.][0-9]+)?[[:space:]]*(ha|km|%)'`)).length);
+
+r = await as('anon', null, `select id, title, author_name, hot from public.post_feed order by hot desc`);
+check('guests can read the feed (with author and hot rank)', r.rows?.length === 3, JSON.stringify(r));
+r = await as('anon', null, `insert into public.posts (title, body) values ('Guest post', 'x') returning id`);
+check('guests cannot post', !!r.error, JSON.stringify(r));
+
+const post = `insert into public.posts (title, body, tags, aoi_id, baseline, comparison, region) values ($1, $2, $3, 'similipal', 2018, 2025, 'Odisha') returning id, author_id, score`;
+r = await as('authenticated', google.id, post, ['Fire scars in 2021', 'Look at **2021**.', ['fire', 'india']]);
+const myPost = r.rows?.[0];
+check('a signed-in user can post (author set from the token)', myPost?.author_id === google.id && myPost?.score === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.posts (author_id, title, body) values ($1, 'Impersonation', 'x')`, [early.id]);
+check('a user cannot post as someone else', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.posts (title, body, score) values ('Rigged', 'x', 999)`);
+check('a user cannot set a score on insert', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, post, ['Bad tags', 'x', ['Not Valid!']]);
+check('invalid tags are rejected', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.posts set score = 999 where id = $1`, [myPost.id]);
+check('a user cannot change a score directly', !!r.error, JSON.stringify(r));
+r = await as('authenticated', early.id, `update public.posts set title = 'hijacked' where id = $1 returning id`, [myPost.id]);
+check("a user cannot edit someone else's post", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.posts set title = 'Fire scars in 2021 (edited)' where id = $1 returning title`, [myPost.id]);
+check('the author can edit their post', r.rows?.[0]?.title.endsWith('(edited)'), JSON.stringify(r));
+
+// a post can link only the author's own saved scan
+const [otherScan] = await rows(`insert into public.saved_scans (user_id, aoi_id, name, baseline, comparison) values ($1, 'similipal', 's', 2018, 2025) returning id`, [early.id]);
+r = await as('authenticated', google.id, `insert into public.posts (title, body, scan_id) values ('Borrowed scan', 'x', $1)`, [otherScan.id]);
+check("a post cannot link someone else's saved scan", !!r.error, JSON.stringify(r));
+
+// threaded comments
+r = await as('authenticated', early.id, `insert into public.comments (post_id, body) values ($1, 'Top-level comment') returning id, author_id`, [myPost.id]);
+const top = r.rows?.[0];
+check('a signed-in user can comment', top?.author_id === early.id, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.comments (post_id, parent_id, body) values ($1, $2, 'A reply') returning id`, [myPost.id, top.id]);
+const reply = r.rows?.[0];
+check('a user can reply (threaded)', !!reply, JSON.stringify(r));
+const [seedPost] = await rows(`select id from public.posts where aoi_id = 'rondonia-frontier'`);
+r = await as('authenticated', google.id, `insert into public.comments (post_id, parent_id, body) values ($1, $2, 'cross-post reply')`, [seedPost.id, top.id]);
+check('a reply must belong to the same post as its parent', !!r.error, JSON.stringify(r));
+r = await as('anon', null, `select body from public.comments where post_id = $1 order by created_at`, [myPost.id]);
+check('guests can read comments', r.rows?.length === 2, JSON.stringify(r));
+check('comment_count follows comments', (await rows('select comment_count from public.posts where id = $1', [myPost.id]))[0].comment_count === 2);
+r = await as('anon', null, `insert into public.comments (post_id, body) values ($1, 'guest')`, [myPost.id]);
+check('guests cannot comment', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.comments set body = 'edited by someone else' where id = $1 returning id`, [top.id]);
+check("a user cannot edit someone else's comment", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', early.id, `update public.comments set deleted = true where id = $1 returning body, deleted`, [top.id]);
+check('soft delete keeps the thread and blanks the body', r.rows?.[0]?.body === '[deleted]' && r.rows[0].deleted === true, JSON.stringify(r));
+r = await as('authenticated', early.id, `update public.comments set deleted = false, body = 'back' where id = $1`, [top.id]);
+check('a deleted comment cannot be revived', !!r.error, JSON.stringify(r));
+check('…and its reply is still there', (await rows('select 1 from public.comments where id = $1', [reply.id])).length === 1);
+
+// votes: +1/-1, one per user per target, score kept by trigger
+const score = async (t, id) => (await rows(`select score from public.${t} where id = $1`, [id]))[0].score;
+r = await as('authenticated', early.id, `insert into public.votes (post_id, value) values ($1, 1)`, [myPost.id]);
+check('a user can upvote a post', !r.error && (await score('posts', myPost.id)) === 1, JSON.stringify(r));
+r = await as('authenticated', early.id, `insert into public.votes (post_id, value) values ($1, 1)`, [myPost.id]);
+check('one vote per user per post', !!r.error && (await score('posts', myPost.id)) === 1, JSON.stringify(r));
+r = await as('authenticated', early.id, `update public.votes set value = -1 where post_id = $1`, [myPost.id]);
+check('changing a vote moves the score by 2', !r.error && (await score('posts', myPost.id)) === -1, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.votes (post_id, value) values ($1, 5)`, [myPost.id]);
+check('a vote is only +1 or -1', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.votes (user_id, post_id, value) values ($1, $2, 1)`, [early.id, seedPost.id]);
+check('a user cannot vote as someone else', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `select * from public.votes`);
+check("a user cannot see other people's votes", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', early.id, `delete from public.votes where post_id = $1`, [myPost.id]);
+check('withdrawing a vote restores the score', !r.error && (await score('posts', myPost.id)) === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.votes (comment_id, value) values ($1, 1)`, [reply.id]);
+check('comments can be voted on', !r.error && (await score('comments', reply.id)) === 1, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.votes (post_id, comment_id, value) values ($1, $2, 1)`, [myPost.id, reply.id]);
+check('a vote targets exactly one post or comment', !!r.error, JSON.stringify(r));
+r = await as('anon', null, `insert into public.votes (post_id, value) values ($1, 1)`, [myPost.id]);
+check('guests cannot vote', !!r.error, JSON.stringify(r));
+
+// search, tags, delete
+r = await as('anon', null, `select title from public.post_feed where search @@ websearch_to_tsquery('english', 'fire scars')`);
+check('full-text search finds posts', r.rows?.some((x) => x.title.startsWith('Fire scars')), JSON.stringify(r));
+r = await as('anon', null, `select title from public.post_feed where tags @> '{mining}'`);
+check('tag filter works', r.rows?.length === 1 && r.rows[0].title.startsWith('Hasdeo'), JSON.stringify(r));
+r = await as('authenticated', early.id, `delete from public.posts where id = $1 returning id`, [myPost.id]);
+check("a user cannot delete someone else's post", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `delete from public.posts where id = $1 returning id`, [myPost.id]);
+check('the author can delete their post (comments and votes go with it)', r.rows?.length === 1 && !(await rows('select 1 from public.comments where post_id = $1', [myPost.id])).length);
+r = await as('authenticated', google.id, `select public.votes_score()`);
+check('trigger functions are not callable by users', !!r.error, JSON.stringify(r));
 
 await db.exec(`delete from auth.users where id = '${plain.id}'`);
 check('deleting the auth user deletes the profile', (await rows('select 1 from public.profiles where id = $1', [plain.id])).length === 0);

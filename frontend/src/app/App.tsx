@@ -23,6 +23,7 @@ const AskPage = lazy(() => import('../features/chat/AskPage').then((m) => ({ def
 const CaseStudyPage = lazy(() => import('../features/casestudy/CaseStudyPage').then((m) => ({ default: m.CaseStudyPage })));
 const ProfilePage = lazy(() => import('../features/account/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const MyScansPage = lazy(() => import('../features/account/MyScansPage').then((m) => ({ default: m.MyScansPage })));
+const CommunityPage = lazy(() => import('../features/community/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const SignInDialog = lazy(() => import('../features/account/SignInDialog').then((m) => ({ default: m.SignInDialog })));
 const AboutModal = lazy(() => import('../features/shell/AboutModal').then((m) => ({ default: m.AboutModal })));
 
@@ -77,6 +78,7 @@ export function App() {
   const aboutMounted = useOpenedOnce(useUi((s) => s.aboutOpen));
   const profileMounted = useOpenedOnce(useUi((s) => s.profileOpen));
   const scansMounted = useOpenedOnce(useUi((s) => s.page?.kind === 'scans'));
+  const communityMounted = useOpenedOnce(useUi((s) => !!s.page && s.page.kind !== 'scans'));
   const signInMounted = useOpenedOnce(useAuth((s) => s.signInOpen));
   useAuthSync();         // Supabase session → useAuth (no-op when the build has no Supabase settings)
   const view = useUi((s) => s.view);
@@ -105,6 +107,7 @@ export function App() {
           {caseStudyMounted && <CaseStudyPage />}
           {profileMounted && <ProfilePage />}
           {scansMounted && <MyScansPage />}
+          {communityMounted && <CommunityPage />}
         </Suspense>
       </main>
       {aboutMounted && <Suspense fallback={null}><AboutModal /></Suspense>}

@@ -380,3 +380,18 @@ input[type='range'].tt-range::-moz-range-thumb { width: 12px; height: 12px; bord
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* Rendered markdown (community posts and comments, AI answers): features/community/Markdown.tsx */
+.tt-md > * + * { margin-top: 0.6em; }
+.tt-md h1, .tt-md h2, .tt-md h3 { color: var(--color-ink, #e8eef0); font-weight: 600; line-height: 1.3; }
+.tt-md h1 { font-size: 1.25em; } .tt-md h2 { font-size: 1.12em; } .tt-md h3 { font-size: 1.02em; }
+.tt-md ul { list-style: disc; padding-left: 1.25em; } .tt-md ol { list-style: decimal; padding-left: 1.4em; }
+.tt-md li + li { margin-top: 0.2em; }
+.tt-md strong { color: var(--color-ink, #e8eef0); font-weight: 600; }
+.tt-md code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.9em; background: rgba(255,255,255,0.06); border-radius: 4px; padding: 0.05em 0.35em; }
+.tt-md pre { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 0.7em 0.9em; overflow-x: auto; }
+.tt-md pre code { background: none; padding: 0; }
+.tt-md blockquote { border-left: 2px solid rgba(69,208,196,0.5); padding-left: 0.8em; color: var(--color-ink-3, #9aa7ad); }
+.tt-md table { border-collapse: collapse; font-size: 0.95em; display: block; overflow-x: auto; }
+.tt-md th, .tt-md td { border: 1px solid rgba(255,255,255,0.1); padding: 0.3em 0.6em; text-align: left; }
+.tt-md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.1); }

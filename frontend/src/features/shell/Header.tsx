@@ -11,14 +11,15 @@ import { useBreakpoint } from '../../lib/useLayout';
 import { useChat } from '../../state/chat';
 import { openSignIn, signOut, useAuth } from '../../state/auth';
 import { identity, useProfile } from '../account/profile';
-import { UserAvatar } from '../account/ProfilePage';
+import { UserAvatar } from '../account/UserAvatar';
 
-type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'ask' | 'about';
+type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'community' | 'ask' | 'about';
 const NAV: { key: NavKey; label: string }[] = [
   { key: 'explore', label: 'Explore' },
   { key: 'analysis', label: 'Analysis' },
   { key: 'timemachine', label: 'Time Machine' },
   { key: 'featured', label: 'Featured' },
+  { key: 'community', label: 'Community' },
   { key: 'ask', label: 'Ask me anything' },
   { key: 'about', label: 'About' },
 ];
@@ -27,7 +28,9 @@ export function navigate(key: NavKey) {
   const ui = useUi.getState();
   if (key === 'ask') return useChat.getState().openAsk();
   useChat.getState().closeAsk();
+  if (key !== 'community' && key !== 'about') ui.closePage();
   if (key === 'about') return ui.setAboutOpen(true);
+  if (key === 'community') return ui.openPage({ kind: 'community' });
   if (key === 'featured') {
     ui.goExplore('intro');
     window.setTimeout(() => window.dispatchEvent(new CustomEvent('tt:featured')), 50);
@@ -271,7 +274,8 @@ export function Header() {
   const bp = useBreakpoint();
   const [menu, setMenu] = useState(false);
   const askOpen = useChat((s) => s.askOpen);
-  const active: NavKey = aboutOpen ? 'about' : askOpen ? 'ask' : view;
+  const inCommunity = useUi((s) => s.page?.kind === 'community' || s.page?.kind === 'post' || s.page?.kind === 'new-post');
+  const active: NavKey = aboutOpen ? 'about' : askOpen ? 'ask' : inCommunity ? 'community' : view;
 
   return (
     <header className="tt-header relative z-50 flex h-16 items-center gap-6 px-4 sm:px-6">
@@ -286,7 +290,7 @@ export function Header() {
               key={n.key}
               onClick={() => navigate(n.key)}
               aria-current={active === n.key ? 'page' : undefined}
-              className={`tt-press relative px-3.5 text-[13px] font-medium transition-colors ${active === n.key ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}
+              className={`tt-press relative whitespace-nowrap px-3.5 text-[13px] font-medium transition-colors ${active === n.key ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}
             >
               {n.label}
               {active === n.key && <motion.span layoutId="nav-ind" className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent shadow-[0_0_10px_rgba(69,208,196,0.8)]" />}
