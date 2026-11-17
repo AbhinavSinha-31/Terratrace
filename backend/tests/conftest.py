@@ -13,6 +13,9 @@ from pathlib import Path
 _tmp = tempfile.mkdtemp(prefix="tt-test-")
 for _k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "EE_PROJECT", "EE_SERVICE_ACCOUNT_KEY"):
     os.environ.pop(_k, None)
+# Accounts and hosted Earth Engine: set EMPTY (not removed) so load_dotenv cannot fill them from backend/.env.
+for _k in ("SUPABASE_URL", "SUPABASE_JWT_SECRET", "EE_SERVICE_ACCOUNT_JSON"):
+    os.environ[_k] = ""
 os.environ["ANTHROPIC_CONFIG_DIR"] = str(Path(_tmp) / "no-anthropic")
 os.environ["EARTHENGINE_CREDENTIALS"] = str(Path(_tmp) / "no-ee")
 os.environ["TT_CACHE_DIR"] = _tmp
