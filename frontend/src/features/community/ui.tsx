@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import { useQueryClient } from '@tanstack/react-query';
 import { requireSignIn } from '../../state/auth';
 import { UserAvatar } from '../account/UserAvatar';
-import { castVote, errorText, type VoteValue } from './api';
+import { castVote, devDetail, errorText, type VoteValue } from './api';
 
 export const FIELD = 'w-full rounded-md bg-white/[0.04] px-3 py-2 text-[13px] text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.12)] outline-none placeholder:text-ink-4 focus:shadow-[0_0_0_1px_rgba(69,208,196,0.6)] disabled:opacity-50';
 
@@ -43,6 +43,19 @@ const useToasts = create<{ items: Toast[]; push(tone: Toast['tone'], text: strin
   drop: (id) => set((s) => ({ items: s.items.filter((t) => t.id !== id) })),
 }));
 export const toast = (tone: Toast['tone'], text: string) => useToasts.getState().push(tone, text);
+/** An error toast: the public sentence, plus the raw Supabase error in development builds. */
+export const toastError = (e: unknown) => toast('error', [errorText(e), devDetail(e)].filter(Boolean).join(' — '));
+
+/** Error body for a StateView: the public sentence and, in development builds only, the raw Supabase error. */
+export function ErrorBody({ error }: { error: unknown }) {
+  const detail = devDetail(error);
+  return (
+    <>
+      {errorText(error)}
+      {detail && <code className="mt-2 block break-words rounded-sm bg-white/[0.04] px-2 py-1.5 text-left text-[11px] text-warn" data-testid="dev-error-detail">dev: {detail}</code>}
+    </>
+  );
+}
 
 export function CommunityToasts() {
   const items = useToasts((s) => s.items);
@@ -80,7 +93,7 @@ export function VoteControl({ kind, id, score, myVote, compact }: { kind: 'post'
       void qc.invalidateQueries({ queryKey: ['community'] });
     } catch (e) {
       setState(before);
-      toast('error', errorText(e));
+      toastError(e);
     } finally {
       setBusy(false);
     }

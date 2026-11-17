@@ -216,5 +216,19 @@ check('trigger functions are not callable by users', !!r.error, JSON.stringify(r
 await db.exec(`delete from auth.users where id = '${plain.id}'`);
 check('deleting the auth user deletes the profile', (await rows('select 1 from public.profiles where id = $1', [plain.id])).length === 0);
 
+// ---- repair migration (20261118090000_repair_data_api.sql): idempotent, and explicit when tables are missing
+const repair = readFileSync(join(MIGRATIONS, '20261118090000_repair_data_api.sql'), 'utf8');
+let again = null;
+try { await db.exec(repair); } catch (e) { again = e.message; }
+check('the repair migration can be run again safely', again === null, again ?? '');
+r = await as('anon', null, 'select count(*)::int as n from public.post_feed');
+check('…and guests still read the feed afterwards', r.rows?.[0]?.n >= 3, JSON.stringify(r));
+const empty = new PGlite();
+await empty.exec(SUPABASE_STUB);
+let missingMsg = '';
+try { await empty.exec(repair); } catch (e) { missingMsg = e.message; }
+check('on a database without the tables it names what is missing',
+  /missing in this database: profiles, saved_scans, posts, comments, votes, post_feed/.test(missingMsg), missingMsg);
+
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nall checks passed');
 process.exit(failed ? 1 : 0);

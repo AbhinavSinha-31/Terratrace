@@ -11,10 +11,10 @@ import { FullPage } from '../shell/FullPage';
 import { Markdown } from './Markdown';
 import { useCompose } from './compose';
 import {
-  LIMITS, TAG, errorText, parseTags, useAddComment, useComments, useCreatePost, useDeleteComment, useDeletePost, useFeed,
+  LIMITS, TAG, parseTags, useAddComment, useComments, useCreatePost, useDeleteComment, useDeletePost, useFeed,
   useMyFeedVotes, useMyVotes, usePost, useUpdatePost, type Comment, type Post, type Sort,
 } from './api';
-import { Author, CommunityToasts, FormError, Input, Labeled, TagChip, TextArea, VoteControl, toast } from './ui';
+import { Author, CommunityToasts, ErrorBody, FormError, Input, Labeled, TagChip, TextArea, VoteControl, toast, toastError } from './ui';
 
 const go = (page: OverlayPage) => useUi.getState().openPage(page);
 const SUGGESTED_TAGS = ['deforestation', 'india', 'amazon', 'mining', 'fire', 'urban-heat', 'land-cover', 'methods', 'featured'];
@@ -113,7 +113,7 @@ function Feed({ tag }: { tag: string | null }) {
         {SUGGESTED_TAGS.map((t) => <TagChip key={t} label={t} active={tag === t} onClick={() => go({ kind: 'community', tag: t })} />)}
       </div>
       {feed.isLoading ? <div className="space-y-3"><Skeleton className="h-24 rounded-md" /><Skeleton className="h-24 rounded-md" /></div>
-        : feed.isError ? <StateView kind="error" title="The community could not be loaded" onRetry={() => feed.refetch()}>{errorText(feed.error)}</StateView>
+        : feed.isError ? <StateView kind="error" title="The community could not be loaded" onRetry={() => feed.refetch()}><ErrorBody error={feed.error} /></StateView>
         : !posts.length ? <StateView kind="empty" title={search || tag ? 'No posts match' : 'No posts yet'}>{search || tag ? 'Try another search or tag.' : 'Start the first discussion.'}</StateView>
         : (
           <>
@@ -134,7 +134,7 @@ function CommentForm({ postId, parentId, onDone, autoFocus }: { postId: string; 
     e.preventDefault();
     if (!requireSignIn('Sign in to comment.')) return;
     if (!body.trim()) return;
-    add.mutate({ body: body.trim(), parentId }, { onSuccess: () => { setBody(''); onDone?.(); }, onError: (err) => toast('error', errorText(err)) });
+    add.mutate({ body: body.trim(), parentId }, { onSuccess: () => { setBody(''); onDone?.(); }, onError: (err) => toastError(err) });
   };
   if (!signedIn && !parentId) {
     return <button className="tt-panel tt-press w-full p-3 text-left text-[12.5px] text-ink-3 hover:text-ink" onClick={() => openSignIn('Sign in to comment. Reading works without an account.')} data-testid="comment-sign-in">Sign in to join the discussion…</button>;
@@ -165,7 +165,7 @@ function CommentNode({ c, kids, votes, depth }: { c: Comment; kids: Map<string |
             <Markdown className="mt-1">{c.body}</Markdown>
             <div className="mt-1 flex gap-3 text-[11.5px]">
               {depth < 6 && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-ink" onClick={() => { if (requireSignIn('Sign in to reply.')) setReplying((v) => !v); }} data-testid="reply"><Reply size={12} /> Reply</button>}
-              {uid === c.author_id && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-bad" onClick={() => { if (window.confirm('Delete this comment? Replies stay.')) del.mutate(c.id, { onError: (e) => toast('error', errorText(e)) }); }}><Trash2 size={12} /> Delete</button>}
+              {uid === c.author_id && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-bad" onClick={() => { if (window.confirm('Delete this comment? Replies stay.')) del.mutate(c.id, { onError: (e) => toastError(e) }); }}><Trash2 size={12} /> Delete</button>}
             </div>
           </>
         )}
@@ -196,7 +196,7 @@ function PostView({ id }: { id: string }) {
   }, [list]);
 
   if (post.isLoading) return <div className="space-y-3"><Skeleton className="h-10 w-2/3 rounded-md" /><Skeleton className="h-40 rounded-md" /></div>;
-  if (post.isError) return <StateView kind="error" title="This post could not be loaded" onRetry={() => post.refetch()}>{errorText(post.error)}</StateView>;
+  if (post.isError) return <StateView kind="error" title="This post could not be loaded" onRetry={() => post.refetch()}><ErrorBody error={post.error} /></StateView>;
   const p = post.data;
   if (!p) return <StateView kind="empty" title="Post not found">It may have been deleted by its author.</StateView>;
   return (
@@ -214,7 +214,7 @@ function PostView({ id }: { id: string }) {
               <div className="flex gap-2 pt-1">
                 <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>Edit</Button>
                 <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} disabled={del.isPending}
-                  onClick={() => { if (window.confirm('Delete this post and its comments?')) del.mutate(p.id, { onSuccess: () => { toast('ok', 'Post deleted.'); go({ kind: 'community' }); }, onError: (e) => toast('error', errorText(e)) }); }}>Delete</Button>
+                  onClick={() => { if (window.confirm('Delete this post and its comments?')) del.mutate(p.id, { onSuccess: () => { toast('ok', 'Post deleted.'); go({ kind: 'community' }); }, onError: (e) => toastError(e) }); }}>Delete</Button>
               </div>
             )}
           </div>
@@ -224,7 +224,7 @@ function PostView({ id }: { id: string }) {
         <h2 className="t-h2 text-ink">{p.comment_count} comment{p.comment_count === 1 ? '' : 's'}</h2>
         <CommentForm postId={p.id} parentId={null} />
         {comments.isLoading ? <Skeleton className="h-16 rounded-md" />
-          : comments.isError ? <StateView kind="error" title="Comments could not be loaded" onRetry={() => comments.refetch()} compact>{errorText(comments.error)}</StateView>
+          : comments.isError ? <StateView kind="error" title="Comments could not be loaded" onRetry={() => comments.refetch()} compact><ErrorBody error={comments.error} /></StateView>
           : <ul className="space-y-4">{(kids.get(null) ?? []).map((c) => <CommentNode key={c.id} c={c} kids={kids} votes={votes} depth={0} />)}</ul>}
       </section>
     </article>
@@ -248,7 +248,7 @@ function PostEditor({ post, onDone }: { post: Post; onDone(): void }) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (tags.error) return;
-    update.mutate({ id: post.id, title: title.trim(), body: body.trim(), tags: tags.tags }, { onSuccess: onDone, onError: (err) => toast('error', errorText(err)) });
+    update.mutate({ id: post.id, title: title.trim(), body: body.trim(), tags: tags.tags }, { onSuccess: onDone, onError: (err) => toastError(err) });
   };
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -287,7 +287,7 @@ function NewPost() {
       region: subject?.region ?? null, bbox: subject?.bbox ?? null,
     }, {
       onSuccess: (id) => { useCompose.getState().set(null); toast('ok', 'Posted.'); go({ kind: 'post', id }); },
-      onError: (err) => toast('error', errorText(err)),
+      onError: (err) => toastError(err),
     });
   };
   return (
