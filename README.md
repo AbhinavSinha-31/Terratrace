@@ -39,29 +39,46 @@ Then authenticate once, using **one** of these methods:
 
 ## Run
 
-Backend (port **8001**):
+One-time setup:
 
 ```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+cd ..\frontend
+npm install
 ```
 
-Check it: <http://127.0.0.1:8001/api/health> should report `"analysis": {"status": "ready"}`
-once Earth Engine is configured.
+**Everything in one command** (from the repository root):
 
-Frontend (port **5173**, proxies `/api` to `127.0.0.1:8001`; set `TT_API_PROXY` to use another backend URL):
+```powershell
+.\run-dev.ps1                 # backend in a new window (8001) + frontend here (http://localhost:5173)
+```
+
+**Backend only** (port **8001**, auto-reload), from any folder:
+
+```powershell
+backend\run.ps1               # same as: backend\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --reload --port 8001
+```
+
+Plain `uvicorn app.main:app` only works when started *inside* `backend/`. From anywhere else it fails with
+`ModuleNotFoundError: No module named 'app'`; `run.ps1` passes `--app-dir` so it works from anywhere.
+If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File backend\run.ps1`.
+
+Check it: <http://127.0.0.1:8001/api/health> should report `"analysis": {"status": "ready"}`
+once Earth Engine is configured. Without credentials the backend still starts and reports
+`"analysis": {"status": "unconfigured"}`.
+
+**Frontend only** (port **5173**, proxies `/api` to `127.0.0.1:8001`; set `TT_API_PROXY` to use another backend URL):
 
 ```powershell
 cd frontend
-npm install
 npm run dev                   # http://localhost:5173
 ```
 
-Run each server in its own terminal, from its own folder (`npm` only works inside `frontend/`).
 If a port is already taken, an earlier server is probably still running: stop it with Ctrl+C in its
-terminal, or find it with `Get-NetTCPConnection -LocalPort 8001 -State Listen`.
+terminal, or find it with `Get-NetTCPConnection -LocalPort 8001 -State Listen`. A backend on any other
+port (e.g. 8000) is not used by the frontend, which shows "backend offline" until 8001 answers.
 
 Single-port mode: run `npm run build` in `frontend/`. The backend then serves `frontend/dist`
 at <http://127.0.0.1:8001>.
