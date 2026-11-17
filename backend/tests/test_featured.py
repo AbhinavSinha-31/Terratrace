@@ -87,11 +87,20 @@ def test_non_ready_results_carry_no_kpis():
 def test_stored_result_endpoint_is_read_only(monkeypatch):
     monkeypatch.setattr(analysis, "create_job", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
     r = client.get("/api/analysis-result/hasdeo-arand", params={"baseline": 2019, "comparison": 2025})
-    assert r.status_code == 404 and r.json()["detail"]["code"] == "not_run" and r.json()["detail"]["retryable"] is False
+    assert r.status_code == 200 and r.json() == {"status": "not_computed", "aoi_id": "hasdeo-arand", "window": [2019, 2025]}
     store("hasdeo-arand", 2019, 2025, ready_result())
     env = client.get("/api/analysis-result/hasdeo-arand", params={"baseline": 2019, "comparison": 2025}).json()
     assert env["analysisStatus"] == "READY" and len(env["events"]["features"]) == 2
     assert client.get("/api/analysis-result/../x").status_code == 404
+    assert client.get("/api/analysis-result/aoi-000000000000").status_code == 404   # unknown area: still a 404
+
+
+def test_stored_result_without_years_uses_the_featured_window(monkeypatch):
+    """Years omitted → the featured area's own window (its result is stored under it), not the global default."""
+    monkeypatch.setattr(featured, "default_window", lambda aid: (2019, 2025))
+    store("hasdeo-arand", 2019, 2025, ready_result())
+    assert client.get("/api/analysis-result/hasdeo-arand").json()["analysisStatus"] == "READY"
+    assert client.get("/api/analysis-status/hasdeo-arand").json()["window"] == [2019, 2025]
 
 
 def test_precompute_runs_one_site_at_a_time_and_skips_stored_results(monkeypatch):

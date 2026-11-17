@@ -17,7 +17,7 @@ from ..providers import registry
 from ..providers.ai import claude
 from ..providers.earth_engine import quickscan as qs_ee
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
-from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health
+from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health, NotComputed
 from ..services import analysis, context as area_context, featured, imagery, quickscan, search, science as sc, tiles as tile_cache
 from ..services.chat import counters as chat_counters, service as chat
 from ..services.explanation import service as explanation
@@ -81,9 +81,11 @@ def _aid() -> Any:
     return Path(..., min_length=1, max_length=80)
 
 
-def _window(baseline: int | None, comparison: int | None) -> tuple[int, int]:
-    """The requested analysis window (defaults filled in); 422 unless baseline < comparison."""
-    b, c = baseline or DEFAULT_B, comparison or DEFAULT_C
+def _window(baseline: int | None, comparison: int | None, aid: str | None = None) -> tuple[int, int]:
+    """The requested analysis window (defaults filled in); 422 unless baseline < comparison. A featured area's
+    missing years default to ITS window (the one its stored result is keyed by), not the global default."""
+    db, dc = featured.default_window(aid) if aid and aid in featured.featured_ids() else (DEFAULT_B, DEFAULT_C)
+    b, c = baseline or db, comparison or dc
     if not b < c:
         raise _err(422, "invalid_window", "The comparison year must be after the baseline year.", False)
     return b, c
@@ -206,16 +208,18 @@ async def get_analysis(aid: str = _aid(), baseline: int | None = _year(), compar
     return await _run(aid, baseline, comparison, rid)
 
 
-@router.get("/analysis-result/{aid}", response_model=AnalysisEnvelope)
+@router.get("/analysis-result/{aid}", response_model=AnalysisEnvelope | NotComputed)
 def get_stored_analysis(aid: str = _aid(), baseline: int | None = _year(), comparison: int | None = _year()) -> dict[str, Any]:
     """The STORED analysis envelope for an area and window (READY / INVALID_ANALYSIS / UNAVAILABLE), so an opened
-    investigation shows its real result at once. Read-only: 404 not_run when nothing is stored — it never computes."""
+    investigation shows its real result at once. Read-only, never computes. Nothing stored for this window is not an
+    error: 200 {status: "not_computed"}. Only an unknown area is a 404."""
+    window = _window(baseline, comparison, aid)
     try:
-        env = analysis.stored_envelope(aid, *_window(baseline, comparison))
+        env = analysis.stored_envelope(aid, *window)
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
     if env is None:
-        raise _err(404, "not_run", "This analysis has not been run yet.", False)
+        return {"status": "not_computed", "aoi_id": aid, "window": list(window)}
     return env
 
 
@@ -263,7 +267,7 @@ def get_analysis_status(aid: str = _aid(), baseline: int | None = _year(), compa
     """Stored status of an analysis (RUNNING / READY / INVALID_ANALYSIS / UNAVAILABLE / NOT_RUN). Read-only: it never
     starts or runs an analysis, so featured cards can show real state without triggering Earth Engine work."""
     try:
-        return analysis.stored_status(aid, *_window(baseline, comparison))
+        return analysis.stored_status(aid, *_window(baseline, comparison, aid))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None
 

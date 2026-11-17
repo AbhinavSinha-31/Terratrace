@@ -200,8 +200,8 @@ export const client = {
   /** The STORED analysis for an area + window, or null when none is stored (read-only; never computes). */
   async storedAnalysis(id: string, window: { start: number; end: number }): Promise<AnalysisResult | null> {
     try {
-      const env = await request<AnalysisEnvelope>(`${API}/analysis-result/${encodeURIComponent(id)}?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: 15000 });
-      return fromEnvelope(env);
+      const env = await request<AnalysisEnvelope | { status: 'not_computed' }>(`${API}/analysis-result/${encodeURIComponent(id)}?baseline=${window.start}&comparison=${window.end}`, { timeoutMs: 15000 });
+      return 'status' in env && env.status === 'not_computed' ? null : fromEnvelope(env as AnalysisEnvelope);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null;
       throw e;

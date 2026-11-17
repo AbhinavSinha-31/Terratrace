@@ -134,6 +134,13 @@ class AnalysisEnvelope(BaseModel):
     cautions: list[Caution] = []
 
 
+class NotComputed(BaseModel):
+    """GET /api/analysis-result when nothing is stored for this area and window: a normal answer, not an error."""
+    status: Literal["not_computed"]
+    aoi_id: str
+    window: list[int]
+
+
 class AoiPreviewRequest(BaseModel):
     geometry: dict[str, Any]
 

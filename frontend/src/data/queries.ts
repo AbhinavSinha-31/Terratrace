@@ -4,6 +4,7 @@ import { ApiError, client } from './client';
 import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, QuickScan, QuickScanSeason, StudyArea } from './contracts';
 import { selectCandidate, useUi } from '../state/store';
 import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
+import { pollDelay } from '../lib/poll';
 import { fmtKm2 } from '../lib/format';
 
 // While the backend is unreachable, re-check every 5 s — also in a background tab — so the UI notices it is back.
@@ -38,7 +39,8 @@ export const useQuickScan = (aoi: string | null, year: number | null, season: Qu
     queryKey: quickScanKey(aoi, year, season),
     queryFn: aoi && backend !== false ? () => client.quickScan(aoi, year, season) : skipToken,
     staleTime: (q) => (q.state.data?.status === 'READY' ? Infinity : 0),
-    refetchInterval: (q) => (q.state.data?.status === 'PROCESSING' ? 3000 : false),
+    // ~2 s backing off to 5 s while the scan runs; stops on any other status (and on unmount, as every query does).
+    refetchInterval: (q) => (q.state.data?.status === 'PROCESSING' ? pollDelay(q.state.dataUpdateCount) : false),
     retry: false,
   });
 };
