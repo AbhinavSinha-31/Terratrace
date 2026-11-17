@@ -262,7 +262,11 @@ def apply_statistics(rows: list[dict[str, Any]], sums: dict[str, Any], means: di
 IMAGERY_VIS_PARAMS = {"min": 0, "max": 0.3, "gamma": 1.2}
 FOREST_PALETTE = ["16a36d"]
 CHANGE_PALETTE = ["d4452f"]
-LAYER_KINDS = ("imagery", "forest", "change")
+# NDVI change heatmap (comparison − baseline NDVI, pixels observed in both years): diverging brown → white → green.
+NDVI_CHANGE_RANGE = 0.4
+NDVI_CHANGE_PALETTE = ["8c510a", "d8b365", "f6e8c3", "f5f5f5", "c7eae5", "5ab4ac", "01665e"]
+LAYER_KINDS = ("imagery", "forest", "change", "ndvi_change")
+TWO_YEAR_KINDS = ("change", "ndvi_change")
 
 
 def change_mask(b, a):
@@ -285,9 +289,14 @@ def change_mask(b, a):
     return change.updateMask(change.connectedPixelCount(mmu_px, True).gte(mmu_px))
 
 
+def ndvi_change(b, a):
+    """Comparison − baseline NDVI of two composites; masked wherever either year is unobserved (never filled)."""
+    return a.select("ndvi").subtract(b.select("ndvi")).rename("d_ndvi")
+
+
 def layer_key(analysis_id: str, kind: str, year: int, baseline: int | None = None) -> tuple[str, str, int]:
     """Cache key of a rendered layer. A change layer depends on BOTH years, so its key carries the baseline."""
-    return (analysis_id, f"change:{baseline}" if kind == "change" else kind, year)
+    return (analysis_id, f"{kind}:{baseline}" if kind in TWO_YEAR_KINDS else kind, year)
 
 
 def evaluate_concurrently(groups: dict[str, Any], workers: int) -> dict[str, Any]:
@@ -1168,6 +1177,8 @@ class EarthEngineProvider:
             return img.select("forest").selfMask().visualize(palette=FOREST_PALETTE, opacity=0.85)
         if kind == "change":
             return img.visualize(palette=CHANGE_PALETTE)
+        if kind == "ndvi_change":
+            return img.visualize(min=-NDVI_CHANGE_RANGE, max=NDVI_CHANGE_RANGE, palette=NDVI_CHANGE_PALETTE)
         raise EarthEngineError("unknown_layer", f"Unknown layer kind {kind!r}.")
 
     def tile_url(self, analysis_id: str, kind: str, year: int, geometry: dict[str, Any] | None = None,
@@ -1180,7 +1191,7 @@ class EarthEngineProvider:
         """
         if kind not in LAYER_KINDS:
             raise EarthEngineError("unknown_layer", f"Unknown layer kind {kind!r}.")
-        if kind == "change" and (baseline is None or not baseline < year):
+        if kind in TWO_YEAR_KINDS and (baseline is None or not baseline < year):
             raise EarthEngineError("unknown_layer", "A change layer needs a baseline year before its comparison year.")
         key = layer_key(analysis_id, kind, year, baseline)
         cached = self.cached_mapid(key)
@@ -1201,6 +1212,8 @@ class EarthEngineProvider:
             g = _ee().Geometry(req["geometry"])
             if kind == "change":
                 img = self._render("change", change_mask(self._composite(g, baseline)[0], self._composite(g, year)[0]))
+            elif kind == "ndvi_change":
+                img = self._render("ndvi_change", ndvi_change(self._composite(g, baseline)[0], self._composite(g, year)[0]))
             else:
                 img = self._render(kind, self._composite(g, year)[0])
             self._images[key] = img

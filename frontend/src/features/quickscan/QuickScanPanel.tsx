@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, Flame, Gauge, Leaf, Loader2, RotateCcw, ScanSearch, Trees } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Flame, Gauge, History, Leaf, Loader2, RotateCcw, ScanSearch, Trees } from 'lucide-react';
 import { Button, Menu, Switch } from '../../design';
-import { useQuickScan, useRunQuickScan } from '../../data/queries';
+import { useCarbonSeries, useQuickScan, useQuickScanCompare, useRunQuickScan } from '../../data/queries';
 import { ApiError } from '../../data/client';
 import type { QuickScan, QuickScanLayer, QuickScanSeason, QuickScanSource } from '../../data/contracts';
 import { useUi } from '../../state/store';
@@ -110,21 +110,39 @@ function LandCover({ d }: { d: QuickScan }) {
   const lc = d.landcover!;
   if (lc.status !== 'READY' || !lc.classes) return <Section icon={<Trees size={14} className="text-forest" />} title="Land cover" testId="qs-landcover"><Unavailable reason={lc.reason} /><Source source={lc.source} /></Section>;
   const shown = lc.classes.filter((c) => c.area_km2 > 0).sort((a, b) => b.share - a.share);
+  const study = lc.advisor_classes ?? null;
   return (
-    <Section icon={<Trees size={14} className="text-forest" />} title="Land cover" layer="landcover" testId="qs-landcover">
+    <Section icon={<Trees size={14} className="text-forest" />} title="Land cover (LULC)" layer="landcover" testId="qs-landcover">
       <div className="flex h-2.5 overflow-hidden rounded-full" aria-hidden>
-        {shown.map((c) => <span key={c.key} style={{ width: `${c.share * 100}%`, background: c.color }} />)}
+        {(study ?? shown).filter((c) => (c.share ?? 0) > 0).map((c) => <span key={c.key} style={{ width: `${(c.share ?? 0) * 100}%`, background: c.color }} />)}
       </div>
-      <ul className="mt-2.5 space-y-1 text-[12px]">
-        {shown.map((c) => (
-          <li key={c.key} className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: c.color }} />
-            <span className="min-w-0 flex-1 truncate text-ink-2">{c.name}</span>
-            <span className="t-data shrink-0 text-ink">{km2(c.area_km2)}</span>
-            <span className="t-data w-14 shrink-0 text-right text-ink-3">{pct(c.share)}</span>
-          </li>
-        ))}
-      </ul>
+      {study && (
+        <table className="mt-2.5 w-full text-[12px]" data-testid="qs-lulc-table">
+          <thead><tr className="text-[10.5px] text-ink-4"><th className="text-left font-normal">Class</th><th className="text-right font-normal">Area</th><th className="w-16 text-right font-normal">Share</th></tr></thead>
+          <tbody>
+            {study.filter((c) => !['wetland', 'snow_ice'].includes(c.key) || c.area_km2 > 0).map((c) => (
+              <tr key={c.key}>
+                <td className="py-0.5"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-[2px] align-middle" style={{ background: c.color }} /><span className="text-ink-2">{c.name}</span></td>
+                <td className="t-data text-right text-ink">{km2(c.area_km2)}</td>
+                <td className="t-data text-right text-ink-3">{pct(c.share)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <details className="mt-2 text-[11.5px]" open={!study}>
+        <summary className="cursor-pointer text-ink-3 hover:text-ink">Dynamic World classes</summary>
+        <ul className="mt-1.5 space-y-1 text-[12px]">
+          {shown.map((c) => (
+            <li key={c.key} className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: c.color }} />
+              <span className="min-w-0 flex-1 truncate text-ink-2">{c.name}</span>
+              <span className="t-data shrink-0 text-ink">{km2(c.area_km2)}</span>
+              <span className="t-data w-14 shrink-0 text-right text-ink-3">{pct(c.share)}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
       <p className="mt-2 text-[11px] leading-snug text-ink-3">
         Low confidence (Dynamic World probability below 0.5): {pct(lc.low_confidence_share)} of the area.
         {lc.worldcover_agreement && <> Agrees with ESA WorldCover 2021 on {pct(lc.worldcover_agreement.share, 0)} of the area (a cross-check, not accuracy).</>}
@@ -178,6 +196,13 @@ function Heat({ d }: { d: QuickScan }) {
         {u?.status === 'READY' && u.value_c !== undefined
           ? <><span className="text-ink-2">{u.label}: </span><b className="t-data text-ink">{signedC(u.value_c)}</b><span className="text-ink-3"> (built {degC(u.built_mean_c)} vs other land {degC(u.other_mean_c)})</span></>
           : <span className="text-ink-3">{u?.reason ?? 'No heat-island figure for this area.'}</span>}
+        {lst.uhi_vegetated && (
+          <div className="mt-1.5 border-t border-line pt-1.5" data-testid="qs-uhi-vegetated">
+            {lst.uhi_vegetated.status === 'READY' && lst.uhi_vegetated.value_c !== undefined
+              ? <><span className="text-ink-2">UHI against vegetated land: </span><b className="t-data text-ink">{signedC(lst.uhi_vegetated.value_c)}</b><span className="text-ink-3"> (built {degC(lst.uhi_vegetated.built_mean_c)} vs vegetated {degC(lst.uhi_vegetated.vegetated_mean_c)}; bare ground and water excluded)</span></>
+              : <span className="text-ink-3">UHI against vegetated land: {lst.uhi_vegetated.reason}</span>}
+          </div>
+        )}
       </div>
       <p className="mt-2 text-[11px] leading-snug text-ink-3">Landsat passes over at about 10:30 local time; water is left out of the land statistics. Clear-sky coverage: {pct(lst.valid_share, 0)} of the area.</p>
       <Source source={lst.source} extra={scenes} />
@@ -204,6 +229,124 @@ function Carbon({ d }: { d: QuickScan }) {
       </p>
       <Source source={c.source} />
       <Disclaimer text={d.disclaimer} />
+    </Section>
+  );
+}
+
+const signed = (v: number, unit: string, d = 1) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)} ${unit}`;
+
+/** Change between this scan's year and an earlier one (both scanned, same season): LULC, built-up expansion, LST, UHI. */
+function CompareYears({ d }: { d: QuickScan }) {
+  const earlier = Array.from({ length: d.year - d.first_year }, (_, i) => d.first_year + i);
+  const [from, setFrom] = useState<number | null>(earlier[0] ?? null);
+  const c = useQuickScanCompare(d.aoi_id, from, d.year, d.season);
+  const runEarlier = useRunQuickScan(d.aoi_id, from, d.season);
+  const [busy, setBusy] = useState(false);
+  const prior = useQuickScan(d.aoi_id, from, d.season);   // polls while the earlier scan runs
+  const priorReady = prior.data?.status === 'READY';
+  const refetch = c.refetch;
+  useEffect(() => { if (priorReady) void refetch(); }, [priorReady, refetch]);
+  if (!earlier.length) return null;
+  const x = c.data;
+  return (
+    <Section icon={<ArrowRightLeft size={14} className="text-accent" />} title="Change between years" testId="qs-compare">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-2">
+        From <Menu<number> label="Compare from year" value={from ?? earlier[0]} onChange={setFrom} options={earlier.map((y) => ({ value: y, label: String(y) }))} /> to <b className="t-data text-ink">{d.year}</b>
+        <span className="text-ink-4">({d.season_label})</span>
+      </div>
+      {c.isLoading && <p className="mt-2 text-[12px] text-ink-3">Loading…</p>}
+      {x?.status === 'NOT_RUN' && (
+        <div className="mt-2 space-y-2">
+          <p className="text-[12px] text-ink-3">{x.reason}</p>
+          {prior.data?.status === 'PROCESSING'
+            ? <p className="flex items-center gap-2 text-[12px] text-ink-2"><Loader2 size={14} className="animate-spin text-accent" />Scanning {from}…</p>
+            : <Button size="sm" variant="secondary" icon={<ScanSearch size={14} />} disabled={busy} data-testid="qs-scan-earlier"
+                onClick={async () => { setBusy(true); try { await runEarlier(); await prior.refetch(); } finally { setBusy(false); } }}>Scan {from}</Button>}
+        </div>
+      )}
+      {x?.status === 'READY' && (
+        <div className="mt-2.5 space-y-2.5" data-testid="qs-compare-ready">
+          {x.landcover?.status === 'READY' && x.landcover.classes && (
+            <>
+              {x.landcover.built_expansion_km2 != null && (
+                <p className="text-[12px] text-ink-2">Built-up {x.landcover.built_expansion_km2 >= 0 ? 'expansion' : 'change'}: <b className="t-data text-ink">{signed(x.landcover.built_expansion_km2, 'km²', 2)}</b>
+                  {x.landcover.built_expansion_pct != null && <span className="text-ink-3"> ({signed(x.landcover.built_expansion_pct, '%')})</span>}</p>
+              )}
+              <table className="w-full text-[11.5px]">
+                <thead><tr className="text-[10.5px] text-ink-4"><th className="text-left font-normal">Class</th><th className="text-right font-normal">{x.from_year}</th><th className="text-right font-normal">{x.to_year}</th><th className="text-right font-normal">Change</th></tr></thead>
+                <tbody>
+                  {x.landcover.classes.filter((r) => r.from_km2 > 0 || r.to_km2 > 0).map((r) => (
+                    <tr key={r.key}>
+                      <td className="py-0.5 text-ink-2"><span className="mr-1.5 inline-block h-2 w-2 rounded-[2px] align-middle" style={{ background: r.color }} />{r.name}</td>
+                      <td className="t-data text-right text-ink-3">{km2(r.from_km2)}</td>
+                      <td className="t-data text-right text-ink-3">{km2(r.to_km2)}</td>
+                      <td className={`t-data text-right ${r.change_km2 && r.change_km2 > 0 ? 'text-accent' : r.change_km2 && r.change_km2 < 0 ? 'text-warn' : 'text-ink-3'}`}>{r.change_km2 == null ? '—' : signed(r.change_km2, 'km²', 2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[10.5px] leading-snug text-ink-4">{x.landcover.note}</p>
+            </>
+          )}
+          {x.lst?.status === 'READY' ? (
+            <p className="text-[12px] leading-relaxed text-ink-2">
+              Mean land surface temperature {degC(x.lst.from_mean_c)} → {degC(x.lst.to_mean_c)}
+              {x.lst.uhi_change_c != null && <> · UHI (vs other land) {signed(x.lst.uhi_change_c, '°C', 2)}</>}
+              {x.lst.uhi_vegetated_change_c != null && <> · UHI (vs vegetated) {signed(x.lst.uhi_vegetated_change_c, '°C', 2)}</>}
+              <span className="mt-1 block text-[10.5px] text-ink-4">{x.lst.note}</span>
+            </p>
+          ) : <p className="text-[12px] text-ink-3">{x.lst?.reason}</p>}
+          <Disclaimer text={x.disclaimer} />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** Estimated above-ground tree carbon per ESA CCI epoch (2007–2022) and its change — on request (one EE request). */
+function CarbonOverTime({ aoi }: { aoi: string }) {
+  const c = useCarbonSeries(aoi);
+  const [busy, setBusy] = useState(false);
+  const d = c.data;
+  return (
+    <Section icon={<History size={14} className="text-forest" />} title="Carbon over time (estimate)" testId="qs-carbon-series">
+      {c.isLoading && <p className="text-[12px] text-ink-3">Loading…</p>}
+      {d && (d.status === 'NOT_RUN' || (d.status === 'UNAVAILABLE' && !d.series)) && (
+        <div className="space-y-2">
+          {d.reason && <p className="text-[12px] text-ink-3">{d.reason}</p>}
+          <p className="text-[12px] leading-relaxed text-ink-2">Estimate above-ground tree carbon for every ESA CCI biomass year (2007, 2010, 2015–2022) and how it changed. One Earth Engine request; the result is stored.</p>
+          <Button size="sm" variant="secondary" icon={busy ? <Loader2 size={14} className="animate-spin" /> : <Leaf size={14} />} disabled={busy || d.retryable === false}
+            onClick={async () => { setBusy(true); try { await c.run(); } finally { setBusy(false); } }} data-testid="qs-run-carbon">Estimate carbon over time</Button>
+        </div>
+      )}
+      {d?.status === 'PROCESSING' && <p className="flex items-center gap-2 text-[12px] text-ink-2"><Loader2 size={14} className="animate-spin text-accent" />Reading ESA CCI biomass for every epoch…</p>}
+      {d?.series && (
+        <div className="space-y-2" data-testid="qs-carbon-series-ready">
+          {d.change && (
+            <p className="text-[12px] text-ink-2">
+              {d.change.from_year} → {d.change.to_year}: <b className="t-data text-ink">{d.change.change_t >= 0 ? '+' : '−'}{tonnes(Math.abs(d.change.change_t))} C</b>
+              {d.change.change_pct != null && <span className="text-ink-3"> ({signed(d.change.change_pct, '%')})</span>}
+              {d.change.ranges_overlap && <span className="block text-[11px] text-warn">The two years' uncertainty ranges overlap: this change is within map uncertainty.</span>}
+            </p>
+          )}
+          <table className="w-full text-[11.5px]">
+            <thead><tr className="text-[10.5px] text-ink-4"><th className="text-left font-normal">Year</th><th className="text-right font-normal">Carbon</th><th className="text-right font-normal">Range</th><th className="text-right font-normal">t C/ha</th></tr></thead>
+            <tbody>
+              {d.series.map((s) => (
+                <tr key={s.year} className={s.status === 'READY' && !s.usable_for_change ? 'opacity-60' : ''}>
+                  <td className="t-data py-0.5 text-ink-2">{s.year}</td>
+                  {s.status === 'READY' && s.total_t !== undefined && s.range_t ? (
+                    <><td className="t-data text-right text-ink">{tonnes(s.total_t)}</td><td className="t-data text-right text-ink-3">{tonnes(s.range_t[0])}–{tonnes(s.range_t[1])}</td><td className="t-data text-right text-ink-3">{s.density_t_per_ha?.toFixed(1)}</td></>
+                  ) : <td colSpan={3} className="text-right text-ink-4">not available</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[10.5px] leading-snug text-ink-4">{d.method} {d.excludes} {d.caveat}</p>
+          {d.tier1 && <p className="text-[10.5px] leading-snug text-ink-4">IPCC Tier 1 cross-check: {d.tier1.reason}</p>}
+          {d.source && <p className="text-[10.5px] leading-snug text-ink-4">{d.source.citation}</p>}
+        </div>
+      )}
     </Section>
   );
 }
@@ -279,6 +422,8 @@ export function QuickScanPanel() {
           <LandCover d={d} />
           <Heat d={d} />
           <Carbon d={d} />
+          {d.status === 'READY' && <CompareYears d={d} />}
+          {d.status === 'READY' && <CarbonOverTime aoi={d.aoi_id} />}
           <p className="text-[10px] leading-snug text-ink-4">
             Scanned {d.computed_at?.slice(0, 10)}{d.elapsed_s !== undefined ? ` in ${d.elapsed_s.toFixed(0)} s` : ''} · {d.area_km2 !== undefined ? km2(d.area_km2) : ''} · method {d.quickscan_version}. Not counted in TerraTrace's forest totals.
           </p>

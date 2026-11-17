@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { skipToken, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, client } from './client';
-import type { AnalysisBundle, AnalysisResult, ChangeEvent, ExplanationFacts, QuickScan, QuickScanSeason, StudyArea } from './contracts';
+import type { AnalysisBundle, AnalysisResult, CarbonSeries, ChangeEvent, ExplanationFacts, QuickScan, QuickScanSeason, StudyArea } from './contracts';
 import { selectCandidate, useUi } from '../state/store';
 import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
 import { pollDelay } from '../lib/poll';
@@ -53,6 +53,34 @@ export function useRunQuickScan(aoi: string | null, year: number | null, season:
     qc.setQueryData(quickScanKey(aoi, year, season), doc);
     return doc;
   };
+}
+
+/** Change between two stored quick scans (read-only). */
+export const useQuickScanCompare = (aoi: string | null, from: number | null, to: number | null, season: QuickScanSeason | null) =>
+  useQuery({
+    queryKey: ['quickscan-compare', aoi, from, to, season],
+    queryFn: aoi && from && to && from < to ? () => client.quickScanCompare(aoi, from, to, season) : skipToken,
+    retry: false,
+  });
+
+/** Estimated carbon per ESA CCI epoch. Polls (2 s backing off to 5 s) while PROCESSING; `run` starts it. */
+export const carbonKey = (aoi: string | null) => ['carbon-series', aoi] as const;
+export function useCarbonSeries(aoi: string | null) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: carbonKey(aoi),
+    queryFn: aoi ? () => client.carbonSeries(aoi) : skipToken,
+    staleTime: (x) => (x.state.data?.status === 'READY' ? Infinity : 0),
+    refetchInterval: (x) => (x.state.data?.status === 'PROCESSING' ? pollDelay(x.state.dataUpdateCount) : false),
+    retry: false,
+  });
+  const run = async (): Promise<CarbonSeries | null> => {
+    if (!aoi) return null;
+    const doc = await client.carbonSeries(aoi, true);
+    qc.setQueryData(carbonKey(aoi), doc);
+    return doc;
+  };
+  return { ...q, run };
 }
 
 export const useBasemaps = () => useQuery({ queryKey: ['basemaps'], queryFn: () => client.basemaps(), staleTime: Infinity, retry: false });

@@ -93,7 +93,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
             <span className="t-data w-8 text-right text-[10px] text-ink-3">{Math.round(layers.forestOpacity * 100)}%</span>
           </div>
         </LayerToggle>
-        {hasNdvi && <LayerToggle icon={<Scan size={14} />} label="NDVI" hint="Vegetation greenness index for the selected year" on={layers.ndvi} onChange={(v) => set('ndvi', v)} />}
+        {hasNdvi && <LayerToggle icon={<Scan size={14} />} label="NDVI change (heatmap)" hint={`${ndviLegend?.title ?? 'NDVI change'} · shown when the timeline is on the comparison year`} on={layers.ndvi} onChange={(v) => set('ndvi', v)} />}
         <LayerToggle icon={<SquareDashed size={14} />} label="Detected change" hint="Change polygons that passed the detection rule" on={layers.change} onChange={(v) => set('change', v)} />
         <LayerToggle icon={<Flame size={14} />} label="Change intensity" hint="Density of detected change, weighted by area" on={layers.intensity} onChange={(v) => set('intensity', v)} />
         </>}

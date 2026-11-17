@@ -27,7 +27,7 @@ from ..config import settings
 from ..lru import LRUDict
 from ..providers.earth_engine import provider as P
 from ..providers.earth_engine import quickscan as Q
-from . import analysis
+from . import analysis, land_metrics
 
 log = logging.getLogger("terratrace.quickscan")
 
@@ -388,6 +388,10 @@ def present(doc: dict[str, Any]) -> dict[str, Any]:
     agreement = (out["landcover"] or {}).get("worldcover_agreement")
     if agreement:
         out["landcover"]["worldcover_agreement"] = dated(agreement, "worldcover")
+    if out["landcover"] and out["landcover"].get("status") == "READY":
+        out["landcover"]["advisor_classes"] = land_metrics.advisor_classes(out["landcover"])
+    if out["lst"] and out["lst"].get("status") == "READY":
+        out["lst"]["uhi_vegetated"] = land_metrics.uhi_vegetated(out["lst"], out["landcover"])
     if doc.get("carbon"):
         out["carbon"] = {**doc["carbon"], "components": [dated(c, "cci") if c.get("id") == "agb_trees" else c
                                                          for c in doc["carbon"]["components"]]}
@@ -521,3 +525,18 @@ def _run(aid: str, y: int, s: str, key: str, geometry: dict[str, Any], area_km2:
     _started.discard(key)
     log.info("[quickscan] %s aoi=%s year=%s season=%s in %.1fs%s", doc["status"], aid, y, s, doc["elapsed_s"],
              " (restricted mode)" if doc["restricted_mode"] else "")
+
+
+def compare(aid: str, from_year: int, to_year: int, season: str | None = None) -> dict[str, Any]:
+    """Change between two STORED scans of an area (same season). Never computes; a missing scan is reported as such."""
+    analysis.aoi_doc(aid)
+    y1, s = validate(from_year, season)
+    y2, _ = validate(to_year, s)
+    if y1 >= y2:
+        raise QuickScanError("invalid_request", "The second year must be after the first.")
+    a, b = stored(aid, y1, s), stored(aid, y2, s)
+    missing = [y for y, d in ((y1, a), (y2, b)) if d is None or d.get("status") != "READY"]
+    if missing:
+        return {"aoi_id": aid, "season": s, "from_year": y1, "to_year": y2, "status": "NOT_RUN", "missing_years": missing,
+                "reason": f"Run the quick scan for {' and '.join(map(str, missing))} first (same season) to compare."}
+    return {"status": "READY", **land_metrics.compare(present(a), present(b)), "disclaimer": DISCLAIMER}

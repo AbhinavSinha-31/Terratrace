@@ -29,6 +29,11 @@ def featured_ids() -> list[str]:
     return [a["id"] for a in registry.featured()["items"]]
 
 
+def forest_ids() -> list[str]:
+    """Featured investigations whose pre-computed result is the forest-change analysis (not the land-focus ones)."""
+    return [a["id"] for a in registry.featured()["items"] if a.get("focus") != "land"]
+
+
 def default_window(aid: str) -> tuple[int, int]:
     """The standard window moved inward to measured-analysable years (unchanged while availability is unmeasured)."""
     from . import imagery   # imagery imports analysis; imported lazily
@@ -65,7 +70,7 @@ def precompute(loop: asyncio.AbstractEventLoop | None = None, per_site_timeout_s
     A site that ends without a stored outcome (e.g. Earth Engine answered 429 in Restricted Mode) is retried ONCE,
     after the other sites and a pause — never in a loop. Its honest ERROR is never stored or shown as a result."""
     first = dict(_pass(featured_ids(), loop, per_site_timeout_s))
-    retry = [aid for aid, outcome in first.items() if not outcome.startswith(("stored", *STORED))]
+    retry = [aid for aid, outcome in first.items() if not outcome.startswith(("stored", "land", *STORED))]
     if retry:
         log.info("Featured pre-compute: retrying %s once in %.0fs", retry, RETRY_PAUSE_S)
         time.sleep(RETRY_PAUSE_S)
@@ -83,6 +88,9 @@ def _pass(ids: list[str], loop: asyncio.AbstractEventLoop | None, per_site_timeo
         b, c = default_window(aid)
         from . import context as area_context
         area_context.ensure(aid, analysis.analysis_target(analysis.aoi_doc(aid))["geometry"])   # reference context
+        if (registry.get(aid) or {}).get("focus") == "land":
+            out.append((aid, _precompute_land(aid, per_site_timeout_s)))
+            continue
         status = analysis.stored_status(aid, b, c)["status"]
         if status in STORED:
             out.append((aid, f"stored {status} {b}-{c}"))
@@ -98,6 +106,27 @@ def _pass(ids: list[str], loop: asyncio.AbstractEventLoop | None, per_site_timeo
         log.info("Featured %s %s-%s pre-computed: %s in %.0fs", aid, b, c, outcome, time.monotonic() - t0)
         out.append((aid, f"{outcome} {b}-{c}"))
     return out
+
+
+def _precompute_land(aid: str, timeout_s: float) -> str:
+    """A land-focus investigation (e.g. the Indian city case study): its quick scans for the first Dynamic World year and
+    the latest year (all months — the panel's default view) and its carbon series, one Earth Engine request at a time.
+    No forest-change analysis is pre-computed for it (a city's forest result is not its story; visitors can still run one)."""
+    from . import carbon_series, quickscan
+    done = []
+    for year in (quickscan.FIRST_YEAR, quickscan.last_year()):
+        doc = quickscan.start(aid, year, "all")
+        fut = quickscan._running.get(quickscan._key(aid, year, "all"))
+        if fut is not None:
+            fut.result(timeout=timeout_s)
+        done.append(f"{year}:{quickscan.status(aid, year, 'all')['status'] if fut else doc['status']}")
+    carbon_series.start(aid)
+    fut = carbon_series._running.get(aid)
+    if fut is not None:
+        fut.result(timeout=timeout_s)
+    done.append(f"carbon:{carbon_series.status(aid)['status']}")
+    log.info("Featured %s (land focus) pre-computed: %s", aid, " ".join(done))
+    return "land " + " ".join(done)
 
 
 def start_background(loop: asyncio.AbstractEventLoop, wait_for_ready_s: float = 120) -> None:

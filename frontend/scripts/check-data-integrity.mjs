@@ -18,6 +18,7 @@ import { chromium } from 'playwright-core';
 
 const BASE = process.env.TT_URL ?? 'http://localhost:5173/';
 const channel = process.env.TT_BROWSER ?? 'msedge';
+// Forest-analysis featured sites (gurugram-urban is a land / heat case study: its result is quick scans, not a forest run).
 const FEATURED = ['rondonia-frontier', 'hasdeo-arand', 'similipal', 'silent-valley'];
 // Phrases that only appear alongside measured results.
 const NON_READY = ['UNAVAILABLE', 'INVALID_ANALYSIS', 'ERROR'];
@@ -139,9 +140,9 @@ async function run(label, { offline }) {
   await page.keyboard.press('Escape');
   check(!DEV_TEXT.test(pop + notes), `${label}: status popover + notices contain no developer text`, ((pop + notes).match(DEV_TEXT) ?? [''])[0]);
   const cards = await page.locator('button.tt-card[aria-label^="Open featured investigation"]').allInnerTexts();
-  check(cards.length === 4, `${label}: four featured investigations`);
+  check(cards.length === 5, `${label}: five featured investigations (four forest sites + the Gurugram land / heat case study)`);
   check(cards.every((c) => !METRIC_TEXT.test(c) && !/\bevents\b/.test(c)), `${label}: featured cards carry no metrics`);
-  check(cards.every((c) => /km²/.test(c) && /live analysis/i.test(c)), `${label}: cards show AOI area + analysis status`);
+  check(cards.every((c) => /km²/.test(c) && /live analysis|land & heat case study/i.test(c)), `${label}: cards show AOI area + analysis status`);
   const overview = await page.locator('[data-testid="overview-detected-change"]').innerText();
   {
     // The overview total is exactly the stored READY featured results' own event area / count (control sites excluded).

@@ -301,6 +301,64 @@
    "area_ha": 39398.0,
    "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/480/729.jpg",
    "featured": true
+  },
+  {
+   "id": "gurugram-urban",
+   "code": "GGN",
+   "name": "Gurugram Urban Expansion",
+   "short_name": "Gurugram",
+   "region": "Gurugram, Haryana (Delhi NCR), India",
+   "country": "India",
+   "biome": "Semi-arid alluvial plain (urban and peri-urban)",
+   "description": "Indian city case study: a farming fringe south-west of Delhi that became one of India's largest office and housing hubs after 2000. Land cover, built-up expansion and the surface urban heat island are measured from public satellite datasets.",
+   "tags": [
+    "Urban expansion",
+    "Urban heat island",
+    "Cropland conversion"
+   ],
+   "focus": "land",
+   "focus_note": "Chosen for the advisor's Indian-city case study: rapid, well-documented conversion of cropland to built-up land since 2000, compact enough (≈384 km²) for the interactive limit, and a contrast to the Noida–Ghaziabad case study across the Delhi NCR. Quick-scan years: Dynamic World land cover from 2016 and Landsat 8/9 temperature from 2013; earlier years (≈2000) need the Landsat 5/7 research pipeline (analysis/), which is not part of the web app.",
+   "bbox": [
+    76.9,
+    28.36,
+    77.12,
+    28.52
+   ],
+   "center": [
+    77.01,
+    28.44
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       76.9,
+       28.36
+      ],
+      [
+       77.12,
+       28.36
+      ],
+      [
+       77.12,
+       28.52
+      ],
+      [
+       76.9,
+       28.52
+      ],
+      [
+       76.9,
+       28.36
+      ]
+     ]
+    ]
+   },
+   "area_km2": 383.6,
+   "area_ha": 38355.7,
+   "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/731.jpg",
+   "featured": true
   }
  ]
 }

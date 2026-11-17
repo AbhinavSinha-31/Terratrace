@@ -9,7 +9,7 @@
 import type {
   AnalysisEnvelope, AnalysisResult, AreaContext, AoiGeometry, AoiPreview, Basemaps, Explanation, ExplanationFacts,
   AnalysisHistory, AnalysisJob, ChatReply, ChatStage, ChatTurn, FeaturedSummaryItem, ImageryAvailability, ImageryDecision, LayerCatalog, StudyArea, SearchResult, StudyAreaIndex, SystemHealth,
-  QuickScan, QuickScanSeason,
+  QuickScan, QuickScanSeason, QuickScanCompare, CarbonSeries, OverlayLayer,
 } from './contracts';
 import { geometryAreaKm2, geometryBbox, geometryCentroid } from '../lib/geo';
 
@@ -92,8 +92,22 @@ async function withFallback<T>(live: () => Promise<T>, offline: () => Promise<T>
 
 const resolveAsset = (p: string) => (p.startsWith('http') || p.startsWith('/') ? p : `${BASE}${p}`);
 
+/** NDVI change heatmap (comparison − baseline NDVI) of the analysed window, served by /api/tiles/…/ndvi_change. */
+export function ndviChangeOverlay(cat: LayerCatalog): OverlayLayer | null {
+  const ch = cat.change;
+  if (!ch || cat.overlays.some((o) => o.kind === 'ndvi')) return null;
+  return {
+    kind: 'ndvi', label: `NDVI change ${ch.baseline_year}→${ch.comparison_year}`, source: 'raster-tiles', by_year: {},
+    tiles_by_year: { [String(ch.comparison_year)]: [`/api/tiles/${cat.aoi_id}/ndvi_change/${ch.comparison_year}/{z}/{x}/{y}?baseline=${ch.baseline_year}`] },
+    legend: { type: 'gradient', title: `NDVI change ${ch.baseline_year}→${ch.comparison_year}`, note: 'shown on the comparison year',
+      stops: [[-0.4, '#8c510a'], [-0.2, '#d8b365'], [0, '#f5f5f5'], [0.2, '#5ab4ac'], [0.4, '#01665e']], min_label: '−0.4 (browning)', max_label: '+0.4 (greening)' },
+  };
+}
+
 function normalizeLayers(cat: LayerCatalog): LayerCatalog {
-  return { ...cat, overlays: cat.overlays.map((o) => ({ ...o, by_year: Object.fromEntries(Object.entries(o.by_year).map(([y, p]) => [y, resolveAsset(p)])) })) };
+  const overlays = cat.overlays.map((o) => ({ ...o, by_year: Object.fromEntries(Object.entries(o.by_year).map(([y, p]) => [y, resolveAsset(p)])) }));
+  const ndvi = ndviChangeOverlay(cat);
+  return { ...cat, overlays: ndvi ? [...overlays, ndvi] : overlays };
 }
 
 
@@ -230,6 +244,17 @@ export const client = {
   runQuickScan(id: string, year: number | null, season: QuickScanSeason | null): Promise<QuickScan> {
     const q = new URLSearchParams({ ...(season ? { season } : {}), ...(year ? { year: String(year) } : {}) });
     return request<QuickScan>(`${API}/quickscan/${encodeURIComponent(id)}?${q}`, { method: 'POST', timeoutMs: 30000 });
+  },
+
+  /** Change between two stored quick scans (read-only; NOT_RUN names the years still to scan). */
+  quickScanCompare(id: string, from: number, to: number, season: QuickScanSeason | null): Promise<QuickScanCompare> {
+    const q = new URLSearchParams({ from: String(from), to: String(to), ...(season ? { season } : {}) });
+    return request<QuickScanCompare>(`${API}/quickscan/${encodeURIComponent(id)}/compare?${q}`, { timeoutMs: 15000 });
+  },
+
+  /** Estimated carbon per ESA CCI epoch: GET never computes; run = POST (one Earth Engine request). */
+  carbonSeries(id: string, run = false): Promise<CarbonSeries> {
+    return request<CarbonSeries>(`${API}/carbon/${encodeURIComponent(id)}`, run ? { method: 'POST', timeoutMs: 30000 } : { timeoutMs: 15000 });
   },
 
   getAoi(id: string): Promise<StudyArea> {

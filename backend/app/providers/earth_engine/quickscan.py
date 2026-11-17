@@ -265,3 +265,30 @@ def tile_url(aid: str, layer: str, year: int, season: str, geometry: dict[str, A
         url = _ee().data.getMapId({"image": layer_image(layer, geometry, year, season, lst_range)})["tile_fetcher"].url_format
         provider.store_mapid(key, url)
         return url
+
+
+# ----------------------------------------------------------------------------- carbon over time (ESA CCI epochs)
+# Every epoch of CCI Biomass v6.0 (checked in the catalog 2026-11-17). The quick scan itself uses CCI_YEAR only.
+CCI_YEARS = (2007, 2010, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022)
+
+
+def carbon_series(geometry: dict[str, Any]) -> dict[str, Any]:
+    """RAW per-epoch sums of ESA CCI above-ground biomass over an area — ONE Earth Engine request at the native 100 m:
+    {year: {area_ha, covered_ha, agb_x_ha, sd_x_ha} | None}. services/carbon_series.py turns them into carbon."""
+    provider.initialize()
+    ee = _ee()
+    geom = ee.Geometry(geometry)
+    area = ee.Image.pixelArea().divide(1e4).rename("area_ha")
+    col = ee.ImageCollection(CCI_AGB)
+    rr = dict(geometry=geom, scale=CCI_SCALE, maxPixels=1e10, tileScale=TILE_SCALE)
+    out = {}
+    for y in CCI_YEARS:
+        yc = col.filterDate(f"{y}-01-01", f"{y + 1}-01-01")
+        img = yc.mosaic().setDefaultProjection(ee.Image(col.first()).projection())
+        agb, sd = img.select("agb"), img.select("agb_sd")
+        sums = ee.Image.cat([area, area.updateMask(agb.mask()).unmask(0).rename("covered_ha"),
+                             agb.multiply(area).unmask(0).rename("agb_x_ha"), sd.multiply(area).unmask(0).rename("sd_x_ha")]
+                            ).reduceRegion(ee.Reducer.sum(), **rr)
+        out[str(y)] = ee.Algorithms.If(yc.size().gt(0), sums, None)
+    with EETimer("carbon_series")("carbon_series [getInfo]"):
+        return ee.Dictionary(out).getInfo()

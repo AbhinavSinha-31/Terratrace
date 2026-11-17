@@ -17,6 +17,7 @@ KNOWN = {
     "hasdeo-arand": (82.3, 22.4, 83.3, 23.3),           # Hasdeo Arand, Chhattisgarh, India
     "similipal": (85.9, 21.4, 86.8, 22.2),              # Similipal, Odisha, India
     "silent-valley": (76.2, 10.9, 76.7, 11.4),          # Silent Valley NP, Kerala, India (~11.1 N, 76.4 E)
+    "gurugram-urban": (76.8, 28.3, 77.2, 28.6),         # Gurugram, Haryana, India (~28.46 N, 77.03 E)
 }
 FRONTEND_COPY = Path(__file__).resolve().parents[2] / "frontend" / "public" / "data" / "featured.json"
 

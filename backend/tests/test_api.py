@@ -30,7 +30,7 @@ client = TestClient(app)
 REPO = Path(__file__).resolve().parents[2]
 SMALL = bbox_polygon((76.40, 11.00, 76.48, 11.08))  # ~77 km², Western Ghats
 METRIC_KEYS = {"summary", "events", "layers"}
-FEATURED = ["rondonia-frontier", "hasdeo-arand", "similipal", "silent-valley"]
+FEATURED = ["rondonia-frontier", "hasdeo-arand", "similipal", "silent-valley", "gurugram-urban"]
 
 
 # ----------------------------------------------------------------------------- no simulation anywhere

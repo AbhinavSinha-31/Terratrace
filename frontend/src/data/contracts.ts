@@ -43,6 +43,9 @@ export interface StudyArea {
   biome: string | null;
   description: string;
   tags: string[];
+  /** "land": a land / heat case study (quick scans pre-computed; no forest analysis is run when it opens). */
+  focus?: 'land';
+  focus_note?: string;
   bbox: [number, number, number, number];
   center: [number, number];
   geometry: AoiGeometry;
@@ -344,6 +347,8 @@ export interface LayerCatalog {
   imagery: ImageryLayer[];
   overlays: OverlayLayer[];
   severity_colors: Record<Severity, string>;
+  /** Raster of the change mask between the window's composites (baseline → comparison). */
+  change?: { baseline_year: number; comparison_year: number; tiles: string[]; palette: string[] };
 }
 
 /** The measured results of one READY Earth Engine analysis. */
@@ -702,7 +707,10 @@ export interface QuickScanLandCover extends QuickScanSection {
   classified_km2?: number; coverage_share?: number | null; low_confidence_share?: number; low_confidence_rule?: string;
   classes?: QuickScanClass[];
   worldcover_agreement?: { share: number; compared_km2: number; source: QuickScanSource; note: string } | null;
+  /** Dynamic World classes grouped into the study design's classes (derived when served; backend land_metrics.py). */
+  advisor_classes?: AdvisorClass[] | null;
 }
+export interface AdvisorClass { key: string; name: string; color: string; dynamic_world: string[]; area_km2: number; share: number | null }
 export interface QuickScanUhi {
   status: 'READY' | 'UNAVAILABLE'; label: string; reason?: string; value_c?: number; built_mean_c?: number; other_mean_c?: number;
   built_km2?: number; built_share?: number; other_km2?: number;
@@ -712,6 +720,32 @@ export interface QuickScanLst extends QuickScanSection {
   mean_c?: number; p2_c?: number; median_c?: number; p98_c?: number; valid_share?: number | null;
   per_class?: { key: string; name: string; mean_c: number; area_km2: number; water: boolean }[];
   uhi?: QuickScanUhi;
+  /** Built − vegetated land (water and bare ground excluded), derived from the per-class means. */
+  uhi_vegetated?: { status: 'READY' | 'UNAVAILABLE'; label: string; reason?: string; value_c?: number; built_mean_c?: number;
+    vegetated_mean_c?: number; built_km2?: number; vegetated_km2?: number; note?: string } | null;
+}
+
+/** GET /api/quickscan/{aoi}/compare — change between two stored scans. */
+export interface QuickScanCompare {
+  status: 'READY' | 'NOT_RUN';
+  aoi_id: string; season: QuickScanSeason; from_year: number; to_year: number;
+  missing_years?: number[]; reason?: string; disclaimer?: string;
+  landcover?: { status: 'READY' | 'UNAVAILABLE'; reason?: string; note?: string; built_expansion_km2?: number | null; built_expansion_pct?: number | null;
+    classes?: { key: string; name: string; color: string; from_km2: number; to_km2: number; change_km2: number | null; change_pp: number | null; change_pct: number | null }[] };
+  lst?: { status: 'READY' | 'UNAVAILABLE'; reason?: string; note?: string; from_mean_c?: number; to_mean_c?: number; mean_change_c?: number | null;
+    uhi_change_c?: number | null; uhi_vegetated_change_c?: number | null };
+}
+
+/** GET/POST /api/carbon/{aoi} — estimated above-ground tree carbon per ESA CCI epoch. */
+export interface CarbonSeries {
+  aoi_id: string;
+  status: 'READY' | 'UNAVAILABLE' | 'NOT_RUN' | 'PROCESSING';
+  reason?: string; retryable?: boolean;
+  label?: string; estimate?: boolean; method?: string; caveat?: string; excludes?: string; carbon_fraction?: number;
+  source?: { dataset: string; id: string; resolution_m: number; citation: string };
+  series?: { year: number; status: 'READY' | 'UNAVAILABLE'; reason?: string; total_t?: number; density_t_per_ha?: number; range_t?: [number, number]; coverage_share?: number; usable_for_change?: boolean }[];
+  change?: { from_year: number; to_year: number; change_t: number; change_pct: number | null; ranges_overlap: boolean } | null;
+  tier1?: { status: 'NOT_COMPUTED'; reason: string };
 }
 export interface QuickScanCarbonComponent extends QuickScanSection {
   id: string; density_t_per_ha?: number; total_t?: number; range_t?: [number, number]; coverage_share?: number;

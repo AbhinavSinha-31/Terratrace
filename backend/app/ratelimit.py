@@ -36,6 +36,7 @@ _RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/api/explain$"), "explain"),
     ("POST", re.compile(r"^/api/chat(?:/stream)?$"), "chat"),   # the streaming route shares the chat limit
     ("POST", re.compile(r"^/api/quickscan/[^/]+$"), "quickscan"),   # starts one Earth Engine request
+    ("POST", re.compile(r"^/api/carbon/[^/]+$"), "quickscan"),      # carbon series: one Earth Engine request too
 ]
 
 

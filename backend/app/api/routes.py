@@ -19,7 +19,7 @@ from ..providers.ai import claude
 from ..providers.earth_engine import quickscan as qs_ee
 from ..providers.earth_engine.provider import CONTEXT_LAYERS, EarthEngineError, layer_key, provider as ee_provider
 from ..schemas import AnalysisEnvelope, AreaContext, AnalysisJobRequest, AnalyzeRequest, AoiPreview, AoiPreviewRequest, AoiRegisterRequest, ChatRequest, ChatResponse, Explanation, ExplainRequest, Health, NotComputed
-from ..services import analysis, context as area_context, featured, imagery, quickscan, search, science as sc, tiles as tile_cache
+from ..services import analysis, carbon_series, context as area_context, featured, imagery, quickscan, search, science as sc, tiles as tile_cache
 from ..services.chat import counters as chat_counters, service as chat
 from ..services.explanation import service as explanation
 from ..services.geometry import AoiError
@@ -306,6 +306,37 @@ async def run_quickscan(aid: str = _aid(), year: int | None = _year(), season: s
     return await asyncio.to_thread(_quickscan, quickscan.start, aid, year, season)
 
 
+@router.get("/quickscan/{aid}/compare")
+def compare_quickscans(aid: str = _aid(), from_year: int = Query(..., alias="from", ge=YEAR_MIN, le=YEAR_MAX),
+                       to_year: int = Query(..., alias="to", ge=YEAR_MIN, le=YEAR_MAX), season: str | None = _SEASON) -> dict[str, Any]:
+    """Change between two stored quick scans of an area (land-cover classes, built-up expansion, LST and UHI).
+    Read-only: NOT_RUN names the year(s) still to scan."""
+    try:
+        return quickscan.compare(aid, from_year, to_year, season)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+    except quickscan.QuickScanError as e:
+        raise _err(422, "invalid_request", e.message, False) from None
+
+
+@router.get("/carbon/{aid}")
+def get_carbon_series(aid: str = _aid()) -> dict[str, Any]:
+    """Estimated above-ground tree carbon for every ESA CCI epoch (2007, 2010, 2015–2022) and its change. Read-only."""
+    try:
+        return carbon_series.status(aid)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+
+
+@router.post("/carbon/{aid}")
+async def run_carbon_series(aid: str = _aid()) -> dict[str, Any]:
+    """Start the carbon series (one Earth Engine request, on the quick scan's single worker). Rate-limited."""
+    try:
+        return await asyncio.to_thread(carbon_series.start, aid)
+    except analysis.AnalysisNotFound:
+        raise _err(404, "not_found") from None
+
+
 @router.get("/progress/{rid}")
 def get_progress(rid: str = Path(..., pattern=RID)) -> dict[str, Any]:
     """Real analysis stage for a client request id (no percentages are invented)."""
@@ -506,7 +537,7 @@ async def tiles(request: Request, aid: str = _aid(), kind: str = Path(..., max_l
 
     A change layer depends on two years: `baseline` (query) is required unless exactly one stored READY result of this
     AOI ends at `year`, whose baseline is then used."""
-    if kind not in ("imagery", "forest", "change"):
+    if kind not in ("imagery", "forest", "change", "ndvi_change"):
         raise _err(404, "not_found")
     _tile_xyz(z, x, y)
     # Only the method's composite years exist as layers: any other year would start a new Earth Engine map request.
@@ -523,12 +554,12 @@ async def tiles(request: Request, aid: str = _aid(), kind: str = Path(..., max_l
             geometry = analysis.analysis_target(analysis.aoi_doc(aid))["geometry"]
         except analysis.AnalysisNotFound:
             raise _err(404, "not_found") from None
-        if kind == "change" and baseline is None:
+        if kind in ("change", "ndvi_change") and baseline is None:
             candidates = analysis.change_baselines(aid, year)
             if len(candidates) != 1:
                 raise _err(404, "not_found", "This change layer needs its baseline year (?baseline=YYYY).", False)
             baseline = candidates[0]
-        layer = f"change:{baseline}" if kind == "change" else kind
+        layer = f"{kind}:{baseline}" if kind in ("change", "ndvi_change") else kind
 
         async def template() -> str:
             return await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry, baseline)

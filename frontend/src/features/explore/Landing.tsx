@@ -192,16 +192,20 @@ function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index
   const [state, ...rest] = area.region.split(',').map((s) => s.trim());
   // Static thumbnail from the backend's study metadata (imagery only; URLs are never built here).
   const img = area.thumbnail_url;
-  const { status, detail, reason } = useStudyCard(area.id);
-  const tone = status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'text-bad' : 'text-warn';
-  const dot = status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'bg-bad' : 'bg-warn';
+  const card = useStudyCard(area.id);
+  // A land / heat case study (e.g. the Indian city): its stored quick scans are the result, not a forest analysis.
+  const land = area.focus === 'land';
+  const { status, detail, reason } = land ? { status: 'Land & heat case study' as typeof card.status, detail: 'Land cover, built-up expansion and urban heat', reason: area.focus_note ?? null } : card;
+  const tone = land ? 'text-accent' : status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'text-bad' : 'text-warn';
+  const dot = land ? 'bg-accent' : status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'bg-bad' : 'bg-warn';
   return (
     <motion.button
       initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + index * 0.07, duration: 0.5, ease: EASE }}
       onClick={() => {
         if (import.meta.env.DEV) console.debug('[analysis] featured card click', { id: area.id, bbox: area.bbox, window: DEFAULT_ANALYSIS_WINDOW });
         // The site's default window (measured-analysable years): a stored result for it opens instantly.
-        open(area.id, { name: area.name, geometry: area.geometry, window: area.default_window ? { start: area.default_window[0], end: area.default_window[1] } : undefined, run: true });
+        open(area.id, { name: area.name, geometry: area.geometry, window: area.default_window ? { start: area.default_window[0], end: area.default_window[1] } : undefined, run: !land });
+        if (land) useUi.getState().setTab('land');
       }}
       data-card-status={status}
       onMouseEnter={() => hover(area.id)} onMouseLeave={() => hover(null)} onFocus={() => hover(area.id)} onBlur={() => hover(null)}

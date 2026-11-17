@@ -122,7 +122,9 @@ def test_precompute_runs_one_site_at_a_time_and_skips_stored_results(monkeypatch
     assert [o[0] for o in order] == ["hasdeo-arand", "similipal", "silent-valley"]
     assert ("similipal", 2018, 2025) in order and ("hasdeo-arand", 2019, 2025) in order
     assert out["rondonia-frontier"].startswith("stored READY")
-    assert dict(featured.precompute()) == {k: v.replace("READY 2", "stored READY 2") if not v.startswith("stored") else v for k, v in out.items()}
+    forest = set(featured.forest_ids())
+    assert dict(featured.precompute()) == {k: v.replace("READY 2", "stored READY 2") if k in forest and not v.startswith("stored") else v
+                                           for k, v in out.items()}
 
 
 def test_precompute_is_off_in_tests_and_configurable():
@@ -150,7 +152,8 @@ def test_a_transient_failure_is_retried_once_after_the_other_sites(monkeypatch):
     monkeypatch.setattr(featured, "RETRY_PAUSE_S", 0)
     out = dict(featured.precompute())
     assert attempts.count("hasdeo-arand") == 2 and attempts[-1] == "hasdeo-arand", attempts
-    assert out["hasdeo-arand"].startswith("READY") and all(v.startswith("READY") for v in out.values())
+    assert out["hasdeo-arand"].startswith("READY") and all(out[k].startswith("READY") for k in featured.forest_ids())
+    assert all(out[k].startswith("land") for k in set(out) - set(featured.forest_ids())), "land-focus sites are never retried"
 
 
 def test_a_site_failing_twice_is_reported_not_retried_forever(monkeypatch):
@@ -165,4 +168,4 @@ def test_a_site_failing_twice_is_reported_not_retried_forever(monkeypatch):
     monkeypatch.setattr(featured, "_measure_availability", lambda aid, loop: None)
     monkeypatch.setattr(featured, "RETRY_PAUSE_S", 0)
     out = dict(featured.precompute())
-    assert len(calls) == 2 * len(featured.featured_ids()) and all(v.startswith("ERROR") for v in out.values())
+    assert len(calls) == 2 * len(featured.forest_ids()) and all(out[k].startswith("ERROR") for k in featured.forest_ids())
