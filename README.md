@@ -1,274 +1,208 @@
-# TERRATRACE — Forest-Change Intelligence
+# TERRATRACE
 
-Select a forest area, explore real satellite imagery from 1984 to today, and run a live
-forest-change analysis on Google Earth Engine. Every measurement shown comes from a
-completed, validated Earth Engine computation. TERRATRACE never shows simulated, estimated
-or placeholder results: when something cannot be measured, the UI says so.
+**Explainable satellite intelligence for forest change, land cover and urban heat — anywhere on Earth.**
 
-Imagery and analysis are independent:
+TERRATRACE turns public Earth-observation archives into transparent, reproducible measurements: forest loss and gain,
+land use / land cover (LULC), land surface temperature (LST) and the surface urban heat island (UHI), and an estimate
+of above-ground carbon. Every figure comes from a completed Google Earth Engine computation, carries its dataset, date
+window and resolution, and passes explicit validity checks. **Nothing is simulated or filled in:** when a value cannot
+be measured, TERRATRACE says why instead of showing a placeholder.
 
-| | What it is | Source |
+---
+
+## Contents
+
+[Features](#features) · [Architecture](#architecture) · [Methods](#methods) · [Data sources](#data-sources) ·
+[Limitations](#limitations) · [Research in progress](#research-in-progress) · [Getting started](#getting-started) ·
+[Tests](#tests) · [Deployment](#deployment) · [Roadmap](#roadmap) · [Credits](#credits--licences)
+
+## Features
+
+| Area | What you get |
+|---|---|
+| **Forest-change analysis** | Annual forest masks and validated loss/gain between a baseline and comparison year for any area ≤ 1,500 km² (Sentinel-2 + Dynamic World, 2016 →). Change events with severity, confidence and spectral evidence (NDVI, NBR, tree probability). Runs as a cancellable background job; stored results open instantly. |
+| **Time Machine** | Real annual imagery from 1984 (Landsat) and 2017 (Sentinel-2) for the open area — imagery only before 2016, never a forest figure. |
+| **Land, heat & carbon (quick scan)** | For any area and year: LULC in the study-design classes (Forest, Cropland, Built-up, Water, Barren, Grass/Shrub) with area and share; LST in °C with per-class means; surface UHI against all other land **and** against vegetated land; above-ground tree carbon (ESA CCI). Map layers with legends for each. |
+| **Change between years** | Per-class area change and built-up expansion between two scanned years, LST and UHI change, and estimated carbon for every ESA CCI epoch (2007, 2010, 2015–2022) with its uncertainty range. |
+| **Heatmaps** | NDVI-change (comparison − baseline) and LST heatmaps with legends; reference layers (terrain, Hansen tree cover). |
+| **Featured investigations** | Rondônia (Brazil), Hasdeo Arand, Similipal and Silent Valley (India), plus an Indian-city case study — **Gurugram** urban expansion — and the static Noida–Ghaziabad LULC + UHI case study. |
+| **Ask TerraTrace** | A Gemini-powered assistant (key on the server only) that explains *your* open analysis from its measured facts, cites them, and withholds any answer containing a number it was not given. Without an open scan it teaches remote-sensing concepts. |
+| **Accounts & community** | Supabase sign-in (email + password, magic link, optional Google). Save scans to *My scans*; discuss analyses and reports in a Reddit-style community with tags, search, threaded comments and votes. Guests can read everything. |
+
+## Architecture
+
+```
+ Browser (React 19 + Vite, MapLibre, ECharts)            Supabase (Auth + Postgres, Row Level Security)
+   │  public anon key + the user's own JWT ───────────────▶  profiles · saved_scans · posts · comments · votes
+   │
+   │  /api/*  (no credentials in the browser)
+   ▼
+ FastAPI backend (one process, one worker)  ──────────────▶  Google Earth Engine (service account)
+   · analysis jobs (polled), method-versioned result cache    Sentinel-2, Landsat C2, Dynamic World, ESA CCI, …
+   · quick scans, carbon series, map-tile proxy + cache
+   · rate limits, Supabase JWT verification (JWKS, ES256)
+   · /api/ask → Gemini, answers checked against cited facts ─▶  Gemini API (server-side key)
+```
+
+- **Frontend** (`frontend/`): React + TypeScript, zustand state, TanStack Query; the URL mirrors the investigation
+  (`#/analysis/<area>?from=&to=`), so links and reloads restore the same view.
+- **Backend** (`backend/app/`): `api/routes.py` (HTTP API), `services/` (analysis orchestration, quick scan,
+  `land_metrics.py`, `carbon_series.py`, chat), `providers/earth_engine/` (the Earth Engine pipeline), `auth.py`
+  (token verification), `ratelimit.py`.
+- **Database** (`supabase/migrations/`): schema and RLS policies, tested on an in-memory Postgres (`supabase/tests`).
+- **Research pipeline** (`analysis/`): a standalone, reproducible LULC (Random Forest) + LST/UHI pipeline used for the
+  Noida–Ghaziabad case study; the quick scan reuses its Landsat scene selection and masking code.
+
+## Methods
+
+The full forest method, thresholds and validity rules are in [docs/METHOD.md](docs/METHOD.md) (current version
+`tt-ee-2.4`); the quick-scan method in [docs/QUICKSCAN_PLAN.md](docs/QUICKSCAN_PLAN.md).
+
+### Spectral indices: NDVI and NBR
+
+- **NDVI** = (NIR − Red) / (NIR + Red) — vegetation greenness (Sentinel-2 B8, B4).
+- **NBR** = (NIR − SWIR2) / (NIR + SWIR2) — sensitive to burned and cleared surfaces (B8, B12).
+
+### Forest and forest change (2016 →)
+
+- **Forest mask.** A 30 m pixel is forest in a year when its Dynamic World *trees* probability (per-pixel 75th
+  percentile of the year) is ≥ 0.50 **and** its leaf-on NDVI (per-pixel 90th percentile of clear Sentinel-2
+  observations, Cloud Score+ `cs_cdf ≥ 0.60`) is ≥ 0.60. Pixels with fewer than 3 clear or 3 Dynamic World
+  observations stay *unobserved*, never "non-forest".
+- **Change.** A loss event requires forest → non-forest **and** ΔNDVI ≤ −0.20 or ΔNBR ≤ −0.25 **and** Δtrees ≤ −0.30,
+  over patches ≥ 2 ha (minimum mapping unit), counted only on pixels observed in both years.
+- **Validity.** Years with < 80 % observed coverage are not analysable; a window with fewer than two analysable years is
+  UNAVAILABLE; an in-window transition that fails a physical check (e.g. implausible gain) makes the result
+  INVALID_ANALYSIS. Figures are shown only for READY results.
+
+### Land use / land cover (LULC)
+
+Dynamic World V1 annual composite of the scan year: mean probability per class, top class wins; statistics at 30 m by
+mode. The nine Dynamic World classes are grouped into the study-design classes **Forest** (trees), **Cropland**
+(crops), **Built-up** (built), **Water**, **Barren** (bare), **Grass/Shrub** (grass + shrub and scrub), with flooded
+vegetation and snow/ice listed separately. Pixels whose top probability is below 0.5 are reported as low confidence,
+and agreement with ESA WorldCover 2021 is reported as a cross-check (agreement, not accuracy). Change between years is
+the net change in mapped area per class between two independent annual classifications — not a pixel transition matrix.
+
+### Land surface temperature and the urban heat island (LST / UHI)
+
+- **LST.** Landsat 8/9 Collection 2 Level-2 surface temperature (`ST_B10`): scale factor 0.00341802, offset 149.0 K,
+  converted to °C. Scenes are masked per pixel for cloud, cloud shadow, snow and saturation (`QA_PIXEL`, `QA_RADSAT`),
+  surface-temperature uncertainty (`ST_QA` ≤ 5 K) and emissivity (`ST_EMIS` ≥ 0.90); the composite is the per-pixel
+  median of a season's clear scenes, and at least 5 usable scenes are required. Landsat passes at about 10:30 local
+  time, so these are daytime surface (not air) temperatures.
+- **UHI intensity** = mean LST of built-up land − mean LST of a reference, area-weighted, water excluded:
+  1. *against all other land* (stored with each scan), and
+  2. *against vegetated land* (trees, crops, grass, shrub, flooded vegetation; bare ground excluded) — the rural
+     reference used in the study design. Bare, dry farmland can be hotter than built-up land in a dry season (an
+     "urban cool island"); showing both references makes that visible instead of hiding it.
+  Built-up land must cover ≥ 5 % and ≥ 2 km² of the land (and the reference ≥ 2 km²) for a UHI figure.
+
+### Carbon index (estimate)
+
+Above-ground tree carbon = ESA CCI above-ground biomass (oven-dry woody biomass of living trees, 100 m) × **0.47**, the
+IPCC (2006) default carbon fraction of dry wood, summed over the area, with a range from the per-pixel standard
+deviation (widest case). It is computed for every CCI epoch, and the change between the first and last epochs that
+cover ≥ 50 % of the area is reported, flagged when the two ranges overlap. It is labelled an **estimate** everywhere.
+Roots, dead wood, litter and soil carbon are not included. An IPCC Tier 1 cross-check (LULC area × default carbon
+density per class) needs the FAO Global Ecological Zone of each area; that layer is not yet available in Earth Engine
+for this project, so Tier 1 is reported as *not computed* rather than approximated.
+
+## Data sources
+
+| Dataset | Use | Reference |
 |---|---|---|
-| **Imagery** | Real satellite imagery for the open area and year (Sentinel-2 SR Harmonized — Earth Engine catalogue from 2017-03-28, a year is shown only where scenes exist — and Landsat Collection 2 before). Imagery only, never a result. | `GET /api/imagery` → Earth Engine |
-| **Analysis** | Forest-cover and change measurements for a baseline → comparison window. Runs only when you press **Run**, as a background job with real stages and **Cancel**. | `POST /api/analysis-jobs`, poll `GET /api/analysis-jobs/{job_id}` → Earth Engine |
+| Copernicus Sentinel-2 SR Harmonized (ESA) | imagery, NDVI/NBR, forest mask (2017 →) | Copernicus Sentinel data, processed in Google Earth Engine |
+| Cloud Score+ S2 Harmonized | per-pixel cloud masking | Pasquarella, V. J., et al. (2023), *CVPR Workshops (EarthVision)* |
+| Google Dynamic World V1 | tree probability, LULC | Brown, C. F., et al. (2022), *Scientific Data* 9, 251, doi:10.1038/s41597-022-01307-4 |
+| USGS Landsat Collection 2 (Level-2 SR and ST) | historical imagery; LST (`ST_B10`) | U.S. Geological Survey, Landsat Collection 2 |
+| ESA WorldCover v200 (2021) | LULC cross-check | Zanaga, D., et al. (2022), ESA WorldCover 10 m 2021 v200 |
+| ESA CCI Above-Ground Biomass v6.0 | carbon estimate (2007, 2010, 2015–2022) | Santoro, M. & Cartus, O., ESA Biomass Climate Change Initiative |
+| Hansen Global Forest Change v1.13 | reference layers only | Hansen, M. C., et al. (2013), *Science* 342, 850–853 |
+| Copernicus DEM GLO-30 | terrain context (slope, hillshade) | © DLR / Airbus, Copernicus programme |
+| IPCC 2006 Guidelines, Vol. 4 (AFOLU) | carbon fraction 0.47 | IPCC (2006), *Guidelines for National Greenhouse Gas Inventories* |
 
-"Imagery READY, analysis unavailable" is a valid state.
+## Limitations
 
-## Requirements
+- **Agreement, not accuracy.** Quick-scan values come from global public products and are not validated against
+  ground truth for each area; WorldCover agreement is a cross-check between two maps.
+- **Deciduous forests.** Dynamic World's tree probability varies between years in strongly seasonal forest; some
+  windows (e.g. Hasdeo Arand) fail the gain check and are reported INVALID_ANALYSIS with no figures.
+- **Before 2016** only imagery is shown: the Landsat-era NDVI proxy cannot separate green crops from forest.
+- **LST is a daytime surface temperature** from single-year composites; differences between years include weather.
+  The UHI difference (built − reference within the same scenes) is less sensitive to it.
+- **Carbon** is an estimate from a biomass map with its own uncertainty; ESA advises caution when reading small
+  differences between epochs as change.
+- **Area limit** of 1,500 km² per interactive analysis; the free Earth Engine tier can enter restricted mode, which makes
+  requests slower (they are queued one at a time).
+- **The assistant** can be wrong about general knowledge; only its cited TERRATRACE figures are checked.
 
-- Python 3 (developed and tested with 3.14) and Node.js 20.19+ or 22.12+ (required by Vite 7)
-- A Google Cloud project registered for Earth Engine (noncommercial use is free):
-  <https://code.earthengine.google.com/register>
+## Research in progress
 
-## Configure Earth Engine (backend only)
+A manuscript describing the TERRATRACE method and its Indian case studies (LULC change, built-up expansion and the
+surface urban heat island in Delhi NCR, and forest change in central and eastern India) is in preparation for a
+peer-reviewed journal. **It has not been submitted.** Figures in the app and in `analysis/outputs/` are working
+results and may change before publication; please contact the author before citing them.
 
-Credentials stay on the server. They never go into the frontend, the browser or Git.
+## Getting started
 
-```powershell
-cd backend
-copy .env.example .env        # then set EE_PROJECT=<your project id> in backend/.env
-```
-
-Then authenticate once, using **one** of these methods:
-
-- **User credentials:** run `earthengine authenticate`.
-- **Service account:** set `EE_SERVICE_ACCOUNT_KEY` in `backend/.env` to the path of a key
-  file stored outside the repository.
-
-`backend/.env` is git-ignored. Never commit it or any key file.
-
-## Accounts (optional)
-
-Google and email sign-in and user profiles use Supabase. Without its settings the app works as before and shows
-"Accounts are not available yet". Setup (project, migrations, Google, redirect URLs, `frontend/.env`):
-[docs/AUTH_SETUP.md](docs/AUTH_SETUP.md).
-
-## Run
-
-One-time setup:
-
-```powershell
-cd backend
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-cd ..\frontend
-npm install
-```
-
-**Everything in one command** (from the repository root):
+Requirements: Python 3.14, Node.js 20.19+ or 22.12+, and a Google Cloud project registered for Earth Engine
+(noncommercial use is free: <https://code.earthengine.google.com/register>).
 
 ```powershell
-.\run-dev.ps1                 # backend in a new window (8001) + frontend here (http://localhost:5173)
+# one-time setup
+cd backend;  python -m venv .venv; .venv\Scripts\python -m pip install -r requirements.txt; cd ..
+cd frontend; npm install; cd ..
+copy backend\.env.example backend\.env              # set EE_PROJECT; optional SUPABASE_URL, GEMINI_API_KEY
+copy frontend\.env.example frontend\.env.local      # optional VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+earthengine authenticate                            # once, for local Earth Engine access
+
+# run everything
+.\run-dev.ps1        # backend http://127.0.0.1:8001 (new window, auto-reload) + frontend http://localhost:5173
 ```
 
-**Backend only** (port **8001**, auto-reload), from any folder:
+- **Backend only:** `backend\run.ps1` (works from any folder; passes `--app-dir`, so `import app` always resolves —
+  plain `uvicorn app.main:app` only works inside `backend/`). If PowerShell blocks scripts:
+  `powershell -ExecutionPolicy Bypass -File backend\run.ps1`.
+- **Frontend only:** `cd frontend; npm run dev` (proxies `/api` to `127.0.0.1:8001`; `TT_API_PROXY` overrides).
+- `http://127.0.0.1:8001/api/health` reports Earth Engine (`ready` / `unconfigured`), the chat and the limits. Without
+  credentials the backend still starts; analysis then shows as unavailable and nothing is substituted.
+- Accounts and the community need a Supabase project with the migrations applied — see [DEPLOY.md](DEPLOY.md#3-supabase-migrations-and-redirect-urls).
+  Without Supabase settings the app works and shows "Accounts are not available yet".
 
-```powershell
-backend\run.ps1               # same as: backend\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --reload --port 8001
-```
-
-Plain `uvicorn app.main:app` only works when started *inside* `backend/`. From anywhere else it fails with
-`ModuleNotFoundError: No module named 'app'`; `run.ps1` passes `--app-dir` so it works from anywhere.
-If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File backend\run.ps1`.
-
-Check it: <http://127.0.0.1:8001/api/health> should report `"analysis": {"status": "ready"}`
-once Earth Engine is configured. Without credentials the backend still starts and reports
-`"analysis": {"status": "unconfigured"}`.
-
-**Frontend only** (port **5173**, proxies `/api` to `127.0.0.1:8001`; set `TT_API_PROXY` to use another backend URL):
-
-```powershell
-cd frontend
-npm run dev                   # http://localhost:5173
-```
-
-If a port is already taken, an earlier server is probably still running: stop it with Ctrl+C in its
-terminal, or find it with `Get-NetTCPConnection -LocalPort 8001 -State Listen`. A backend on any other
-port (e.g. 8000) is not used by the frontend, which shows "backend offline" until 8001 answers.
-
-Single-port mode: run `npm run build` in `frontend/`. The backend then serves `frontend/dist`
-at <http://127.0.0.1:8001>.
-
-Without a reachable backend the UI still opens. Featured areas and search keep working,
-but imagery and analysis show as unavailable, and nothing is substituted.
-
-## Deploy
-
-**Before going public, resolve every open item in [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md).**
-
-The frontend is a static build and runs on Vercel (`vercel.json` at the repo root builds `frontend/`
-and publishes `frontend/dist`; `.vercelignore` keeps `backend/` and every secret out of the upload).
-
-The backend does **not** fit serverless functions: analysis jobs run for minutes in background
-threads and are polled from in-memory state, registered areas and results live in `backend/.cache`,
-and rate limits are per process. Host it as **one** long-running process with a persistent disk.
-Hosting options are compared in [docs/PRODUCTION_PLAN.md](docs/PRODUCTION_PLAN.md#backend-hosting--options).
-
-The repository-root `Dockerfile` builds the backend image (it includes the two parts of `analysis/` the
-quick scan imports):
-
-```sh
-docker build -t terratrace-backend .
-docker run -p 8000:8000 -v terratrace-cache:/data --env-file backend/.env terratrace-backend
-```
-
-- **Start command** (the image's default): `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
-  --proxy-headers --forwarded-allow-ips=${TT_FORWARDED_ALLOW_IPS:-*}`. `--proxy-headers` makes rate limits apply
-  per real client instead of per proxy; `*` is safe only when the container is reachable solely through the
-  platform's proxy.
-- **Health checks:** `GET /api/health/live` (liveness: no Earth Engine call, 503 if the cache is not writable);
-  `GET /api/health` reports Earth Engine, chat and limits and can take several seconds.
-- **Storage:** mount the persistent volume at `TT_CACHE_DIR` (`/data` in the image). Tiles go to
-  `TT_TILE_CACHE_DIR` (default `$TT_CACHE_DIR/tiles`, disposable). The image runs as a non-root user (uid 10001):
-  if the platform mounts the volume owned by root, `/api/health/live` answers 503 — fix the volume's ownership
-  (or the platform's run-as-uid setting) before going live.
-
-On the host,
-Earth Engine needs a service account (`EE_PROJECT` + `EE_SERVICE_ACCOUNT_KEY` = path to the key
-file, uploaded as a secret file), since `earthengine authenticate` user credentials do not exist there.
-
-| Where | Variable | Value |
-| --- | --- | --- |
-| Vercel | `VITE_API_BASE` | backend public URL ending in `/api` (public; baked into the bundle) |
-| Vercel | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | optional accounts; public by design (never the service_role key). See docs/AUTH_SETUP.md |
-| Backend | `TT_CORS_ORIGINS` | your Vercel production origin, e.g. `https://<project>.vercel.app` |
-| Backend | `TT_CACHE_DIR`, `TT_TILE_CACHE_DIR` | persistent volume path (image default `/data`); optional separate tile path |
-| Backend | `TT_FORWARDED_ALLOW_IPS` | proxy address trusted for `X-Forwarded-For` (default `*`) |
-| Backend | `EE_PROJECT`, `EE_SERVICE_ACCOUNT_KEY` | Earth Engine (secret) |
-| Backend | `ANTHROPIC_API_KEY` | optional AI briefings (secret) |
-| Backend | `TT_CHAT_ENABLED`, `GEMINI_API_KEY`, `TT_LLM_MODEL`, `TT_LLM_TIER` | optional AI chat, off by default; the key is a secret. `TT_LLM_TIER` = `free` (default) or `paid` (key from a billed project) sets the notice shown with the chat. Read docs/PRE_DEPLOYMENT.md items 4–7 first |
-
-## Method (tt-ee-2.1)
-
-- **Data.** `COPERNICUS/S2_SR_HARMONIZED` masked with Cloud Score+ (`cs_cdf ≥ 0.60`, scenes without
-  Cloud Score+ excluded) and `GOOGLE/DYNAMICWORLD/V1` (*trees* probability, 0–1). Each year is a
-  calendar-year composite (1 Jan – 31 Dec). A year without scenes is reported unavailable, never
-  composited.
-- **Area limit.** Every area — featured or drawn — is checked against the 1,500 km² interactive
-  limit before anything else. A larger area returns `analysis_too_large` with the selected and maximum
-  area. No stored result is served and no Earth Engine work runs.
-- **Window.** The live analysis measures every year of the requested window (default 2018 → 2025).
-  Years before the window come from a separate history request. They are shown in the Time Machine
-  and charts only, and never change the window's result.
-- **Forest.** A pixel (statistics at 30 m) is forest in a year when its Dynamic World mean *trees* probability is
-  ≥ 0.50 **and** its leaf-on Sentinel-2 NDVI is ≥ 0.60. Leaf-on NDVI is the per-pixel 90th
-  percentile of the year's clear NDVI observations. Pixels with fewer than 3 clear
-  Sentinel-2 or 3 Dynamic World observations stay **unobserved**, never "non-forest".
-- **Change.** Loss or gain is the change in forest state between two consecutive analysable years,
-  counted only over pixels observed in both years. Unobserved → forest is never gain, and
-  unobserved → non-forest is never loss.
-- **Status.**
-  - A year with < 80 % observed coverage is not analysable. Transitions skip it explicitly.
-  - Fewer than two analysable years in the window gives **UNAVAILABLE**.
-  - An in-window transition that fails a physical check gives **INVALID_ANALYSIS**. One such check
-    is gain ≤ 5 % of the compared area per year. The compared area is the set of pixels observed in
-    both years. The failed check is shown with its measured value.
-  - Otherwise the result is **READY**. Measurements are shown only for READY.
-
-**Why leaf-on NDVI (change from tt-ee-2.0).** Version 2.0 applied the NDVI floor to the
-annual-median NDVI. In deciduous forest that median mixes leaf-off dry-season scenes. Whether a
-pixel passed then depended on each year's seasonal sampling, not on forest cover. The evidence,
-comparing annual-median NDVI (old) with leaf-on NDVI (new), same thresholds:
-
-| Site (2018–2025) | Old method | Leaf-on NDVI |
-|---|---|---|
-| Kanha core, protected sal forest (stable control) | 30.7 % gain in 2019→20; 27 % loss in 2018→19 | 5.4 %; 2.6 % |
-| Jaú interior, Amazon evergreen (stable control) | < 1 % per year | < 1 % per year |
-| Rondônia subset, clearing in patches ≥ 2 ha | 39 / 80 / 27 / 49 / 25 ha | 37 / 82 / 24 / 46 / 23 ha |
-
-About 90 % of the old implausible gains came from pixels that were already Dynamic World trees
-and only crossed the NDVI floor. Real clearing is still detected. The thresholds (trees ≥ 0.50,
-NDVI ≥ 0.60, gain ≤ 5 %/yr, ≥ 3 observations, ≥ 80 % coverage) are unchanged, and results from
-2.0 are never reused.
-
-A two-year persistence rule was also tested and not adopted:
-
-- It cannot confirm the latest year.
-- It shifts the timing of change.
-- It still failed Hasdeo 2019→2020 (9.8 %).
-
-**Remaining limitation.** Dynamic World's *trees* probability itself varies between years in
-deciduous forest. Hasdeo Arand (2018→19 7.0 %, 2019→20 8.2 %) and the Kanha control (2019→20
-5.4 %) therefore still fail the 5 % check. They are reported as INVALID_ANALYSIS, and no
-measurements are shown.
-
-## Earth Engine quota (noncommercial / Restricted Mode)
-
-A noncommercial project that exceeds its compute quota enters **Restricted Mode**. Earth
-Engine then limits concurrency and answers some tile requests with `429 RESOURCE_EXHAUSTED`.
-TERRATRACE handles this without bypassing the quota:
-
-- At most 3 Earth Engine tile requests are in flight at once.
-- Tiles outside the study area are never requested.
-- Tiles the map no longer needs are cancelled.
-- A throttled tile is retried once, then skipped. The rest of the layer stays on the map, with
-  the notice *"Satellite imagery is temporarily throttled. Retrying…"*.
-- Analyses larger than the interactive limit (`TT_INTERACTIVE_MAX_KM2`, default 1,500 km²)
-  are refused before any computation.
+`backend/.env` and `frontend/.env.local` are git-ignored. Never commit them, a key file, or a Supabase service-role key.
 
 ## Tests
 
 ```powershell
-# from the repository root
-cd backend;  .venv\Scripts\python -m pytest -q; cd ..   # offline: Earth Engine is replaced by fakes
-cd frontend; npm test; npm run typecheck; npm run build; cd ..   # npm test = Vitest unit tests (jsdom, no backend)
-cd frontend; npm run test:integrity; cd ..              # end-to-end; needs the dev server + backend running
-cd supabase; npm install; npm test; cd ..               # migrations + Row Level Security, in-memory Postgres
+cd backend;  .venv\Scripts\python -m pytest -q; cd ..        # offline: Earth Engine, Gemini and Supabase are faked
+cd frontend; npm run typecheck; npm test; npm run build; cd .. # Vitest unit tests (jsdom)
+cd supabase; npm install; npm test; cd ..                      # migrations + Row Level Security on in-memory Postgres
+# end-to-end (a preview build with test Supabase settings; see each script's header):
+cd frontend; npm run test:auth; npm run test:community; npm run test:integrity; cd ..
 ```
 
-The integrity suite never starts a live Earth Engine analysis.
+## Deployment
 
-## LULC + urban heat island case study (`analysis/`)
+Frontend on **Vercel**, backend on **Railway** (one container from the repo-root `Dockerfile`, persistent volume),
+accounts and community on **Supabase**. Exact environment variables per platform, redirect URLs and Google OAuth:
+[DEPLOY.md](DEPLOY.md). Open items before going public: [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md).
 
-A standalone, reproducible research pipeline. It is separate from the web app: it has its own virtual environment
-and does not import backend code. It classifies land use / land cover (Random Forest in Earth Engine) and measures
-Landsat land surface temperature and urban heat island intensity for a configurable city. The default city is
-Noida + Greater Noida + Ghaziabad. Every choice of method is in [analysis/config.toml](analysis/config.toml), and the
-method is described in [analysis/README.md](analysis/README.md).
+## Roadmap
 
-```powershell
-cd analysis
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-copy .env.example .env                      # set EE_PROJECT=<your Earth Engine project>; uses `earthengine authenticate`
-.venv\Scripts\python -m pytest tests -q     # offline tests, no Earth Engine
-.venv\Scripts\python run_pipeline.py        # everything, all years (Earth Engine steps take ~20 min per year)
-.venv\Scripts\python run_pipeline.py --years 2015 2025              # selected years only
-.venv\Scripts\python run_pipeline.py --steps stats figures report   # re-run the local steps only (seconds)
-```
+**Later (not built yet):**
 
-Results go to `analysis/outputs/`:
-
-- `maps/`, `charts/`: PNG files at 300 dpi.
-- `tables/`: CSV files.
-- `validation/`: KML files for manual checking.
-- `results_summary.md`: key numbers as sentences, with every flagged issue.
-
-Earth Engine results are cached in `analysis/outputs/cache/` (git-ignored), so later runs skip them unless you pass `--force`.
-
-## Layout
-
-```
-backend/app/api/routes.py                 HTTP API (/api/…)
-backend/app/services/analysis.py          analysis orchestration, method-versioned result cache
-backend/app/services/imagery.py           imagery decisions, availability, basemap config (all imagery URLs)
-backend/app/services/science.py           scientific thresholds and validity rules (docs/METHOD.md)
-backend/app/providers/earth_engine/       the Earth Engine pipeline
-frontend/src/state/store.ts               canonical InvestigationState
-frontend/src/data/                        API client, analysis runner, imagery sync
-frontend/src/features/map/                MapLibre map; eeTiles.ts = bounded Earth Engine tile loader
-frontend/src/state/auth.ts                Supabase session (sign-in / sign-out); features/account/ = #/profile page
-supabase/migrations/                      database schema + Row Level Security (docs/AUTH_SETUP.md)
-```
-
-The method, thresholds and validity rules are documented in [docs/METHOD.md](docs/METHOD.md).
+- **Custom-trained models** — a TERRATRACE land-cover / change classifier trained on the project's own labelled
+  samples (the `analysis/` Random Forest is a first step), with per-class accuracy against independent validation.
+- **Terrain datasets** in the analyses themselves (elevation, slope and aspect as covariates and stratification for
+  LULC, LST and change), beyond today's terrain context layers.
+- IPCC Tier 1 carbon cross-check once the FAO Global Ecological Zone layer is available in Earth Engine.
+- Earlier baseline years (≈2000) for city case studies through the Landsat 5/7 research pipeline.
 
 ## Credits & licences
 
-- Copernicus Sentinel-2 data (via Google Earth Engine); USGS Landsat Collection 2;
-  Google Dynamic World V1; Hansen et al. Global Forest Change (CC BY 4.0).
-- Globe basemap: Sentinel-2 cloudless 2025 © EOX IT Services GmbH, s2maps.eu
-  (CC BY-NC-SA 4.0; contains modified Copernicus Sentinel data). A static basemap,
-  not live imagery.
+- Copernicus Sentinel-2 data (ESA); USGS Landsat Collection 2; Google Dynamic World V1; ESA WorldCover; ESA Climate
+  Change Initiative Biomass; Hansen et al. Global Forest Change (CC BY 4.0); Copernicus DEM — all via Google Earth Engine.
+- Globe basemap: Sentinel-2 cloudless 2025 © EOX IT Services GmbH, s2maps.eu (CC BY-NC-SA 4.0).
 - High-resolution imagery and labels © Esri, Maxar, Earthstar Geographics.
-- MapLibre GL JS, Apache ECharts, React, Tailwind CSS.
+- Built with React, MapLibre GL JS, Apache ECharts, Tailwind CSS, FastAPI, Supabase and the Gemini API.

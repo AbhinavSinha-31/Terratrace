@@ -14,7 +14,10 @@ from app.main import app
 from app.providers.earth_engine import provider as P
 from app.providers.earth_engine import quickscan as Q
 from app.services import carbon_series, land_metrics, quickscan
-from tests.test_quickscan import RAW, _g, fresh  # noqa: F401 — `fresh` is an autouse fixture (empty scan state, inline jobs)
+from tests import test_quickscan
+from tests.test_quickscan import RAW, _g
+
+fresh = test_quickscan.fresh   # autouse fixture: empty scan state, inline jobs
 
 client = TestClient(app, raise_server_exceptions=False)
 

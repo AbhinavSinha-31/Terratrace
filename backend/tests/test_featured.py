@@ -5,7 +5,6 @@ browser had run in this session, featured results were never pre-computed, and c
 window that some sites cannot analyse.
 """
 
-import json
 
 import pytest
 from fastapi.testclient import TestClient

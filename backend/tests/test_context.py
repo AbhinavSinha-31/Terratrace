@@ -5,7 +5,6 @@ provider.area_context for Hasdeo Arand (recorded 2026-10-09), so parsing is test
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
