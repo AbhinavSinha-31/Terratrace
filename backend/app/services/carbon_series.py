@@ -25,8 +25,12 @@ from ..providers.earth_engine import quickscan as Q
 from . import analysis, quickscan
 
 log = logging.getLogger("terratrace.carbon")
-VERSION = f"cs-1-{Q.CCI_AGB.rsplit('/', 1)[-1]}-{Q.CARBON_FRACTION}"
-MIN_COVERAGE = 0.5          # an epoch covering less than half the area is reported, but not used for change
+VERSION = f"cs-2-{Q.CCI_AGB.rsplit('/', 1)[-1]}-{Q.CARBON_FRACTION}"
+# Change is measured over the consistent annual epochs only; 2007 and 2010 come from earlier radar inputs (shown, not used).
+CHANGE_FROM_YEAR = 2015
+# CCI pixels without a value are masked where there is no above-ground tree biomass (checked 2026-11-18: the Sahara and
+# Gurugram's built-up core are fully masked; farmland and forest carry values), so they count as zero, not as a data gap.
+MASK_NOTE = "Pixels without a CCI value (e.g. desert, dense built-up land) are counted as no above-ground tree biomass."
 CAVEAT = ("Differences between CCI epochs include map uncertainty: ESA advises caution when reading small differences "
           "between biomass maps as real change. The range uses the per-pixel standard deviation (widest case).")
 
@@ -52,7 +56,7 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
         cov = covered / area if area else None
         series.append({"year": y, "status": "READY", "total_t": _r(total, 0), "density_t_per_ha": _r(total / covered, 2),
                        "range_t": [_r(max(0.0, total - spread), 0), _r(total + spread, 0)], "coverage_share": _r(cov, 4),
-                       "usable_for_change": cov is not None and cov >= MIN_COVERAGE})
+                       "usable_for_change": y >= CHANGE_FROM_YEAR})
     usable = [s for s in series if s.get("usable_for_change")]
     change = None
     if len(usable) >= 2:
@@ -65,7 +69,9 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
         "label": "Estimated above-ground tree carbon over time (ESA CCI Biomass × 0.47)",
         "estimate": True,
         "method": f"ESA CCI above-ground biomass v6.0 (oven-dry woody biomass of living trees, 100 m) × {Q.CARBON_FRACTION} "
-                  "(IPCC 2006 default carbon fraction of dry wood), summed over the area for each epoch.",
+                  f"(IPCC 2006 default carbon fraction of dry wood), summed over the area for each epoch. {MASK_NOTE} "
+                  f"Change is measured between the first and last epochs from {CHANGE_FROM_YEAR} on; 2007 and 2010 come from "
+                  "earlier radar inputs and are shown for context only.",
         "source": {"dataset": "ESA CCI Above-Ground Biomass v6.0", "id": Q.CCI_AGB, "resolution_m": Q.CCI_SCALE,
                    "citation": "Santoro, M. & Cartus, O. ESA Biomass Climate Change Initiative (Biomass_cci): global forest "
                                "above-ground biomass, v6.0 (Earth Engine catalog ESA/CCI/Above_Ground_Biomass/V6_0)."},

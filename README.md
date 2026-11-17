@@ -102,8 +102,9 @@ the net change in mapped area per class between two independent annual classific
 
 Above-ground tree carbon = ESA CCI above-ground biomass (oven-dry woody biomass of living trees, 100 m) × **0.47**, the
 IPCC (2006) default carbon fraction of dry wood, summed over the area, with a range from the per-pixel standard
-deviation (widest case). It is computed for every CCI epoch, and the change between the first and last epochs that
-cover ≥ 50 % of the area is reported, flagged when the two ranges overlap. It is labelled an **estimate** everywhere.
+deviation (widest case). It is computed for every CCI epoch; the change is measured between 2015 and 2022 (2007 and
+2010 come from earlier radar inputs and are shown for context) and flagged when the two ranges overlap. CCI pixels
+without a value (desert, dense built-up land) are counted as no tree biomass, not as missing data. It is labelled an **estimate** everywhere.
 Roots, dead wood, litter and soil carbon are not included. An IPCC Tier 1 cross-check (LULC area × default carbon
 density per class) needs the FAO Global Ecological Zone of each area; that layer is not yet available in Earth Engine
 for this project, so Tier 1 is reported as *not computed* rather than approximated.

@@ -147,10 +147,19 @@ def test_carbon_series_values_ranges_and_change():
     for s in d["series"]:
         if s["status"] == "READY":
             assert 0 <= s["range_t"][0] <= s["total_t"] <= s["range_t"][1] and 0 < s["coverage_share"] <= 1
-    assert by[2010]["usable_for_change"] is False                     # covers 20 % of the area: shown, not used for change
+    assert by[2010]["usable_for_change"] is False                     # before 2015 (earlier radar inputs): shown, not used
+    assert by[2015]["coverage_share"] == 0.9 and "no above-ground tree biomass" in d["method"]
     ch = d["change"]
     assert (ch["from_year"], ch["to_year"]) == (2015, 2022) and ch["change_t"] == pytest.approx(9000 * -20 * 0.47)
     assert d["estimate"] is True and d["tier1"]["status"] == "NOT_COMPUTED" and d["caveat"]
+
+
+def test_carbon_change_is_measured_in_a_city_with_little_biomass():
+    """Regression 2026-11-18 (Gurugram): CCI covered 3–7 % of the city, and a 50 % coverage rule hid every change.
+    Masked CCI pixels are zero biomass, not gaps; change is 2015 → 2022."""
+    d = carbon_series.parse(cci({2015: (300.0, 50, 10), 2022: (500.0, 80, 10)}))
+    assert d["change"]["from_year"] == 2015 and d["change"]["to_year"] == 2022
+    assert d["change"]["change_t"] == pytest.approx((500 * 80 - 300 * 50) * 0.47)
 
 
 def test_carbon_series_without_any_biomass_is_unavailable_not_zero():
