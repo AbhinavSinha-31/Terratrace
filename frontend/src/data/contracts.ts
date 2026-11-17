@@ -502,6 +502,9 @@ export interface Explanation {
 
 export type ProviderState = 'ready' | 'unconfigured' | 'error' | 'offline';
 
+/** Gemini API tier of the server's key (TT_LLM_TIER): decides the notice shown with the chat. */
+export type ChatTier = 'free' | 'paid';
+
 export interface SystemHealth {
   /** false when the backend is unreachable: UI PREVIEW only, no analysis possible. */
   backend: boolean;
@@ -516,7 +519,7 @@ export interface SystemHealth {
   geocoder: { status: ProviderState; detail?: string | null };
   limits: { max_aoi_km2: number; min_aoi_km2: number; interactive_max_km2?: number };
   /** AI chat (POST /api/chat): 'offline' = switched off on the server. */
-  chat?: { status: ProviderState; detail?: string | null } | null;
+  chat?: { status: ProviderState; detail?: string | null; tier?: ChatTier } | null;
 }
 
 export interface SearchResult {

@@ -29,8 +29,10 @@
   /* ink */
   --color-ink: #edf1f3;
   --color-ink-2: #a2afb8;
-  --color-ink-3: #6c7a84;
-  --color-ink-4: #46525a;
+  /* ink-3 / ink-4 carry small text: both stay >= 4.5:1 (WCAG AA) on base, surface and raised (Lighthouse 2026-10-25:
+     the former #6c7a84 / #46525a measured 4.35 / 2.39 on surface). */
+  --color-ink-3: #808e98;
+  --color-ink-4: #76848e;
   /* semantic */
   --color-accent: #45d0c4;
   --color-accent-2: #2b9a91;

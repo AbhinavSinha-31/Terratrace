@@ -193,6 +193,10 @@ class ProviderStatus(BaseModel):
     detail: str | None = None
 
 
+class ChatStatus(ProviderStatus):
+    tier: Literal["free", "paid"] = "free"   # Gemini API tier of the configured key (TT_LLM_TIER): decides the notice
+
+
 class Health(BaseModel):
     status: Literal["operational", "degraded"]
     version: str
@@ -203,7 +207,7 @@ class Health(BaseModel):
     explainer_model: str | None = None
     geocoder: ProviderStatus
     limits: dict[str, float]
-    chat: ProviderStatus | None = None
+    chat: ChatStatus | None = None
 
 
 # ----------------------------------------------------------------------------- AI chat (POST /api/chat)

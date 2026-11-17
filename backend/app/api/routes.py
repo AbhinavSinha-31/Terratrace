@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
+from .. import ratelimit
 from ..config import settings
 from ..errors import public_error
 from ..providers import registry
@@ -44,13 +45,20 @@ def _tile_response(data: bytes) -> Response:
     return Response(data, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
 
-async def _serve_tile(key: str, z: int, x: int, y: int, template, forget_template) -> Response:
-    """Cache-first tile: a cached tile needs no Earth Engine call at all. Otherwise the template (map ID) is resolved
-    and the tile fetched through the bounded, single-flight, backoff fetcher (services/tiles.py). An expired map ID
-    is rebuilt once. `template` is an async callable returning the EE URL template."""
+async def _serve_tile(request: Request, key: str, z: int, x: int, y: int, template, forget_template) -> Response:
+    """Cache-first tile: a cached tile needs no Earth Engine call at all. Otherwise the client's tile limit is checked
+    (429 rate_limited with Retry-After; app/ratelimit.py group `tiles`), the template (map ID) is resolved and the tile
+    fetched through the bounded, single-flight, backoff fetcher (services/tiles.py). An expired map ID is rebuilt once.
+    `template` is an async callable returning the EE URL template."""
     data = tile_cache.cached(key)
     if data is not None:
         return _tile_response(data)
+    retry_after = ratelimit.limiter.check(ratelimit.client_of(request), "tiles")
+    if retry_after is not None:
+        log.warning("Tile rate limit reached for %s", ratelimit.client_of(request))
+        e = public_error("rate_limited")
+        raise HTTPException(status_code=429, detail={**e, "message": e["user_message"]},
+                            headers={"Retry-After": str(int(retry_after + 0.999))})
     for attempt in (1, 2):
         url = (await template()).format(z=z, x=x, y=y)
         try:
@@ -96,6 +104,30 @@ async def _run(aid: str, baseline: int | None, comparison: int | None, rid: str 
         raise _err(422, e.code, e.message, False) from None
 
 
+def _cache_writable() -> bool:
+    """The durable cache directory exists (or can be created) and accepts a write."""
+    try:
+        settings.cache_dir.mkdir(parents=True, exist_ok=True)
+        probe = settings.cache_dir / ".write-probe"
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+@router.get("/health/live")
+def health_live() -> Response:
+    """Liveness for container health checks: the process answers and can write its cache. No Earth Engine call
+    (/api/health checks Earth Engine and can take seconds). 503 when the cache is not writable: every result would be
+    lost on restart, so the platform should flag the deployment."""
+    ok = _cache_writable()
+    if not ok:
+        log.error("Cache directory %s is not writable (TT_CACHE_DIR / volume permissions)", settings.cache_dir)
+    return Response(json.dumps({"status": "ok" if ok else "cache_not_writable", "version": settings.version}),
+                    status_code=200 if ok else 503, media_type="application/json")
+
+
 @router.get("/health", response_model=Health)
 def health() -> Health:
     ee_status, ee_detail = ee_provider.status()
@@ -110,7 +142,7 @@ def health() -> Health:
         explainer_model=settings.llm_model if claude.configured() else None,
         geocoder={"status": "ready" if settings.geocoder_enabled else "offline", "detail": "OpenStreetMap Nominatim + offline gazetteer"},
         limits={"max_aoi_km2": settings.max_aoi_km2, "min_aoi_km2": settings.min_aoi_km2, "interactive_max_km2": settings.interactive_max_km2},
-        chat=dict(zip(("status", "detail"), chat.status())),
+        chat={**dict(zip(("status", "detail"), chat.status())), "tier": settings.chat_tier},
     )
 
 
@@ -386,7 +418,7 @@ async def search_places(q: str = Query(..., min_length=1, max_length=120)) -> di
 
 
 @router.get("/tiles/{aid}/quickscan/{layer}/{year}/{season}/{z}/{x}/{y}")
-async def quickscan_tiles(aid: str = _aid(), layer: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+async def quickscan_tiles(request: Request, aid: str = _aid(), layer: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
                           season: str = Path(..., pattern="^(all|mam|jja|son|djf)$"),
                           z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
     """Quick-scan map tiles (land surface temperature, Dynamic World land cover, ESA CCI biomass carbon) — only for a
@@ -410,7 +442,7 @@ async def quickscan_tiles(aid: str = _aid(), layer: str = Path(..., max_length=1
             return await asyncio.to_thread(qs_ee.tile_url, aid, layer, year, season, geometry, rng)
 
         key = tile_cache.cache_key(f"qs-{layer}-{season}-{doc['quickscan_version']}", aid, year, z, x, y)
-        return await _serve_tile(key, z, x, y, template, lambda: ee_provider.drop_mapid(qs_ee.mapid_key(aid, layer, year, season, rng)))
+        return await _serve_tile(request, key, z, x, y, template, lambda: ee_provider.drop_mapid(qs_ee.mapid_key(aid, layer, year, season, rng)))
     except HTTPException:
         raise
     except EarthEngineError as e:
@@ -424,7 +456,7 @@ async def quickscan_tiles(aid: str = _aid(), layer: str = Path(..., max_length=1
 
 
 @router.get("/tiles/{aid}/context/{layer}/{z}/{x}/{y}")
-async def context_tiles(aid: str = _aid(), layer: str = Path(..., max_length=32),
+async def context_tiles(request: Request, aid: str = _aid(), layer: str = Path(..., max_length=32),
                         z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
     """Reference context map tiles (hillshade, slope, Hansen tree cover 2000, Hansen loss year) — never TerraTrace
     results. Same validation, cache, concurrency cap, backoff and public errors as the analysis tile route; declared
@@ -442,7 +474,7 @@ async def context_tiles(aid: str = _aid(), layer: str = Path(..., max_length=32)
             return await asyncio.to_thread(ee_provider.context_tile_url, aid, layer, geometry)
 
         key = tile_cache.cache_key(f"ctx-{layer}-{area_context.CONTEXT_VERSION}", aid, 0, z, x, y)
-        return await _serve_tile(key, z, x, y, template, lambda: ee_provider.drop_mapid((aid, f"ctx:{layer}", 0)))
+        return await _serve_tile(request, key, z, x, y, template, lambda: ee_provider.drop_mapid((aid, f"ctx:{layer}", 0)))
     except HTTPException:
         raise
     except EarthEngineError as e:
@@ -456,7 +488,7 @@ async def context_tiles(aid: str = _aid(), layer: str = Path(..., max_length=32)
 
 
 @router.get("/tiles/{aid}/{kind}/{year}/{z}/{x}/{y}")
-async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+async def tiles(request: Request, aid: str = _aid(), kind: str = Path(..., max_length=16), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
                 z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0),
                 baseline: int | None = _year()) -> Response:
     """Earth Engine map tiles for a READY live analysis (proxied so no credentials reach the browser).
@@ -490,7 +522,7 @@ async def tiles(aid: str = _aid(), kind: str = Path(..., max_length=16), year: i
         async def template() -> str:
             return await asyncio.to_thread(ee_provider.tile_url, aid, kind, year, geometry, baseline)
 
-        return await _serve_tile(tile_cache.cache_key(layer, aid, year, z, x, y), z, x, y, template,
+        return await _serve_tile(request, tile_cache.cache_key(layer, aid, year, z, x, y), z, x, y, template,
                                  lambda: ee_provider.drop_mapid(layer_key(aid, kind, year, baseline)))
     except HTTPException:
         raise
@@ -538,13 +570,13 @@ def imagery_basemaps() -> dict[str, Any]:
 
 
 @router.get("/imagery/tiles/{aid}/{year}/{z}/{x}/{y}")
-async def imagery_tiles(aid: str = _aid(), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
+async def imagery_tiles(request: Request, aid: str = _aid(), year: int = Path(..., ge=YEAR_MIN, le=YEAR_MAX),
                         z: int = Path(..., ge=0, le=24), x: int = Path(..., ge=0), y: int = Path(..., ge=0)) -> Response:
     """Earth Engine composite tiles for a year MEASURED as AVAILABLE (fetched and cached by the backend; no credentials
     reach the browser)."""
     _tile_xyz(z, x, y)
     try:
-        return await _serve_tile(tile_cache.cache_key("aoi-imagery", aid, year, z, x, y), z, x, y,
+        return await _serve_tile(request, tile_cache.cache_key("aoi-imagery", aid, year, z, x, y), z, x, y,
                                  lambda: imagery.tile_url(aid, year), lambda: ee_provider.drop_mapid((aid, "aoi-imagery", year)))
     except analysis.AnalysisNotFound:
         raise _err(404, "not_found") from None

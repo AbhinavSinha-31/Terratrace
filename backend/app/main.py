@@ -101,9 +101,9 @@ async def rate_limit(request: Request, call_next):
     """Refuse requests over the per-client limit with an explicit 429 public error (app/ratelimit.py)."""
     group = ratelimit.group_of(request.method, request.url.path)
     if group:
-        retry_after = ratelimit.limiter.check(request.client.host if request.client else "unknown", group)
+        retry_after = ratelimit.limiter.check(ratelimit.client_of(request), group)
         if retry_after is not None:
-            log.warning("Rate limit (%s) reached for %s on %s %s", group, request.client.host if request.client else "?", request.method, request.url.path)
+            log.warning("Rate limit (%s) reached for %s on %s %s", group, ratelimit.client_of(request), request.method, request.url.path)
             body = {**public_error("rate_limited"), "message": public_error("rate_limited")["user_message"]}
             return JSONResponse(status_code=429, content={"detail": body}, headers={"Retry-After": str(int(retry_after + 0.999))})
     return await call_next(request)

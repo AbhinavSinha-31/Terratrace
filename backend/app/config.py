@@ -56,11 +56,18 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+_CACHE_DIR = Path(os.environ.get("TT_CACHE_DIR") or BACKEND_DIR / ".cache")
+
+
 @dataclass(frozen=True)
 class Settings:
     version: str = __version__
     frontend_dist: Path = REPO_DIR / "frontend" / "dist"
-    cache_dir: Path = Path(os.environ.get("TT_CACHE_DIR", BACKEND_DIR / ".cache"))
+    # Durable state (registered areas, stored results, quick scans): a PERSISTENT volume in production.
+    cache_dir: Path = _CACHE_DIR
+    # Fetched map tiles: disposable (rebuilt from Earth Engine on demand). Defaults to cache_dir/tiles; can point at a
+    # faster or ephemeral disk where the durable volume is slow for many small files (e.g. Cloud Storage FUSE).
+    tile_cache_dir: Path = Path(os.environ.get("TT_TILE_CACHE_DIR") or _CACHE_DIR / "tiles")
 
     # AOI limits for interactive analysis (prototype scale, not planetary scale).
     max_aoi_km2: float = _float("TT_MAX_AOI_KM2", 2500.0)
@@ -124,6 +131,10 @@ class Settings:
     rate_explain_per_min: int = _bounded_int("TT_RATE_EXPLAIN_PER_MIN", 20, 0, 10_000)
     # Quick scans (POST /api/quickscan/{aid}): each one is an Earth Engine request over a year of Landsat and Dynamic World.
     rate_quickscan_per_min: int = _bounded_int("TT_RATE_QUICKSCAN_PER_MIN", 6, 0, 10_000)
+    # Map tiles that need Earth Engine (cache misses) per client; cached tiles are never limited. The whole backend fetches
+    # at most TT_EE_TILE_CONCURRENCY tiles at once (~1 s each), i.e. roughly 180 per minute: 120 keeps one client from
+    # taking every slot while a normal map view (20-60 new tiles) is never refused.
+    rate_tiles_per_min: int = _bounded_int("TT_RATE_TILES_PER_MIN", 120, 0, 100_000)
     # Earth Engine request deadline for ONE quick scan while the project is in restricted mode (slower, not blocked).
     quickscan_restricted_deadline_s: float = _float("TT_QUICKSCAN_RESTRICTED_DEADLINE_S", 900.0)
 
@@ -131,6 +142,11 @@ class Settings:
     # Swiss users (docs/PRE_DEPLOYMENT.md). The key is read from GEMINI_API_KEY at call time and never stored here.
     chat_enabled: bool = os.environ.get("TT_CHAT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
     chat_provider: str = os.environ.get("TT_LLM_PROVIDER", "gemini").strip().lower()
+    # Which Gemini API tier GEMINI_API_KEY belongs to (it cannot be read from the key): "free" (default) or "paid" (a key
+    # from a project with billing enabled). Decides the notice next to the chat: on the free tier Google may use inputs
+    # to improve its products and human reviewers may read them. Switching to paid = new key + TT_LLM_TIER=paid + the
+    # project's paid limits in TT_RATE_CHAT_PER_MIN / TT_CHAT_*; no code change.
+    chat_tier: str = "paid" if os.environ.get("TT_LLM_TIER", "free").strip().lower() == "paid" else "free"
     chat_model: str = os.environ.get("TT_LLM_MODEL", "gemini-3.8-flash").strip()
     # Tried ONCE when the primary model answers 503 ("high demand"; seen for every full Flash model on 2026-10-15 while
     # gemini-3.5-flash-lite answered). Empty = no fallback. Never used after a 429 (quota) or any other error.

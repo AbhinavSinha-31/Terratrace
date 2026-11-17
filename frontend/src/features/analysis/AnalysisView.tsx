@@ -207,7 +207,7 @@ export function AnalysisView() {
           <motion.aside key="drawer" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
             className="tt-panel pointer-events-auto absolute right-3 top-[76px] overflow-hidden" style={{ width: drawerW, bottom: CHROME.dock + 24 }} aria-label="Intelligence drawer">
             <DrawerBody />
-            <button aria-label="Collapse drawer" onClick={() => ui().setDrawerOpen(false)} className="tt-press absolute -left-px top-1/2 grid h-14 w-4 -translate-y-1/2 place-items-center rounded-r-sm bg-hover text-ink-3 hover:text-ink">
+            <button aria-label="Collapse drawer" onClick={() => ui().setDrawerOpen(false)} className="tt-press absolute -left-px top-1/2 grid h-14 w-6 -translate-y-1/2 place-items-center rounded-r-sm bg-hover text-ink-3 hover:text-ink">
               <ChevronRight size={12} />
             </button>
           </motion.aside>
@@ -242,7 +242,9 @@ function MobileAnalysis() {
       <TimeMachineHud />
       <motion.section
         className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col overflow-hidden rounded-t-xl bg-[#090c0f]/97 shadow-[0_-20px_40px_-10px_rgba(0,0,0,.8),0_0_0_1px_rgba(255,255,255,.07)]"
-        animate={{ height: `${h * 100}vh` }} transition={{ type: 'spring', stiffness: 280, damping: 34 }}
+        // initial={false}: the sheet opens at its height instead of growing from its content height (a layout shift of
+        // 1.0 on phones, Lighthouse 2026-10-25); changes after a drag or tap still animate.
+        initial={false} animate={{ height: `${h * 100}vh` }} transition={{ type: 'spring', stiffness: 280, damping: 34 }}
         drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={0.15}
         onDragEnd={(_, info) => {
           const order: (keyof typeof heights)[] = ['peek', 'half', 'full'];
@@ -252,9 +254,12 @@ function MobileAnalysis() {
         }}
         aria-label="Analysis sheet"
       >
-        <button className="mx-auto my-2 h-1.5 w-12 shrink-0 rounded-full bg-white/20" aria-label="Resize panel" onClick={() => setSheet(sheet === 'full' ? 'peek' : sheet === 'peek' ? 'half' : 'full')} />
-        <div className="h-[132px] shrink-0 overflow-x-auto no-scrollbar"><div className="h-full min-w-[640px]"><TimeMachine compact /></div></div>
-        <div className="h-[62px] shrink-0 overflow-x-auto border-y border-line no-scrollbar"><div className="h-full min-w-[520px]"><MetricsStrip /></div></div>
+        {/* 48 x 24 px tap target around the 6 px handle */}
+        <button className="mx-auto grid h-6 w-12 shrink-0 place-items-center" aria-label="Resize panel" onClick={() => setSheet(sheet === 'full' ? 'peek' : sheet === 'peek' ? 'half' : 'full')}>
+          <span className="h-1.5 w-12 rounded-full bg-white/20" aria-hidden="true" />
+        </button>
+        <div className="h-[132px] shrink-0 overflow-x-auto no-scrollbar" tabIndex={0} role="region" aria-label="Timeline (scrolls sideways)"><div className="h-full min-w-[640px]"><TimeMachine compact /></div></div>
+        <div className="h-[62px] shrink-0 overflow-x-auto border-y border-line no-scrollbar" tabIndex={0} role="region" aria-label="Key figures (scroll sideways)"><div className="h-full min-w-[520px]"><MetricsStrip /></div></div>
         <div className="min-h-0 flex-1"><DrawerBody /></div>
       </motion.section>
       <ReportModal />

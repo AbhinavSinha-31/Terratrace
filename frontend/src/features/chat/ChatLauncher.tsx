@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MessageCircle, Send, X } from 'lucide-react';
 import { GENERAL, useChat } from '../../state/chat';
-import { GENERAL_STARTERS, GREETING } from './AskPage';
-import { CHAT_NOTICE, useChatAvailability } from './ChatPanel';
+import { GENERAL_STARTERS, GREETING } from './starters';
+import { ChatNotice, useChatAvailability } from './ChatPanel';
 
 /**
  * Front-page chat: an in-flow button in the "Featured investigations" header row (so it can never cover a card, at
@@ -70,7 +70,7 @@ function ChatPopup() {
               className="h-9 min-w-0 flex-1 rounded-md bg-white/[0.04] px-3 text-[12.5px] text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.12)] outline-none placeholder:text-ink-4 disabled:opacity-50" />
             <button type="submit" aria-label="Send" disabled={ready === false || !draft.trim()} className="tt-press grid h-9 w-9 place-items-center rounded-md bg-accent text-[#03201d] disabled:opacity-40"><Send size={14} /></button>
           </form>
-          <p className="mt-2 text-[10px] leading-snug text-ink-4">{CHAT_NOTICE}</p>
+          <ChatNotice className="mt-2" />
         </motion.div>
       )}
     </AnimatePresence>

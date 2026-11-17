@@ -1,0 +1,49 @@
+# The backend image needs only backend/app, backend/scripts, backend/requirements.txt and two paths of analysis/.
+# Everything else stays out of the build context — above all, secrets.
+
+# --- secrets & credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.token
+access_token
+*service-account*.json
+*-ee-key*.json
+**/credentials.json
+**/*credentials*.json
+application_default_credentials.json
+kaggle.json
+**/kaggle.json
+.config/
+
+# --- not part of the backend image
+.git
+frontend/
+docs/
+ml/
+analysis/outputs/
+analysis/boundaries/
+analysis/tests/
+backend/tests/
+backend/tests_live/
+*.md
+
+# --- local environments, caches, builds
+.venv/
+**/.venv/
+venv/
+.cache/
+**/.cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/.pytest_cache/
+node_modules/
+*.log

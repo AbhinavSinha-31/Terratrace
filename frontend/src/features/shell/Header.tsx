@@ -264,7 +264,8 @@ export function Header() {
 
       <AnimatePresence>
         {menu && (
-          <motion.div className="fixed inset-0 z-[80] bg-black/60" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMenu(false)}>
+          <motion.div className="fixed inset-0 z-[80] bg-black/60" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMenu(false)}
+            role="dialog" aria-modal="true" aria-label="Menu" onKeyDown={(e) => { if (e.key === 'Escape') setMenu(false); }}>
             <motion.nav
               aria-label="Primary"
               initial={{ x: 40 }} animate={{ x: 0 }} exit={{ x: 40 }}
@@ -273,7 +274,7 @@ export function Header() {
             >
               <div className="flex items-center justify-between px-2 py-1">
                 <TerratraceLogo size="sm" />
-                <IconButton label="Close menu" size="sm" onClick={() => setMenu(false)}><X size={15} /></IconButton>
+                <IconButton label="Close menu" size="sm" autoFocus onClick={() => setMenu(false)}><X size={15} /></IconButton>
               </div>
               <div className="mt-4 space-y-1">
                 {NAV.map((n) => (

@@ -6,7 +6,7 @@ only per browser tab — so a project in Restricted Mode answered 429 and tiles 
 
 Here:
   - a tile is fetched from Earth Engine at most once per (layer, method version, z/x/y) and kept in
-    cache_dir/tiles (bounded by TT_TILE_CACHE_MB, oldest evicted first); a cached tile needs no Earth Engine call
+    TT_TILE_CACHE_DIR, default cache_dir/tiles (bounded by TT_TILE_CACHE_MB, oldest evicted first); a cached tile needs no Earth Engine call
     at all, not even a map ID;
   - identical concurrent requests share one fetch (single-flight);
   - at most TT_EE_TILE_CONCURRENCY Earth Engine tile fetches run at once for the whole backend (a dedicated pool,
@@ -38,7 +38,7 @@ log = logging.getLogger("terratrace.tiles")
 
 # Bump when a layer's visualisation changes (styling is not part of the scientific method version).
 TILE_STYLE_VERSION = "s1"
-TILES = settings.cache_dir / "tiles"
+TILES = settings.tile_cache_dir
 RETRY_STATUS = {429, 500, 502, 503, 504}
 BACKOFF_S = (1.0, 2.0, 4.0, 8.0)       # 4 retries after the first attempt
 MAX_RETRY_AFTER_S = 15.0
