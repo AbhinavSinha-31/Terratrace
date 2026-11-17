@@ -14,6 +14,10 @@ interface AuthState {
   /** An error that Google or an email link sent back to the app; shown once on the profile page. */
   callbackError: string | null;
   clearCallbackError(): void;
+  /** The sign-in dialog (opened from the avatar, or by an action that needs an account). */
+  signInOpen: boolean;
+  /** Why the dialog opened ("Sign in to save this scan."); shown above the form. */
+  signInReason: string | null;
 }
 
 export const useAuth = create<AuthState>((set) => ({
@@ -22,7 +26,22 @@ export const useAuth = create<AuthState>((set) => ({
   recovery: false,
   callbackError: null,
   clearCallbackError: () => set({ callbackError: null }),
+  signInOpen: false,
+  signInReason: null,
 }));
+
+export const openSignIn = (reason: string | null = null) => useAuth.setState({ signInOpen: true, signInReason: reason });
+export const closeSignIn = () => useAuth.setState({ signInOpen: false, signInReason: null });
+
+/** For actions that need an account: true when signed in; otherwise opens the sign-in dialog and returns false. */
+export function requireSignIn(reason: string): boolean {
+  if (useAuth.getState().status === 'signed-in') return true;
+  openSignIn(reason);
+  return false;
+}
+
+/** The signed-in user's id, or null. */
+export const currentUserId = () => useAuth.getState().session?.user.id ?? null;
 
 function auth() {
   if (!supabase) throw new Error('Sign-in is not configured for this build.');
@@ -48,6 +67,12 @@ export async function signUpWithEmail(email: string, password: string, fullName:
   });
   if (error) throw error;
   return !data.session;
+}
+
+/** Passwordless: emails a one-time sign-in link (creates the account on first use). */
+export async function signInWithMagicLink(email: string): Promise<void> {
+  const { error } = await auth().signInWithOtp({ email, options: { emailRedirectTo: authRedirectUrl(), shouldCreateUser: true } });
+  if (error) throw error;
 }
 
 export async function sendPasswordReset(email: string): Promise<void> {
@@ -90,7 +115,7 @@ export function useAuthSync() {
     }
     // No awaited Supabase calls inside this callback (supabase-js holds a lock while it runs).
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      useAuth.setState({ session, status: session ? 'signed-in' : 'signed-out' });
+      useAuth.setState({ session, status: session ? 'signed-in' : 'signed-out', ...(session ? { signInOpen: false, signInReason: null } : {}) });
       if (event === 'PASSWORD_RECOVERY') {
         useAuth.setState({ recovery: true });
         useUi.getState().openProfile();

@@ -6,7 +6,7 @@ import { AnalysisProgressOverlay } from '../features/analysis/AnalyzingOverlay';
 import { BootSplash } from '../features/shell/BootSplash';
 import { useUi } from '../state/store';
 import { useChat } from '../state/chat';
-import { useAuthSync } from '../state/auth';
+import { useAuth, useAuthSync } from '../state/auth';
 import { MapErrorBoundary } from './ErrorBoundary';
 import { useUrlSync } from '../lib/urlState';
 import { useAnalysisRunner } from '../data/analysisRunner';
@@ -22,6 +22,8 @@ const AnalysisView = lazy(() => import('../features/analysis/AnalysisView').then
 const AskPage = lazy(() => import('../features/chat/AskPage').then((m) => ({ default: m.AskPage })));
 const CaseStudyPage = lazy(() => import('../features/casestudy/CaseStudyPage').then((m) => ({ default: m.CaseStudyPage })));
 const ProfilePage = lazy(() => import('../features/account/ProfilePage').then((m) => ({ default: m.ProfilePage })));
+const MyScansPage = lazy(() => import('../features/account/MyScansPage').then((m) => ({ default: m.MyScansPage })));
+const SignInDialog = lazy(() => import('../features/account/SignInDialog').then((m) => ({ default: m.SignInDialog })));
 const AboutModal = lazy(() => import('../features/shell/AboutModal').then((m) => ({ default: m.AboutModal })));
 
 /** True from the first time `flag` is true: a page stays mounted after its first opening (its own exit animation runs). */
@@ -74,6 +76,8 @@ export function App() {
   const caseStudyMounted = useOpenedOnce(useUi((s) => !!s.caseStudy));
   const aboutMounted = useOpenedOnce(useUi((s) => s.aboutOpen));
   const profileMounted = useOpenedOnce(useUi((s) => s.profileOpen));
+  const scansMounted = useOpenedOnce(useUi((s) => s.page?.kind === 'scans'));
+  const signInMounted = useOpenedOnce(useAuth((s) => s.signInOpen));
   useAuthSync();         // Supabase session → useAuth (no-op when the build has no Supabase settings)
   const view = useUi((s) => s.view);
   const hasStudy = useUi((s) => !!s.investigation.study);
@@ -100,9 +104,11 @@ export function App() {
           {askMounted && <AskPage />}
           {caseStudyMounted && <CaseStudyPage />}
           {profileMounted && <ProfilePage />}
+          {scansMounted && <MyScansPage />}
         </Suspense>
       </main>
       {aboutMounted && <Suspense fallback={null}><AboutModal /></Suspense>}
+      {signInMounted && <Suspense fallback={null}><SignInDialog /></Suspense>}
       <BootSplash />
     </div>
   );

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, KeyRound, LogOut, Mail, TriangleAlert, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, KeyRound, LogOut, Mail, TriangleAlert, CheckCircle2, Sparkles } from 'lucide-react';
 import { Button, Skeleton, StateView } from '../../design';
 import { useUi } from '../../state/store';
-import { sendPasswordReset, setNewPassword, signInWithEmail, signInWithGoogle, signOut, signUpWithEmail, useAuth } from '../../state/auth';
+import { sendPasswordReset, setNewPassword, signInWithEmail, signInWithGoogle, signInWithMagicLink, signOut, signUpWithEmail, useAuth } from '../../state/auth';
+import { GOOGLE_ENABLED } from '../../lib/supabase';
 import { identity, useProfile, useUpdateProfile } from './profile';
 
 const message = (e: unknown) => (e instanceof Error && e.message ? e.message : 'Something went wrong. Try again.');
@@ -24,7 +25,7 @@ export function UserAvatar({ name, src, size = 36 }: { name: string; src: string
   );
 }
 
-function Notice({ tone, children }: { tone: 'error' | 'info'; children: ReactNode }) {
+export function Notice({ tone, children }: { tone: 'error' | 'info'; children: ReactNode }) {
   return (
     <div role={tone === 'error' ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-md px-3 py-2.5 text-[12px] leading-relaxed ${tone === 'error' ? 'bg-bad/10 text-[#ff8a80] shadow-[0_0_0_1px_rgba(229,88,79,0.4)]' : 'bg-accent/10 text-ink-2 shadow-[0_0_0_1px_rgba(69,208,196,0.35)]'}`}>
       <span className="mt-px shrink-0">{tone === 'error' ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} className="text-accent" />}</span>
@@ -33,7 +34,7 @@ function Notice({ tone, children }: { tone: 'error' | 'info'; children: ReactNod
   );
 }
 
-function Field({ label, ...input }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+export function Field({ label, ...input }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11.5px] font-medium text-ink-3">{label}</span>
@@ -53,9 +54,10 @@ function GoogleMark() {
   );
 }
 
-type Mode = 'sign-in' | 'sign-up' | 'reset';
+type Mode = 'sign-in' | 'sign-up' | 'magic' | 'reset';
 
-function SignInPanel() {
+/** Sign in / sign up / magic link / password reset. Used by the sign-in dialog and by #/profile when signed out. */
+export function SignInPanel({ titleId = 'profile-title', reason }: { titleId?: string; reason?: string | null }) {
   const [mode, setMode] = useState<Mode>('sign-in');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -87,20 +89,24 @@ function SignInPanel() {
       void run(async () => ((await signUpWithEmail(addr, password, name.trim()))
         ? `We sent a confirmation link to ${addr}. Open it in this browser to finish creating your account.`
         : null));
+    } else if (mode === 'magic') {
+      void run(async () => { await signInWithMagicLink(addr); return `We emailed a sign-in link to ${addr}. Open it in this browser to finish signing in.`; });
     } else void run(async () => { await sendPasswordReset(addr); return `If ${addr} has an account, a reset link is on its way. Open it in this browser.`; });
   };
 
-  const title = mode === 'sign-in' ? 'Sign in to TERRATRACE' : mode === 'sign-up' ? 'Create your account' : 'Reset your password';
+  const title = mode === 'sign-in' ? 'Sign in to TERRATRACE' : mode === 'sign-up' ? 'Create your account' : mode === 'magic' ? 'Sign in with an email link' : 'Reset your password';
+  const intro = mode === 'reset' ? 'Enter your email and we will send you a link to choose a new password.'
+    : mode === 'magic' ? 'No password needed: we email you a one-time link. New addresses get an account automatically.'
+    : 'An account lets you save scans and join the community. Exploring and analysing areas works without one.';
   return (
     <div className="space-y-5">
       <div>
-        <h1 id="profile-title" className="t-h1 text-ink">{title}</h1>
-        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-3">
-          {mode === 'reset' ? 'Enter your email and we will send you a link to choose a new password.' : 'An account keeps your profile. Exploring and analysing areas works without one.'}
-        </p>
+        <h1 id={titleId} className="t-h1 text-ink">{title}</h1>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-3">{intro}</p>
       </div>
+      {reason && <Notice tone="info">{reason}</Notice>}
       {callbackError && <Notice tone="error">{callbackError}</Notice>}
-      {mode !== 'reset' && (
+      {GOOGLE_ENABLED && (mode === 'sign-in' || mode === 'sign-up') && (
         <>
           <Button block size="lg" variant="primary" icon={<GoogleMark />} disabled={busy} onClick={() => void run(signInWithGoogle)} data-testid="google-sign-in">
             Continue with Google
@@ -111,20 +117,21 @@ function SignInPanel() {
       <form onSubmit={submit} className="space-y-3" data-testid={`${mode}-form`}>
         {mode === 'sign-up' && <Field label="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="name" disabled={busy} />}
         <Field label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" disabled={busy} />
-        {mode !== 'reset' && (
+        {(mode === 'sign-in' || mode === 'sign-up') && (
           <Field label="Password" type="password" required minLength={mode === 'sign-up' ? 8 : undefined} value={password} onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'} disabled={busy} placeholder={mode === 'sign-up' ? 'At least 8 characters' : undefined} />
         )}
         {error && <Notice tone="error">{error}</Notice>}
         {info && <Notice tone="info">{info}</Notice>}
-        <Button type="submit" block size="lg" variant="brand" icon={mode === 'reset' ? <Mail size={15} /> : undefined} disabled={busy}>
-          {busy ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : mode === 'sign-up' ? 'Create account' : 'Send reset link'}
+        <Button type="submit" block size="lg" variant="brand" icon={mode === 'reset' || mode === 'magic' ? <Mail size={15} /> : undefined} disabled={busy}>
+          {busy ? 'Please wait…' : mode === 'sign-in' ? 'Sign in' : mode === 'sign-up' ? 'Create account' : mode === 'magic' ? 'Email me a sign-in link' : 'Send reset link'}
         </Button>
       </form>
       <div className="flex flex-wrap justify-between gap-2 text-[12px]">
         {mode === 'sign-in' ? (
           <>
             <button className="text-accent hover:underline" onClick={() => switchTo('sign-up')}>Create an account</button>
+            <button className="flex items-center gap-1 text-ink-2 hover:text-ink" onClick={() => switchTo('magic')} data-testid="magic-link-mode"><Sparkles size={12} /> Email me a link instead</button>
             <button className="text-ink-3 hover:text-ink" onClick={() => switchTo('reset')}>Forgot password?</button>
           </>
         ) : (

@@ -18,6 +18,8 @@ import { ReportModal } from './ReportModal';
 import { AreaContextPanel } from './AreaContext';
 import { AreaChat } from '../chat/AreaChat';
 import { QuickScanPanel } from '../quickscan/QuickScanPanel';
+import { SaveScanButton } from '../account/SaveScanButton';
+import type { AnalysisResult } from '../../data/contracts';
 
 function DrawerBody() {
   const tab = useUi((s) => s.tab);
@@ -62,8 +64,13 @@ function DrawerBody() {
     <div className="flex h-full min-h-0 flex-col">
       {!selected && (
         <div className="shrink-0 border-b border-line px-5 pb-0 pt-4">
-          <div className="t-label text-ink-3">Intelligence</div>
-          <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? '—'}</div>
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="t-label text-ink-3">Intelligence</div>
+              <div className="mt-1 truncate text-[15px] font-semibold text-ink">{aoi?.name ?? '—'}</div>
+            </div>
+            {q.data && <div className="flex shrink-0 gap-1.5"><ScanActions result={q.data} /></div>}
+          </div>
           <div className="no-scrollbar -mx-1 mt-3 flex gap-1 overflow-x-auto px-1" role="tablist">
             {([['overview', 'Overview', LayoutDashboard], ['events', 'Events', ListTree], ['land', 'Land, heat & carbon', Leaf], ['ask', 'Ask', MessagesSquare]] as const).map(([k, label, Icon]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
@@ -139,6 +146,11 @@ function ReadyToAnalyze({ name }: { name?: string }) {
       </div>
     </div>
   );
+}
+
+/** Account actions on a READY analysis (save; discuss is added by the community). */
+function ScanActions({ result }: { result: AnalysisResult }) {
+  return <SaveScanButton result={result} />;
 }
 
 export function AnalysisView() {

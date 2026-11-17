@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useUi, type InvestigationState, type View } from '../state/store';
+import { useUi, type InvestigationState, type OverlayPage, type View } from '../state/store';
 
 /**
  * URL ⇄ UI state, so refreshes and shared links restore the same analysis.
@@ -10,6 +10,8 @@ import { useUi, type InvestigationState, type View } from '../state/store';
  *   #/timemachine/<aoiId>?from=1984&to=2025&year=1990
  *   #/case-study/<id>                    a static case study, full page over the overview
  *   #/profile                            the account page (sign in / your profile), full page over the overview
+ *   #/scans                              My scans (signed-in users' saved analyses)
+ *   #/community[?tag=x]                  community feed; #/community/new = new post; #/community/<postId> = a post
  *
  * `aoiId` is either a featured investigation id or a backend analysis id for a
  * custom AOI (the backend persists registered AOIs, so they survive a refresh).
@@ -24,6 +26,7 @@ export interface UrlState {
   year?: number;
   caseStudy?: string | null;
   profile?: boolean;
+  page?: OverlayPage | null;
 }
 
 const int = (v: string | null) => (v && /^\d{4}$/.test(v) ? Number(v) : undefined);
@@ -36,12 +39,34 @@ const safeDecode = (s: string) => {
   }
 };
 
+const POST_ID = /^[0-9a-f-]{36}$/;
+
+function parsePage(parts: string[], q: URLSearchParams): OverlayPage | null {
+  if (parts[0] === 'scans') return { kind: 'scans' };
+  if (parts[0] !== 'community') return null;
+  if (parts[1] === 'new') return { kind: 'new-post' };
+  if (parts[1] && POST_ID.test(parts[1])) return { kind: 'post', id: parts[1] };
+  const tag = q.get('tag');
+  return tag && /^[a-z0-9-]{1,32}$/.test(tag) ? { kind: 'community', tag } : { kind: 'community' };
+}
+
+export function pageHash(p: OverlayPage): string {
+  if (p.kind === 'scans') return '#/scans';
+  if (p.kind === 'new-post') return '#/community/new';
+  if (p.kind === 'post') return `#/community/${p.id}`;
+  return p.tag ? `#/community?tag=${encodeURIComponent(p.tag)}` : '#/community';
+}
+
+const samePage = (a: OverlayPage | null | undefined, b: OverlayPage | null | undefined) => (a ? pageHash(a) : '') === (b ? pageHash(b) : '');
+
 /** Parse a location hash. Never throws: anything unrecognised falls back to Explore. */
 export function parseHash(hash: string): UrlState {
   const [path, query = ''] = hash.replace(/^#/, '').split('?');
   const parts = path.split('/').filter(Boolean).map(safeDecode);
   const q = new URLSearchParams(query);
   if (parts[0] === 'profile') return { view: 'explore', phase: 'intro', aoiId: null, profile: true };
+  const page = parsePage(parts, q);
+  if (page) return { view: 'explore', phase: 'intro', aoiId: null, page };
   if (parts[0] === 'case-study' && parts[1]) return { view: 'explore', phase: 'intro', aoiId: null, caseStudy: parts[1] };
   if ((parts[0] === 'analysis' || parts[0] === 'timemachine') && parts[1]) {
     return { view: parts[0], phase: 'explore', aoiId: parts[1], from: int(q.get('from')), to: int(q.get('to')), year: int(q.get('year')) };
@@ -51,8 +76,9 @@ export function parseHash(hash: string): UrlState {
 }
 
 /** The URL is a MIRROR of InvestigationState (study, baseline, comparison, imagery year) — never a source. */
-export function toHash(s: { view: View; phase: 'intro' | 'explore'; investigation: InvestigationState; caseStudy?: string | null; profileOpen?: boolean }): string {
+export function toHash(s: { view: View; phase: 'intro' | 'explore'; investigation: InvestigationState; caseStudy?: string | null; profileOpen?: boolean; page?: OverlayPage | null }): string {
   if (s.profileOpen) return '#/profile';
+  if (s.page) return pageHash(s.page);
   if (s.caseStudy) return `#/case-study/${encodeURIComponent(s.caseStudy)}`;
   const inv = s.investigation;
   if (s.view === 'explore' || !inv.study) {
@@ -88,6 +114,10 @@ function apply(u: UrlState) {
     if (u.profile) ui.openProfile();
     else ui.closeProfile();
   }
+  if (!samePage(ui.page, u.page)) {
+    if (u.page) ui.openPage(u.page);
+    else ui.closePage();
+  }
 }
 
 /** Restore state from the URL on load, keep the URL in sync, and honour Back/Forward. */
@@ -105,7 +135,7 @@ export function useUrlSync() {
       if (next === last || (next === '#/' && last === '')) return;
       // A new place (view / AOI / explore phase) is a history entry; scrubbing years is not.
       const navigation = s.view !== prev.view || s.investigation.study?.id !== prev.investigation.study?.id || s.phase !== prev.phase
-        || s.caseStudy !== prev.caseStudy || s.profileOpen !== prev.profileOpen;
+        || s.caseStudy !== prev.caseStudy || s.profileOpen !== prev.profileOpen || !samePage(s.page, prev.page);
       const url = `${window.location.pathname}${window.location.search.replace(/[?&]mode=(live|demo)/, '')}${next}`;
       if (navigation) window.history.pushState(null, '', url);
       else window.history.replaceState(null, '', url);

@@ -7,10 +7,11 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from .. import ratelimit
+from ..auth import AuthUser, require_user
 from ..config import settings
 from ..errors import public_error
 from ..providers import registry
@@ -146,6 +147,12 @@ def health() -> Health:
         limits={"max_aoi_km2": settings.max_aoi_km2, "min_aoi_km2": settings.min_aoi_km2, "interactive_max_km2": settings.interactive_max_km2},
         chat={**dict(zip(("status", "detail"), chat.status())), "tier": settings.chat_tier},
     )
+
+
+@router.get("/me")
+def me(user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+    """The signed-in user (verified Supabase access token). 401 without one; 503 when accounts are not set up."""
+    return {"id": user.id, "email": user.email}
 
 
 @router.get("/study-areas")

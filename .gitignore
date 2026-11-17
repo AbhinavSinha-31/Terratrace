@@ -69,3 +69,6 @@ analysis/**/*.npy
 /TERRATRACE_PROJECT_AUDIT.md
 /TERRATRACE_STATUS.md
 /TERRATRACE_ARCHITECTURE.md
+
+# local e2e builds
+.e2e-dist/

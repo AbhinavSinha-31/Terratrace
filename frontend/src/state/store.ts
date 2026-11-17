@@ -92,6 +92,12 @@ export interface AnalysisRequestMeta {
   comparisonYear: number;
 }
 
+export type OverlayPage =
+  | { kind: 'scans' }
+  | { kind: 'community'; tag?: string }
+  | { kind: 'post'; id: string }
+  | { kind: 'new-post' };
+
 interface UiState {
   view: View;
   phase: ExplorePhase;
@@ -103,6 +109,10 @@ interface UiState {
   profileOpen: boolean;
   openProfile(): void;
   closeProfile(): void;
+  /** A full page over the map: My scans (#/scans) or the community (#/community, #/community/<post>, #/community/new). */
+  page: OverlayPage | null;
+  openPage(page: OverlayPage): void;
+  closePage(): void;
   /** The active investigation — the only source of study / AOI / years / analysis state. */
   investigation: InvestigationState;
   /** Selectable timeline years (UI option list; per-year availability comes from the backend later). */
@@ -230,11 +240,14 @@ export const useUi = create<UiState>((set, get) => ({
   view: 'explore',
   phase: 'intro',
   caseStudy: null,
-  openCaseStudy: (id) => set({ caseStudy: id }),
+  openCaseStudy: (id) => set({ caseStudy: id, page: null }),
   closeCaseStudy: () => set({ caseStudy: null }),
   profileOpen: false,
-  openProfile: () => set({ profileOpen: true, caseStudy: null }),
+  openProfile: () => set({ profileOpen: true, caseStudy: null, page: null }),
   closeProfile: () => set({ profileOpen: false }),
+  page: null,
+  openPage: (page) => set({ page, profileOpen: false, caseStudy: null }),
+  closePage: () => set({ page: null }),
   investigation: EMPTY_INVESTIGATION,
   years: DEFAULT_YEARS,
   playing: false,

@@ -138,6 +138,12 @@ class Settings:
     # Earth Engine request deadline for ONE quick scan while the project is in restricted mode (slower, not blocked).
     quickscan_restricted_deadline_s: float = _float("TT_QUICKSCAN_RESTRICTED_DEADLINE_S", 900.0)
 
+    # Supabase accounts (app/auth.py). The backend only VERIFIES access tokens; it never holds the service_role key.
+    # New projects sign tokens with asymmetric keys (published at SUPABASE_URL/auth/v1/.well-known/jwks.json); older ones
+    # with the legacy HS256 "JWT secret". Either is enough. Neither set: endpoints that need a signed-in user answer 503.
+    supabase_url: str | None = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/") or None
+    supabase_jwt_secret: str | None = os.environ.get("SUPABASE_JWT_SECRET") or None
+
     # AI chat (POST /api/chat). Off by default: Gemini API users must be 18+ and the free tier may not serve EEA / UK /
     # Swiss users (docs/PRE_DEPLOYMENT.md). The key is read from GEMINI_API_KEY at call time and never stored here.
     chat_enabled: bool = os.environ.get("TT_CHAT_ENABLED", "false").strip().lower() in ("1", "true", "yes")

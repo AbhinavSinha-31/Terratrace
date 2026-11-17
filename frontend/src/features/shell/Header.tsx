@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, ChevronDown, RotateCcw, Info, LogIn, LogOut, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
+import { Bell, Bookmark, ChevronDown, RotateCcw, Info, LogIn, LogOut, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
@@ -9,7 +9,7 @@ import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
 import { useChat } from '../../state/chat';
-import { signOut, useAuth } from '../../state/auth';
+import { openSignIn, signOut, useAuth } from '../../state/auth';
 import { identity, useProfile } from '../account/profile';
 import { UserAvatar } from '../account/ProfilePage';
 
@@ -234,11 +234,12 @@ function Avatar() {
           <div className="my-1 h-px bg-line" />
           {who ? (
             <>
-              <button className={menuItem} onClick={() => { close(); openProfile(); }}><UserRound size={15} /> Your profile</button>
+              <button className={menuItem} onClick={() => { close(); openProfile(); }} data-testid="menu-profile"><UserRound size={15} /> Profile</button>
+              <button className={menuItem} onClick={() => { close(); useChat.getState().closeAsk(); useUi.getState().openPage({ kind: 'scans' }); }} data-testid="menu-scans"><Bookmark size={15} /> My scans</button>
               <button className={menuItem} onClick={() => { close(); void signOut().catch(() => openProfile()); }} data-testid="menu-sign-out"><LogOut size={15} /> Sign out</button>
             </>
           ) : status === 'signed-out' && (
-            <button className={menuItem} onClick={() => { close(); openProfile(); }} data-testid="menu-sign-in"><LogIn size={15} /> Sign in</button>
+            <button className={menuItem} onClick={() => { close(); openSignIn(); }} data-testid="menu-sign-in"><LogIn size={15} /> Sign in</button>
           )}
           <button className={menuItem} onClick={() => { close(); useUi.getState().setAboutOpen(true); }}>
             <Info size={15} /> About TERRATRACE

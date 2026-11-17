@@ -91,7 +91,7 @@ class BodySizeLimit:
 
 
 app = FastAPI(title="TERRATRACE API", version=settings.version, description="Explainable satellite forest-change intelligence", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
 app.add_middleware(BodySizeLimit, max_bytes=settings.max_request_bytes)
 app.include_router(router)
 

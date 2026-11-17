@@ -44,6 +44,10 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     "outside_sentinel2_coverage": ("No Sentinel-2 imagery at this latitude: Sentinel-2 systematically images land between 56° S "
                                    "and 82.8° N, so there is nothing to analyse here.", False),
     "open_water": ("Sentinel-2 does not image the open ocean, so there is no imagery to analyse here.", False),
+    # Accounts (app/auth.py).
+    "auth_required": ("Sign in to do this.", False),
+    "auth_expired": ("Your session has expired. Sign in again.", False),
+    "auth_unconfigured": ("Accounts are not set up on this server.", False),
     # AI chat (POST /api/chat). Never contains chat text, model output or provider error text.
     "chat_disabled": ("The AI chat is switched off on this server.", False),
     "chat_unavailable": ("The AI chat is not available right now. Try again later.", True),

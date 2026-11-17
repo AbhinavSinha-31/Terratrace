@@ -95,6 +95,33 @@ check('an empty display name is rejected', !!r.error, JSON.stringify(r));
 r = await as('authenticated', google.id, `select public.handle_new_user()`);
 check('the sign-up trigger function is not callable by users', !!r.error, JSON.stringify(r));
 
+// ---- saved_scans ("My scans")
+const scan = `insert into public.saved_scans (aoi_id, name, baseline, comparison, summary, bbox)
+  values ($1, 'Rondônia 2019–2025', 2019, 2025, '{"status":"READY","net_change_ha":-1234.5}', '{-63.1,-10.2,-62.6,-9.8}') returning id, user_id`;
+r = await as('authenticated', google.id, scan, ['rondonia-frontier']);
+check('a user can save a scan (owner set from the token)', r.rows?.[0]?.user_id === google.id, JSON.stringify(r));
+const scanId = r.rows?.[0]?.id;
+r = await as('authenticated', google.id, scan, ['rondonia-frontier']);
+check('the same area + window is saved once per user', !!r.error, JSON.stringify(r));
+r = await as('authenticated', early.id, `insert into public.saved_scans (user_id, aoi_id, name, baseline, comparison) values ($1, 'similipal', 'x', 2018, 2025)`, [google.id]);
+check("a user cannot save a scan as someone else", !!r.error, JSON.stringify(r));
+r = await as('authenticated', early.id, 'select id from public.saved_scans');
+check("a user cannot see someone else's scans", r.rows?.length === 0, JSON.stringify(r));
+r = await as('anon', null, 'select id from public.saved_scans');
+check('anon cannot read saved scans', !!r.error || r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', early.id, 'delete from public.saved_scans where id = $1 returning id', [scanId]);
+check("a user cannot delete someone else's scan", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.saved_scans set aoi_id = 'similipal' where id = $1`, [scanId]);
+check('a saved scan cannot be moved to another area', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.saved_scans (aoi_id, name, baseline, comparison) values ('../etc', 'x', 2018, 2025)`);
+check('an invalid area id is rejected', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into public.saved_scans (aoi_id, name, baseline, comparison) values ('similipal', 'x', 2025, 2018)`);
+check('a reversed window is rejected', !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.saved_scans set name = 'Renamed' where id = $1 returning name`, [scanId]);
+check('the owner can rename a scan', r.rows?.[0]?.name === 'Renamed', JSON.stringify(r));
+r = await as('authenticated', google.id, 'delete from public.saved_scans where id = $1 returning id', [scanId]);
+check('the owner can delete a scan', r.rows?.length === 1, JSON.stringify(r));
+
 await db.exec(`delete from auth.users where id = '${plain.id}'`);
 check('deleting the auth user deletes the profile', (await rows('select 1 from public.profiles where id = $1', [plain.id])).length === 0);
 
