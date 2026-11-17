@@ -320,7 +320,7 @@ export const client = {
 
   /** AI chat: answered, declined or withheld by the backend's deterministic checks (the key never leaves the server). */
   async chat(body: ChatBody): Promise<ChatReply> {
-    return request<ChatReply>(`${API}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 75000 });   // backend chat timeout is 60 s
+    return request<ChatReply>(`${API}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 75000 });   // backend chat timeout is 60 s
   },
 
   /**
@@ -332,7 +332,7 @@ export const client = {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90000);   // up to two model calls (fallback) of 60 s are capped server-side
     try {
-      const res = await fetch(`${API}/chat/stream`, {
+      const res = await fetch(`${API}/ask/stream`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body), signal: ctrl.signal,
       });
       const type = res.headers.get('content-type') ?? '';

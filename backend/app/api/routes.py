@@ -384,6 +384,7 @@ def _chat_window(req: ChatRequest) -> tuple[int, int] | None:
     return featured.default_window(req.aoi_id) if req.aoi_id in featured.featured_ids() else (DEFAULT_B, DEFAULT_C)
 
 
+@router.post("/ask", response_model=ChatResponse)
 @router.post("/chat", response_model=ChatResponse)
 async def chat_answer(req: ChatRequest, request: Request) -> ChatResponse:
     """AI chat (additive; /api/explain is unchanged). Answers are checked deterministically (services/chat/validator.py)
@@ -403,6 +404,7 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+@router.post("/ask/stream")
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
     """The same answer as POST /api/chat, as Server-Sent Events: "stage" events while the model works

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Database, Loader2, Send, ShieldAlert, Sparkles } from 'lucide-react';
+import { Markdown } from '../community/Markdown';
 import { useHealth } from '../../data/queries';
 import type { ChatCitation, ChatReply, ChatSegment, ChatStage, ChatTier } from '../../data/contracts';
 import { useChat, type AreaContextRef, type ChatMessage } from '../../state/chat';
@@ -83,14 +84,14 @@ function Segment({ s, lang }: { s: ChatSegment; lang?: ChatReply['language'] }) 
       {s.kind === 'reference' && <div className="t-label mb-1 !text-[8.5px] text-ink-3">Method / dataset reference</div>}
       {local ? (
         <>
-          <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink" lang={lang === 'hi' ? 'hi' : 'hi-Latn'} data-testid="chat-segment-local">{local}</p>
+          <div lang={lang === 'hi' ? 'hi' : 'hi-Latn'} data-testid="chat-segment-local"><Markdown className="!text-ink">{local}</Markdown></div>
           <details className="mt-1 text-[11px] text-ink-3" data-testid="chat-segment-english">
             <summary className="cursor-pointer select-none">English (checked) · AI translation above; its numbers match the checked English</summary>
-            <p className="mt-1 whitespace-pre-line leading-relaxed text-ink-2" lang="en">{s.text}</p>
+            <div className="mt-1" lang="en"><Markdown className="!text-[11px]">{s.text}</Markdown></div>
           </details>
         </>
       ) : (
-        <p className="whitespace-pre-line text-[13px] leading-relaxed text-ink">{s.text}</p>
+        <Markdown className="!text-ink">{s.text}</Markdown>
       )}
       {s.citations.length > 0 && <ul className="mt-1.5 space-y-1">{s.citations.map((c) => <Citation key={c.id} c={c} />)}</ul>}
     </div>

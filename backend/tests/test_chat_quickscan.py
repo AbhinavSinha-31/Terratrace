@@ -176,3 +176,40 @@ def test_quick_scan_figures_in_a_general_segment_are_still_withheld(facts):
     v = V.validate({"in_scope": True, "segments": [{"kind": "general", "text": "This area has 30.0 km² of trees.", "fact_ids": []}]},
                    facts[1], REF, AREA)
     assert not v.ok and v.reason == "forest_figure_in_general"
+
+
+# ----------------------------------------------------------------------------- Phase 4 metrics in the chat (grounding)
+def test_vegetated_uhi_and_merged_classes_are_citable_facts(facts):
+    _, index, _, by_label = facts
+    veg = fid(by_label, "Surface UHI against vegetated land")
+    assert check("Built-up land was about 3.7 °C warmer than vegetated land.", [veg], index) is None
+    assert check("Built-up land was about 5.2 °C warmer than vegetated land.", [veg], index), "an invented figure is withheld"
+
+
+def test_carbon_series_is_citable_only_when_stored(facts):
+    from app.services import carbon_series
+    carbon_series._memory.clear()
+    _, _, _, by_label = facts
+    assert not [label for label in by_label if label.startswith("Estimated above-ground tree carbon")]
+    raw = {"2015": {"area_ha": 1e4, "covered_ha": 9e3, "agb_x_ha": 9e3 * 100, "sd_x_ha": 9e3 * 20},
+           "2022": {"area_ha": 1e4, "covered_ha": 9e3, "agb_x_ha": 9e3 * 80, "sd_x_ha": 9e3 * 20}}
+    carbon_series._memory[AID] = {**carbon_series.parse(raw), "aoi_id": AID}
+    try:
+        labels, index, *_ = chat_facts.place_facts(AID, (2019, 2025))
+        by = {p["label"]: p["id"] for p in labels}
+        change = fid(by, "Change in estimated above-ground tree carbon")
+        assert check("Estimated above-ground tree carbon fell by about 84.6 kt C between 2015 and 2022.", [change], index) is None
+    finally:
+        carbon_series._memory.clear()
+
+
+def test_api_ask_is_the_chat_endpoint_with_the_same_limit():
+    from fastapi.testclient import TestClient
+    from app import ratelimit
+    from app.main import app
+    c = TestClient(app)
+    body = {"messages": [{"role": "user", "text": "What is NDVI?"}]}
+    a, b = c.post("/api/ask", json=body), c.post("/api/chat", json=body)
+    assert a.status_code == b.status_code == 200 and a.json()["reason_code"] == b.json()["reason_code"]
+    assert ratelimit.group_of("POST", "/api/ask") == ratelimit.group_of("POST", "/api/chat") == "chat"
+    assert ratelimit.group_of("POST", "/api/ask/stream") == "chat"

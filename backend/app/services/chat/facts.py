@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .. import analysis, context as area_context, quickscan, science as sc
+from .. import analysis, carbon_series, context as area_context, land_metrics, quickscan, science as sc
 from ..units import fmt_share
 from .validator import NUMBER, PROPORTION, QUANTIFIER, Fact, _num_value, _unit_of
 
@@ -229,6 +229,13 @@ def _quickscan_facts(b: _Builder, aoi: dict[str, Any]) -> None:
                 v = lc["low_confidence_share"] * 100
                 b.add(f"Dynamic World {y}: share of the area with low confidence (top probability below 0.5)", f"{v:.1f} %",
                       values=((v, "%"), (0.5, None)), years=(y,), dataset=ds, year=str(y), kind=QUICK)
+            for c in land_metrics.advisor_classes(lc) or []:
+                if len(c["dynamic_world"]) < 2 or not c["area_km2"]:
+                    continue   # single-class groups are the Dynamic World facts above; only merged classes are new numbers
+                a, sh = c["area_km2"], (c["share"] or 0) * 100
+                b.add(f"{y} land cover, study-design class '{c['name']}' (Dynamic World {' + '.join(c['dynamic_world'])})",
+                      f"{_km2(a)} ({sh:.1f} %)", values=((a, "km2"), (a * 100, "ha"), (sh, "%")), years=(y,), dataset=ds,
+                      year=str(y), kind=QUICK)
             wc = lc.get("worldcover_agreement")
             if wc:
                 v = wc["share"] * 100
@@ -261,6 +268,13 @@ def _quickscan_facts(b: _Builder, aoi: dict[str, Any]) -> None:
                       values=((u["built_mean_c"], "C"), (u["other_mean_c"], "C")), years=(y,), dataset=ds, year=when, kind=QUICK)
             elif u.get("reason"):
                 b.add(f"No surface heat-island figure for {when}: {u['reason']}", None, years=(y,), dataset=ds, year=when, kind=QUICK)
+            v = land_metrics.uhi_vegetated(lst, lc) or {}
+            if v.get("status") == "READY":
+                b.add(f"Surface UHI against vegetated land, {when}: built-up minus vegetated land, water and bare ground excluded "
+                      "(positive = built-up land is warmer)", f"{v['value_c']:+.1f} °C", values=((v["value_c"], "C"),), years=(y,),
+                      dataset=f"{ds}; Dynamic World V1", year=when, kind=QUICK, direction="warmth")
+                b.add(f"Mean surface temperature of built-up / vegetated land, {when}", f"{v['built_mean_c']:.1f} °C / {v['vegetated_mean_c']:.1f} °C",
+                      values=((v["built_mean_c"], "C"), (v["vegetated_mean_c"], "C")), years=(y,), dataset=ds, year=when, kind=QUICK)
         elif lst:
             b.add(f"Land surface temperature, {season} {y}: unavailable — {lst.get('reason') or 'not measured'}", None,
                   years=(y,), dataset="Landsat 8/9 Collection 2", year=str(y), kind=QUICK)
@@ -288,6 +302,31 @@ def _quickscan_facts(b: _Builder, aoi: dict[str, Any]) -> None:
                       dataset=src["dataset"], year=str(cy), kind=QUICK)
 
 
+def _carbon_series_facts(b: _Builder, aoi: dict[str, Any]) -> None:
+    """The area's stored carbon series (ESA CCI epochs), when one was measured. Estimates, tagged like quick-scan carbon."""
+    doc = carbon_series.stored(aoi["id"])
+    if not doc or doc.get("status") != "READY":
+        return
+    ds = doc["source"]["dataset"]
+
+    def scaled(v: float) -> tuple[tuple[float, str], ...]:
+        return ((v, "tC"), (v / 1e3, "ktC"), (v / 1e6, "MtC"))
+    for s in doc.get("series") or []:
+        if s.get("status") != "READY":
+            continue
+        lo, hi = s["range_t"]
+        b.add(f"Estimated above-ground tree carbon, ESA CCI {s['year']} × {doc['carbon_fraction']} (estimate, with range)",
+              f"{s['total_t']:,.0f} t C (range {lo:,.0f}–{hi:,.0f})", values=scaled(s["total_t"]) + scaled(lo) + scaled(hi),
+              years=(s["year"],), dataset=ds, year=str(s["year"]), kind=QUICK, tags=("biomass_carbon",))
+    ch = doc.get("change")
+    if ch:
+        note = "; the two years' ranges overlap, so this is within map uncertainty" if ch["ranges_overlap"] else ""
+        b.add(f"Change in estimated above-ground tree carbon, {ch['from_year']}→{ch['to_year']} (ESA CCI){note}",
+              f"{ch['change_t']:+,.0f} t C" + (f" ({ch['change_pct']:+.1f} %)" if ch.get("change_pct") is not None else ""),
+              values=scaled(ch["change_t"]) + scaled(abs(ch["change_t"])) + (((ch["change_pct"], "%"),) if ch.get("change_pct") is not None else ()),
+              years=(ch["from_year"], ch["to_year"]), dataset=ds, year=f"{ch['from_year']}–{ch['to_year']}", kind=QUICK, tags=("biomass_carbon",))
+
+
 def place_facts(aid: str, window: tuple[int, int]) -> tuple[list[dict[str, Any]], dict[str, Fact], dict[str, dict[str, Any]], set[str], str]:
     """(facts for the prompt, validator index, public citations, area names, area display name). Read-only.
     Raises analysis.AnalysisNotFound for an unknown id."""
@@ -298,6 +337,7 @@ def place_facts(aid: str, window: tuple[int, int]) -> tuple[list[dict[str, Any]]
     _result_facts(b, aoi, window)
     _context_facts(b, aoi)
     _quickscan_facts(b, aoi)
+    _carbon_series_facts(b, aoi)
     names = {n for n in (aoi.get("name"), aoi.get("short_name"), aoi.get("region"), aoi.get("country")) if n}
     return b.prompt, b.index, b.public, names, aoi.get("name") or "the selected area"
 
