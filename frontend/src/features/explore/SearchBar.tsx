@@ -170,7 +170,7 @@ export function SearchBar({ compact = false }: { compact?: boolean }) {
           else if (e.key === 'Enter') { e.preventDefault(); void submit(); }
           else if (e.key === 'Escape') { setOpen(false); input.current?.blur(); }
         }}
-        placeholder="Search a place, forest or coordinates"
+        placeholder="Search a place, city, forest or coordinates"
         aria-label="Search Earth"
         role="combobox"
         aria-expanded={showList}

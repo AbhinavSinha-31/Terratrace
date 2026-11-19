@@ -18,7 +18,7 @@ from .config import settings
 
 PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
     # Live analysis cannot run at all (backend reachable but Earth Engine unavailable / misconfigured).
-    "service_unavailable": ("Live Earth observation is temporarily unavailable for this investigation. "
+    "service_unavailable": ("Earth Engine analysis is temporarily unavailable for this investigation. "
                             "TERRATRACE does not display estimated, simulated, or placeholder measurements.", True),
     "analysis_timeout": ("The requested analysis exceeded the available computation window. "
                          "No forest-change measurements were generated.", True),
@@ -28,7 +28,7 @@ PUBLIC_MESSAGES: dict[str, tuple[str, bool]] = {
                              "No forest-change measurements were generated.", False),
     "analysis_failed": ("The analysis could not be completed. No forest-change measurements were generated.", True),
     # Earth Engine could not be reached at all (DNS / network down on the machine running TERRATRACE).
-    "earth_engine_unreachable": ("Live Earth observation could not be reached — the network connection to Google Earth Engine failed. "
+    "earth_engine_unreachable": ("Google Earth Engine could not be reached — the network connection to Google Earth Engine failed. "
                                  "Check the internet connection and try again. No forest-change measurements were generated.", True),
     # Earth Engine answered 429: the project's concurrency quota is exhausted (noncommercial Restricted Mode).
     "earth_engine_throttled": ("Google Earth Engine is throttling requests for this project right now. "

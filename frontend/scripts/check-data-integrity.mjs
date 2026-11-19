@@ -129,7 +129,7 @@ async function run(label, { offline }) {
 
   // ---- landing
   const status = (await page.locator('[data-testid="data-status"]').innerText()).trim();
-  check(live ? /live earth observation/i.test(status) : /live analysis unavailable/i.test(status), `${label}: header data status`, status.replace(/\s+/g, ' '));
+  check(live ? /powered by google earth engine/i.test(status) : /analysis unavailable/i.test(status), `${label}: header data status`, status.replace(/\s+/g, ' '));
   await page.locator('[data-testid="data-status"]').click();
   await page.waitForTimeout(300);
   const pop = await page.locator('body').innerText();
@@ -142,7 +142,7 @@ async function run(label, { offline }) {
   const cards = await page.locator('button.tt-card[aria-label^="Open featured investigation"]').allInnerTexts();
   check(cards.length === 5, `${label}: five featured investigations (four forest sites + the Gurugram land / heat case study)`);
   check(cards.every((c) => !METRIC_TEXT.test(c) && !/\bevents\b/.test(c)), `${label}: featured cards carry no metrics`);
-  check(cards.every((c) => /km²/.test(c) && /live analysis|land & heat case study/i.test(c)), `${label}: cards show AOI area + analysis status`);
+  check(cards.every((c) => /km²/.test(c) && /published analysis|urban case study/i.test(c)), `${label}: cards show AOI area + analysis status`);
   const overview = await page.locator('[data-testid="overview-detected-change"]').innerText();
   {
     // The overview total is exactly the stored READY featured results' own event area / count (control sites excluded).
@@ -262,7 +262,7 @@ async function run(label, { offline }) {
 
     // C. Pressing Run sends exactly ONE analysis request.
     const n1 = analysisRequests.length;
-    await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
+    await page.getByRole('button', { name: /Run analysis 2018 → 2025/ }).first().click();
     await settle();
     await page.waitForTimeout(500);
     check(analysisRequests.length - n1 === 1, `${label}: ${id} Run sends exactly 1 analysis request`, `${analysisRequests.length - n1} sent`);
@@ -276,7 +276,7 @@ async function run(label, { offline }) {
     const panel = page.locator('[data-testid="analysis-unavailable"]');
     await panel.waitFor({ timeout: 30000 });
     const text = await panel.innerText();
-    check(/Live Earth observation is temporarily unavailable/.test(text), `${label}: ${id} truthful unavailable message`);
+    check(/Earth Engine analysis is temporarily unavailable/.test(text), `${label}: ${id} truthful unavailable message`);
     const bodyText = await page.locator('body').innerText();
     check(!DEV_TEXT.test(bodyText), `${label}: ${id} no developer text in the UI`, (bodyText.match(DEV_TEXT) ?? [''])[0]);
     check((await page.locator('[data-testid="no-metrics"]').count()) >= 1, `${label}: ${id} metrics strip carries no metrics`);
@@ -307,7 +307,7 @@ async function run(label, { offline }) {
       }
     }
     if (!live) {
-      await page.getByRole('button', { name: /Run live analysis 2018 → 2025/ }).first().click();
+      await page.getByRole('button', { name: /Run analysis 2018 → 2025/ }).first().click();
       await settle();
     }
     const before = await inv();
@@ -327,8 +327,8 @@ async function run(label, { offline }) {
       return { ok, has: !!window.__ttUi.getState().investigation.analysisResult };
     }, before.rid);
     check(stale.ok === false && !stale.has, `${label}: a stale response for an old request is discarded`);
-    const runBtn = page.getByRole('button', { name: /Run live analysis 1990 → 2025/ }).first();
-    check((await runBtn.count()) === 1, `${label}: explicit 'Run live analysis' action offered`);
+    const runBtn = page.getByRole('button', { name: /Run analysis 1990 → 2025/ }).first();
+    check((await runBtn.count()) === 1, `${label}: explicit 'Run analysis' action offered`);
     if (!live) {
       const n1 = analysisRequests.length;
       await runBtn.click();
@@ -518,7 +518,7 @@ async function run(label, { offline }) {
       else console.log(`INFO  ${label}: custom AOI history not merged within 120 s — pre-2016 rows not checked in the UI`);
     } else {
       const text = await page.locator('[data-testid="analysis-unavailable"]').innerText({ timeout: 30000 });
-      const statusOk = live ? NON_READY.includes(env?.analysisStatus) && !env?.summary : /Live analysis unavailable/i.test(text);
+      const statusOk = live ? NON_READY.includes(env?.analysisStatus) && !env?.summary : /Analysis unavailable/i.test(text);
       check(statusOk && /7\d\.\d+ km²/.test(text), `${label}: custom AOI → ${env?.analysisStatus ?? 'UNAVAILABLE'} with reason, geodesic area, no metrics`, (text.match(/[\d.]+ km²/) ?? [''])[0]);
       const body = await page.locator('body').innerText();
       check(!METRIC_TEXT.test(body), `${label}: custom AOI no metric text rendered`);

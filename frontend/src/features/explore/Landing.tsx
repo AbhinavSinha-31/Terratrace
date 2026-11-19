@@ -1,56 +1,54 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronRight, Database, Layers3, ScanSearch, ShieldCheck, Trees } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, Database, Layers3, ShieldCheck, Trees } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useFeaturedSummary, useHealth, useStudyAreas, useStudyCard } from '../../data/queries';
+import { client } from '../../data/client';
 import { ChatLauncher } from '../chat/ChatLauncher';
 import { selectCandidate, useUi } from '../../state/store';
 import type { StudyArea } from '../../data/contracts';
 import { fmtHa, fmtKm2, shortBiome } from '../../lib/format';
 import { useBreakpoint } from '../../lib/useLayout';
 import { DEFAULT_ANALYSIS_WINDOW, ERAS } from '../../lib/time';
-import { Badge, Button, IconButton, Skeleton, StateView, TerratraceMark, Tooltip } from '../../design';
+import { Badge, IconButton, Segmented, Skeleton, StateView, TerratraceMark, Tooltip } from '../../design';
 import { AnimatedNumber } from '../../design/Metric';
 import { DrawHint, SearchBar } from './SearchBar';
 import { SelectionPanel } from './SelectionPanel';
 import { CaseStudyCard } from '../casestudy/CaseStudyCard';
-import { CASE_STUDIES } from '../casestudy/data';
+import { CASE_STUDIES, useCaseStudy } from '../casestudy/data';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 // ---------------------------------------------------------------- hero
-function Hero() {
-  const setPhase = useUi((s) => s.setPhase);
+function Hero({ search = true }: { search?: boolean }) {
   return (
     <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.6, ease: EASE }} className="pointer-events-auto max-w-[580px]" aria-labelledby="hero-title" data-map-occluder>
       <div className="t-label flex flex-wrap gap-x-3 gap-y-1 text-ink-3">
-        {['Forests', 'Satellites', 'Change', 'Evidence'].map((w, i) => (
+        {['Forests', 'Cities', 'Land cover', 'Evidence'].map((w, i) => (
           <span key={w} className="flex items-center gap-3">{i > 0 && <span className="text-ink-4">•</span>}{w}</span>
         ))}
       </div>
       <h1 id="hero-title" className="tt-hero-title mt-[clamp(12px,2.2vh,20px)] max-w-[11.6em]">
-        See where forests
-        <br /> are changing —
+        See how the land
+        <br /> is changing —
         <br /><span className="tt-hero-accent">and the evidence<br />behind it.</span>
       </h1>
       <p className="mt-[clamp(14px,2.4vh,24px)] max-w-[500px] text-[clamp(13.5px,1.65vh,15.5px)] leading-[1.6] text-ink-2 lg:[@media(max-height:760px)]:hidden">
-        TERRATRACE uses decades of satellite data, advanced analysis and explainable AI to detect, quantify and investigate forest-cover change anywhere on Earth.
+        TERRATRACE turns decades of archived satellite data into transparent evidence of forest loss, urban expansion and changing land cover — anywhere on Earth.
       </p>
-      <div className="mt-[clamp(16px,2.8vh,30px)] flex flex-wrap gap-3">
-        <Button variant="brand" size="lg" className="!h-[50px] !px-6 !text-[14.5px]" icon={<ScanSearch size={18} />} trailing={<ArrowRight size={17} />} onClick={() => setPhase('explore')}>
-          Explore Earth
-        </Button>
-      </div>
+      {/* The main call to action: search a place, or draw an area (the old "Explore Earth" / "Explore anywhere" entries). */}
+      {search && <div className="mt-[clamp(16px,2.8vh,28px)] max-w-[560px]" data-testid="hero-search"><SearchBar /></div>}
       <div className="mt-[clamp(20px,3.2vh,36px)] grid max-w-[560px] grid-cols-3 gap-4 [@media(max-height:960px)]:hidden">
         {[
           { icon: Database, t: 'Decades of data', d: 'Landsat + Sentinel-2' },
-          { icon: Layers3, t: 'Scientific analysis', d: 'NDVI • NBR • Land cover' },
+          { icon: Layers3, t: 'Scientific analysis', d: 'NDVI • Land cover • Heat' },
           { icon: ShieldCheck, t: 'Explainable insights', d: 'Evidence-based AI' },
         ].map(({ icon: Icon, t, d }) => (
           <div key={t} className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.35)]"><Icon size={18} /></span>
             <span className="min-w-0">
               <span className="block text-[12.5px] font-medium text-ink">{t}</span>
-              <span className="block text-[11px] text-ink-3">{d}</span>
+              <span className="block text-[11.5px] text-ink-2">{d}</span>
             </span>
           </div>
         ))}
@@ -60,7 +58,86 @@ function Hero() {
 }
 
 // ---------------------------------------------------------------- right panels
-function OverviewPanel() {
+const signed = (v: number, d = 1) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)}`;
+
+/** One urban study's headline figures — always from TERRATRACE's own stored results, never typed in. */
+interface UrbanRow { id: string; name: string; source: string; period: string; built: string | null; heat: string | null; open(): void }
+
+/** Urban studies: land-focus featured areas (from their stored quick scans) and the static urban case studies (from the
+ *  research pipeline's published results). A study without stored figures is simply not listed. */
+function useUrbanRows(): { rows: UrbanRow[]; loading: boolean } {
+  const items = useStudyAreas().data?.items ?? [];
+  const land = items.filter((a) => a.focus === 'land');
+  const first = land[0]?.id ?? null;
+  // Latest stored scan (all months) of the first land-focus area, then its comparison with the first scan year.
+  const latest = useQuery({ queryKey: ['overview-qs', first], queryFn: () => client.quickScan(first!, null, 'all'), enabled: !!first, staleTime: 60_000, retry: false });
+  const d = latest.data?.status === 'READY' ? latest.data : null;
+  const cmp = useQuery({
+    queryKey: ['overview-qs-compare', first, d?.first_year, d?.year],
+    queryFn: () => client.quickScanCompare(first!, d!.first_year, d!.year, 'all'),
+    enabled: !!d && d.first_year < d.year, staleTime: 60_000, retry: false,
+  });
+  const cs = useCaseStudy(CASE_STUDIES[0]?.id ?? null).data;
+  const rows: UrbanRow[] = [];
+  const area = land[0];
+  if (area && d) {
+    const c = cmp.data?.status === 'READY' ? cmp.data.landcover : null;
+    const veg = d.lst?.uhi_vegetated;
+    rows.push({
+      id: area.id, name: area.short_name, source: 'Quick scan · Dynamic World + Landsat',
+      period: c ? `${cmp.data!.from_year}→${cmp.data!.to_year}` : String(d.year),
+      built: c?.built_expansion_km2 != null ? `${signed(c.built_expansion_km2)} km²${c.built_expansion_pct != null ? ` (${signed(c.built_expansion_pct)} %)` : ''}` : null,
+      heat: veg?.status === 'READY' && veg.value_c != null ? `${signed(veg.value_c)} °C vs vegetated land, ${d.year}` : null,
+      open: () => { useUi.getState().openAnalysis(area.id, { name: area.name, geometry: area.geometry, run: false }); useUi.getState().setTab('land'); },
+    });
+  }
+  if (cs) {
+    const b = cs.net_change.find((n) => /^built/i.test(n.class));
+    const lastYear = Math.max(...cs.uhi.map((u) => u.year));
+    const winter = cs.uhi.find((u) => u.primary && u.season === 'winter' && u.year === lastYear);
+    rows.push({
+      id: cs.id, name: CASE_STUDIES[0].name, source: 'Case study · Landsat land-cover pipeline',
+      period: b ? `${b.from_year}→${b.to_year}` : '',
+      built: b ? `${signed(b.delta_km2)} km²` : null,
+      heat: winter ? `${signed(winter.uhi_c)} °C urban core vs rural ring, winter ${winter.year}` : null,
+      open: () => useUi.getState().openCaseStudy(cs.id),
+    });
+  }
+  return { rows: rows.filter((r) => r.built || r.heat), loading: latest.isLoading || cmp.isLoading };
+}
+
+function UrbanOverview() {
+  const { rows, loading } = useUrbanRows();
+  if (loading && !rows.length) return <div className="mt-4 space-y-2"><Skeleton className="h-14 rounded-md" /><Skeleton className="h-14 rounded-md" /></div>;
+  if (!rows.length) {
+    return (
+      <div className="mt-4" data-testid="overview-urban-empty">
+        <div className="text-[13px] font-medium text-ink-2">No published urban analyses yet</div>
+        <div className="mt-1 text-[11.5px] leading-snug text-ink-3">Built-up expansion and heat-island figures appear here once an urban area has been scanned. Nothing is estimated.</div>
+      </div>
+    );
+  }
+  return (
+    <ul className="mt-3 space-y-3" data-testid="overview-urban">
+      {rows.map((r) => (
+        <li key={r.id}>
+          <button onClick={r.open} className="tt-press -mx-1.5 block w-[calc(100%+12px)] rounded-md px-1.5 py-1 text-left hover:bg-hover">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-[13px] font-medium text-ink">{r.name}</span>
+              <span className="t-data shrink-0 text-[11.5px] text-ink-3">{r.period}</span>
+            </div>
+            {r.built && <div className="mt-0.5 flex items-baseline justify-between gap-2"><span className="text-[12px] text-ink-2">Built-up land</span><span className="t-data text-[15px] text-[#f0a35e]">{r.built}</span></div>}
+            {r.heat && <div className="mt-0.5 text-[11.5px] leading-snug text-ink-2">Heat island <span className="t-data text-ink">{r.heat}</span></div>}
+            <div className="mt-0.5 text-[11px] text-ink-3">{r.source}</div>
+          </button>
+        </li>
+      ))}
+      <li className="text-[11px] leading-snug text-ink-3">TERRATRACE&apos;s own analyses only · different methods, so figures are not added up</li>
+    </ul>
+  );
+}
+
+function ForestOverview() {
   const areas = useStudyAreas();
   const summary = useFeaturedSummary();
   const { data: health } = useHealth();
@@ -73,74 +150,94 @@ function OverviewPanel() {
   const ready = (summary.data?.items ?? []).filter((i) => i.status === 'READY' && i.kpis);
   const counted = ready.filter((r) => !isControl(r.id));
   const controls = ready.filter((r) => isControl(r.id));
-  // "Detected change" = area of the detected change events (the polygons drawn on the map) of completed live
-  // analyses — not gross loss, which sums year-to-year forest-mask transitions (including reversals).
+  // "Detected change" = area of the detected change events (the polygons drawn on the map) of published analyses —
+  // not gross loss, which sums year-to-year forest-mask transitions (including reversals).
   const areaOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_area_ha ?? 0), 0);
   const countOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_count ?? 0), 0);
   const events = countOf(counted);
-  const n = items.length;
   const eeReady = health?.analysis.status === 'ready';
   return (
-    <section className="tt-panel pointer-events-auto px-5 py-4" aria-labelledby="gfo" data-map-occluder>
-      <div className="flex items-center gap-2.5">
-        <Trees size={16} className="text-forest" />
-        <h2 id="gfo" className="t-label text-ink">Global forest overview</h2>
-      </div>
+    <>
       <div className="mt-4">
-        <div className="text-[12px] text-ink-3">World forest area</div>
+        <div className="text-[12.5px] text-ink-2">World forest area</div>
         <div className="mt-1 flex items-end justify-between gap-3">
           <div className="t-data text-[26px] font-medium leading-none">40.6 <span className="text-[16px] text-ink-2">M km²</span></div>
           <div className="text-right">
             <div className="t-data text-[15px] text-forest">31%</div>
-            <div className="text-[10.5px] text-ink-3">of land area</div>
+            <div className="text-[11.5px] text-ink-3">of land area</div>
           </div>
         </div>
-        <div className="mt-1.5 text-[10.5px] text-ink-4">Reference · FAO FRA 2020</div>
+        <div className="mt-1.5 text-[11.5px] text-ink-3">Reference · FAO FRA 2020</div>
       </div>
       <div className="my-3.5 h-px bg-line" />
       <div data-testid="overview-detected-change">
-        <div className="text-[12px] text-ink-3">Detected change · TERRATRACE</div>
+        <div className="text-[12.5px] text-ink-2">Detected change · TERRATRACE</div>
         {counted.length > 0 ? (
           <>
             <div className="mt-1 flex items-end justify-between gap-3">
-              <div className="t-data text-[26px] font-medium leading-none text-[#ff8a6b]">
+              <div className="t-data whitespace-nowrap text-[26px] font-medium leading-none text-[#ff8a6b]">
                 <AnimatedNumber value={areaOf(counted)} format={(v) => fmtHa(v)} /> <span className="text-[16px] text-ink-2">ha</span>
               </div>
-              <div className="text-right">
+              <div className="shrink-0 text-right">
                 <div className="t-data text-[15px] text-ink">{events}</div>
-                <div className="text-[10.5px] text-ink-3">events · {counted.length} live {counted.length === 1 ? 'analysis' : 'analyses'}</div>
+                <div className="whitespace-nowrap text-[11.5px] text-ink-3">events · {counted.length} published</div>
               </div>
             </div>
-            <div className="mt-1.5 text-[10.5px] text-ink-4">Area of detected change events{controls.length ? ' · control sites excluded' : ''}</div>
+            <div className="mt-1.5 text-[11.5px] text-ink-3">Area of detected change events{controls.length ? ' · control sites excluded' : ''}</div>
           </>
         ) : (
           <div className="mt-1.5">
             <div className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
               <span className={`h-1.5 w-1.5 rounded-full ${eeReady ? 'bg-live' : 'bg-warn'}`} />
-              {controls.length ? 'No change-site analyses yet' : 'No completed live analyses'}
+              {controls.length ? 'No change-site analyses yet' : 'No published analyses yet'}
             </div>
-            <div className="mt-1 text-[10.5px] leading-snug text-ink-4">{eeReady && health?.backend ? 'Open an area to run a live analysis.' : 'Live analysis is temporarily unavailable.'}</div>
+            <div className="mt-1 text-[11.5px] leading-snug text-ink-3">{eeReady && health?.backend ? 'Open an area to run an analysis.' : 'The analysis service is temporarily unavailable.'}</div>
           </div>
         )}
         {controls.map((r) => {
           const n = countOf([r]);
           const name = items.find((a) => a.id === r.id)?.short_name ?? r.id;
           return (
-            <div key={r.id} className="mt-2 text-[10.5px] leading-snug text-ink-3" data-testid="overview-control">
+            <div key={r.id} className="mt-2 text-[11.5px] leading-snug text-ink-3" data-testid="overview-control">
               Control site · {name}: {n} {n === 1 ? 'detection' : 'detections'} ({fmtHa(areaOf([r]))} ha) — false-alarm check, not counted
             </div>
           );
         })}
       </div>
+    </>
+  );
+}
+
+function OverviewPanel() {
+  const [tab, setTab] = useState<'forests' | 'urban'>('forests');
+  const items = useStudyAreas().data?.items ?? [];
+  // Exactly the cards shown under "Featured investigations": the featured areas + the case studies.
+  const urban = items.filter((a) => a.focus === 'land').length + CASE_STUDIES.length;
+  const forest = items.length - items.filter((a) => a.focus === 'land').length;
+  const total = items.length + CASE_STUDIES.length;
+  return (
+    <section className="tt-panel pointer-events-auto px-5 py-4" aria-labelledby="gfo" data-map-occluder>
+      <div className="flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5">
+          {tab === 'forests' ? <Trees size={16} className="text-forest" /> : <Building2 size={16} className="text-[#f0a35e]" />}
+          <h2 id="gfo" className="t-label text-ink">Global land overview</h2>
+        </div>
+      </div>
+      <div className="mt-3" data-testid="overview-tabs">
+        <Segmented<'forests' | 'urban'> label="Overview" value={tab} onChange={(v) => setTab(v)} options={[
+          { value: 'forests', label: <span className="flex items-center gap-1"><Trees size={12} />Forests</span> },
+          { value: 'urban', label: <span className="flex items-center gap-1"><Building2 size={12} />Urban</span> },
+        ]} />
+      </div>
+      {tab === 'forests' ? <ForestOverview /> : <UrbanOverview />}
       <div className="my-3.5 h-px bg-line" />
       <div>
-        <div className="text-[12px] text-ink-3">Featured investigations</div>
-        {/* Live investigations only; the static case studies are listed beside the number, never added to it. */}
+        <div className="text-[12.5px] text-ink-2">Featured investigations</div>
         <div className="mt-1 flex items-baseline gap-2" data-testid="overview-featured-count">
-          <span className="t-data text-[26px] font-medium leading-none">{n ? String(n).padStart(2, '0') : '—'}</span>
-          <span className="text-[12px] text-ink-2">live{CASE_STUDIES.length > 0 && ` · ${CASE_STUDIES.length} case ${CASE_STUDIES.length === 1 ? 'study' : 'studies'}`}</span>
+          <span className="t-data text-[26px] font-medium leading-none">{total ? String(total).padStart(2, '0') : '—'}</span>
+          <span className="text-[12.5px] text-ink-2">published · {forest} forest · {urban} urban</span>
         </div>
-        <div className="mt-1 text-[10.5px] text-ink-4">Any area on Earth can be analysed</div>
+        <div className="mt-1 text-[11.5px] text-ink-3">Any area on Earth can be analysed</div>
       </div>
     </section>
   );
@@ -195,7 +292,7 @@ function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index
   const card = useStudyCard(area.id);
   // A land / heat case study (e.g. the Indian city): its stored quick scans are the result, not a forest analysis.
   const land = area.focus === 'land';
-  const { status, detail, reason } = land ? { status: 'Land & heat case study' as typeof card.status, detail: 'Land cover, built-up expansion and urban heat', reason: area.focus_note ?? null } : card;
+  const { status, detail, reason } = land ? { status: 'Urban case study' as typeof card.status, detail: 'Urban expansion + land surface temperature', reason: area.focus_note ?? null } : card;
   const tone = land ? 'text-accent' : status === 'Analysis ready' ? 'text-live' : status === 'Processing' ? 'text-accent' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'text-bad' : 'text-warn';
   const dot = land ? 'bg-accent' : status === 'Analysis ready' ? 'bg-live' : status === 'Processing' ? 'bg-accent animate-pulse' : status === 'Scientific validation required' || status === 'Analysis failed' ? 'bg-bad' : 'bg-warn';
   return (
@@ -216,6 +313,7 @@ function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index
         <img src={img} alt="" loading="lazy" className="h-full w-full scale-105 object-cover transition duration-700 ease-out group-hover:scale-[1.12]" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/5 via-transparent to-[#0b0f12]" />
         <div className="absolute left-3 top-3 flex gap-1.5">
+          {land && <span className="tt-img-badge !bg-accent/85 !text-[#03201d]">Urban</span>}
           <span className="tt-img-badge">{area.country}</span>
           <span className="tt-img-badge">{rest.length ? state : area.region}</span>
         </div>
@@ -240,7 +338,7 @@ function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index
             </div>
           ))}
         </div>
-        {/* Live analysis state. The detail gets its own line: next to the long status label it had no room left. */}
+        {/* Analysis state. The detail gets its own line: next to the long status label it had no room left. */}
         <div className="mt-2.5 min-w-0 border-t border-line pt-2" title={reason ?? detail ?? status} data-testid="card-status">
           <div className="flex min-w-0 items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
@@ -259,11 +357,10 @@ function FeaturedCard({ area, index, highlight, cell }: { area: StudyArea; index
   );
 }
 
-const LiveAnalysisLabel = () => <span className="ml-auto shrink-0 text-[10.5px] text-ink-4">live analysis</span>;
+const LiveAnalysisLabel = () => <span className="ml-auto shrink-0 text-[10.5px] text-ink-3">published analysis</span>;
 
 function Featured() {
   const { data, isLoading, isError, error, refetch } = useStudyAreas();
-  const setPhase = useUi((s) => s.setPhase);
   const frontPage = useUi((s) => s.view === 'explore' && s.phase === 'intro');
   const [highlight, setHighlight] = useState(false);
   const ref = useRef<HTMLElement>(null);
@@ -284,18 +381,15 @@ function Featured() {
             <TerratraceMark size={18} />
             <h2 id="fi" className="t-label text-[11px] leading-none text-ink">Featured investigations</h2>
           </div>
-          <p className="mt-1.5 text-[12px] text-ink-3">Real-world examples to explore. You can also select any area on Earth.</p>
+          <p className="mt-1.5 text-[12.5px] text-ink-2">Published forest and urban investigations. Search above to analyse any other place.</p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <button onClick={() => setPhase('explore')} className="tt-press flex shrink-0 items-center gap-1.5 text-[12px] text-accent hover:underline">
-            Explore anywhere <ArrowRight size={14} />
-          </button>
           {/* In the header row (normal flow): never over a card, at any width. */}
           {frontPage && <ChatLauncher />}
         </div>
       </div>
-      {/* Live investigations from the backend, then the static case studies — which need no backend, so they stay
-          visible (and are never counted in the live totals) even when the investigations cannot be loaded. */}
+      {/* Published investigations from the backend, then the static case studies — which need no backend, so they stay
+          visible even when the investigations cannot be loaded. */}
       <div className={FEATURED_ROW}>
         {isError && (
           <div className="tt-panel w-[min(300px,82vw)] shrink-0 sm:col-span-6 sm:w-auto"><StateView kind="service-unavailable" title="Investigations unavailable" onRetry={() => refetch()}>{(error as Error)?.message}</StateView></div>
@@ -338,9 +432,8 @@ export function Landing() {
               <div className="pt-[clamp(0px,calc(4.5vh-24px),24px)]">
                 <Hero />
               </div>
-              <div className="hidden min-h-[240px] flex-col lg:flex">
+              <div className="hidden min-h-[300px] flex-col lg:flex">
                 <GlobeSlot />
-                <div className="pointer-events-auto mx-auto w-full max-w-[720px] pt-3" data-map-occluder><SearchBar /></div>
               </div>
               <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25, duration: 0.6, ease: EASE }}
                 className="hidden space-y-3 self-start min-[1320px]:block">
@@ -349,7 +442,6 @@ export function Landing() {
               </motion.div>
             </div>
             <div className="relative shrink-0 px-6 pb-4 pt-4 xl:px-10">
-              <div className="pointer-events-auto mb-4 lg:hidden"><SearchBar /></div>
               <Featured />
             </div>
           </motion.div>
@@ -383,7 +475,7 @@ export function Landing() {
                 <span className="text-[12.5px] text-ink-2">Search a place, click the map at regional zoom, or use <b className="font-medium text-ink">Draw Area</b> to define an area of interest.</span>
               </motion.div>
             )}
-            {health && !health.backend && <div className="absolute bottom-6 left-6"><Badge tone="warn">Live analysis unavailable</Badge></div>}
+            {health && !health.backend && <div className="absolute bottom-6 left-6"><Badge tone="warn">Analysis unavailable</Badge></div>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -439,7 +531,7 @@ function MapLegendChip() {
   return (
     <div className="tt-panel pointer-events-auto space-y-1.5 px-3.5 py-3 text-[11px] text-ink-2" data-testid="map-legend">
       <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-[2px] bg-[#1f9d57]" /> Forest cover · reference (Hansen 2000)</div>
-      <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ff6b52] shadow-[0_0_8px_#ff6b52]" /> Detected change · completed live analyses only</div>
+      <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ff6b52] shadow-[0_0_8px_#ff6b52]" /> Detected change · published analyses only</div>
     </div>
   );
 }
@@ -457,7 +549,7 @@ function MobileLanding() {
       <div className="scroll-thin pointer-events-auto absolute inset-x-0 bottom-0 max-h-[56vh] overflow-y-auto rounded-t-xl bg-[#07090c]/96 px-4 pb-6 pt-5 shadow-[0_-20px_40px_-10px_rgba(0,0,0,.8),0_0_0_1px_rgba(255,255,255,.06)]">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/15" />
         {selection && !drawTool ? <SelectionPanel /> : phase === 'intro' ? (
-          <div className="space-y-6"><Hero /><Featured /><OverviewPanel /><DataSourcesPanel /></div>
+          <div className="space-y-6"><Hero search={false} /><Featured /><OverviewPanel /><DataSourcesPanel /></div>
         ) : (
           <div className="space-y-6"><Featured /></div>
         )}

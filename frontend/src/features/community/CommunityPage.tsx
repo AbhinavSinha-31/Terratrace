@@ -18,19 +18,25 @@ import {
 } from './api';
 import {
   Author, CommentSkeleton, CommunityToasts, ErrorBody, FormError, Input, Labeled, PostCardSkeleton, TagChip, TextArea, TimeAgo,
-  VoteControl, tileThumb, toast, toastError,
+  VoteControl, toast, toastError,
 } from './ui';
 
 const go = (page: OverlayPage) => useUi.getState().openPage(page);
 const SUGGESTED_TAGS = ['deforestation', 'india', 'amazon', 'mining', 'fire', 'urban-heat', 'land-cover', 'methods', 'featured'];
 
-/** Thumbnail of a post's linked analysis: the featured area's own card image, else satellite imagery at its bbox. */
-function useAnalysisThumb(post: Pick<Post, 'aoi_id' | 'bbox'>): string | null {
+/** Thumbnail of a post's linked analysis, as the backend gives it (imagery URLs are never built in the frontend):
+ *  a featured area's card image, else the registered area's own thumbnail. */
+function useAnalysisThumb(post: Pick<Post, 'aoi_id'>): string | null {
   const featured = useStudyAreas().data?.items;
-  if (!post.aoi_id) return null;
-  const f = featured?.find((a) => a.id === post.aoi_id);
-  if (f?.thumbnail_url) return f.thumbnail_url;
-  return post.bbox ? tileThumb(post.bbox) : null;
+  const f = post.aoi_id ? featured?.find((a) => a.id === post.aoi_id) : undefined;
+  const custom = useQuery({
+    queryKey: ['aoi-doc', post.aoi_id],
+    queryFn: () => client.getAoi(post.aoi_id!),
+    enabled: !!post.aoi_id && !!featured && !f,
+    staleTime: Infinity,
+    retry: false,
+  });
+  return f?.thumbnail_url || custom.data?.thumbnail_url || null;
 }
 
 function Thumb({ src, className = '' }: { src: string; className?: string }) {

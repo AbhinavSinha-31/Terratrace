@@ -123,7 +123,7 @@ export function LayerPanel({ onCollapse }: { onCollapse?: () => void }) {
       <div className="mt-4 border-t border-line px-1 pt-4">
         <SectionLabel>Legend</SectionLabel>
         <div className="space-y-3.5">
-          {!analysis && <div className="text-[11px] leading-relaxed text-ink-3">Forest, NDVI and change layers appear after a live analysis completes and passes validation. None are simulated.</div>}
+          {!analysis && <div className="text-[11px] leading-relaxed text-ink-3">Forest, NDVI and change layers appear after an analysis completes and passes validation. None are simulated.</div>}
           {layers.forest && forestLegend && <Gradient legend={forestLegend} />}
           {ctxOn.slope && <Gradient legend={{ type: 'gradient', title: 'Slope · Copernicus DEM GLO-30', note: 'reference', stops: [[0, '#1a9850'], [15, '#fee08b'], [30, '#f46d43'], [45, '#a50026']], min_label: '0°', max_label: '45°+' }} />}
           {ctxOn.treecover2000 && <Gradient legend={{ type: 'gradient', title: 'Tree canopy · Hansen v1.13 · year 2000', note: 'reference', stops: [[30, '#c7e9c0'], [65, '#41ab5d'], [100, '#00441b']], min_label: '30 %', max_label: '100 %' }} />}

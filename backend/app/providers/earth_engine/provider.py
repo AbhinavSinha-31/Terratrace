@@ -1048,7 +1048,7 @@ class EarthEngineProvider:
                     {"name": "Hansen GFC v1.13 (2025)", "role": "Independent reference (cross-check)", "real": True},
                 ],
                 "note": (
-                    f"Live Earth Engine analysis (method {sc.METHOD_VERSION}). Change events are detected between {b_year} and {c_year}"
+                    f"Google Earth Engine analysis (method {sc.METHOD_VERSION}). Change events are detected between {b_year} and {c_year}"
                     + (f" — the requested window {baseline_year}–{comparison_year} was narrowed to the years with sufficient clear observations" if adjusted else "")
                     + ". Statistics are computed over observed pixels only; historical (Landsat proxy) and modern (Dynamic World) forest are never compared."
                     + (f" Years without usable imagery: {', '.join(str(q['year']) for q in quality('READY', [])['years'] if not q['passes'])}." if any(not r['passes_quality'] for r in rows) or unavailable_years else "")
@@ -1216,7 +1216,7 @@ class EarthEngineProvider:
         if img is None:
             req = self._requests.get(analysis_id) or ({"geometry": geometry} if geometry else None)
             if not req:
-                raise EarthEngineError("unknown_layer", "This live analysis is no longer in memory; run the analysis again.")
+                raise EarthEngineError("unknown_layer", "This analysis is no longer in memory; run the analysis again.")
             g = _ee().Geometry(req["geometry"])
             if kind == "change":
                 img = self._render("change", change_mask(self._composite(g, baseline)[0], self._composite(g, year)[0]))

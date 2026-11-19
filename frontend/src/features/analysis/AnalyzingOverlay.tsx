@@ -41,7 +41,7 @@ function StageProgress({ title, subtitle }: { title: string; subtitle: React.Rea
   const elapsed = (job?.elapsedS ?? 0) + tick;
   return (
     <div role="status" aria-live="polite" aria-label={`${title}: ${label}`} data-testid="stage-progress" data-stage={stage}>
-      <div className="t-label text-accent">Live analysis</div>
+      <div className="t-label text-accent">Analysis</div>
       <div className="mt-1 flex items-baseline justify-between gap-3">
         <div className="t-h2">{title}</div>
         <div className="t-data text-[11px] text-ink-3" title="Elapsed time" data-testid="elapsed">Elapsed {mmss(elapsed)}</div>
@@ -106,7 +106,7 @@ export function AnalysisProgressOverlay() {
         <StateView
           kind={refused ? 'error' : 'service-unavailable'}
           title={refused ? 'Area size or shape not accepted'
-            : code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Live analysis unavailable'}
+            : code === 'analysis_timeout' ? 'Analysis could not be completed' : 'Analysis unavailable'}
           onRetry={canRetry ? () => useUi.getState().requestAnalysis() : undefined}
           action={<Button size="sm" variant="ghost" onClick={() => useUi.getState().resetAnalysis()}>Close</Button>}
         >

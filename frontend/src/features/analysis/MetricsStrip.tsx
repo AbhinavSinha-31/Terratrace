@@ -101,7 +101,7 @@ function NoMetrics({ status }: { status: string }) {
         <SatelliteDish size={16} className="shrink-0 text-warn" />
         <div className="min-w-0">
           <div className="t-label text-warn" data-testid="analysis-state-label">
-            {status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Live analysis unavailable' : 'No measurements available'}
+            {status === 'INVALID_ANALYSIS' ? 'Scientific validation failed' : status === 'ERROR' ? 'Analysis could not be completed' : status === 'UNAVAILABLE' ? 'Analysis unavailable' : 'No measurements available'}
             <span className="ml-2 !normal-case !tracking-normal text-ink-3">· analysis window {analysis.window.start} → {analysis.window.end}</span>
           </div>
           {/* The reason is stated once, in the analysis panel; this bar only names the state. */}

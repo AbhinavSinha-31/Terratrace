@@ -139,7 +139,7 @@ def health() -> Health:
     return Health(
         status="operational",
         version=settings.version,
-        analysis={"status": ee_status, "detail": "Live Earth observation available" if ee_status == "ready" else "Live analysis unavailable"},
+        analysis={"status": ee_status, "detail": "Earth Engine analysis available" if ee_status == "ready" else "Analysis unavailable"},
         explainer={"status": "ready" if claude.configured() else "unconfigured",
                    "detail": None if claude.configured() else "Deterministic briefing from measured facts"},
         explainer_model=settings.llm_model if claude.configured() else None,

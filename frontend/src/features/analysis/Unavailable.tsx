@@ -21,7 +21,7 @@ export function statusCopy(r: AnalysisResult) {
   if (code === 'open_water') return { title: 'Open water: no imagery to analyse', Icon: AlertTriangle, tone: 'text-ink-2' };
   if (code === 'outside_sentinel2_coverage') return { title: 'No Sentinel-2 imagery at this latitude', Icon: AlertTriangle, tone: 'text-ink-2' };
   if (r.status === 'ERROR') return { title: 'Analysis could not be completed', Icon: AlertTriangle, tone: 'text-warn' };
-  return { title: 'Live analysis unavailable', Icon: AlertTriangle, tone: 'text-warn' };
+  return { title: 'Analysis unavailable', Icon: AlertTriangle, tone: 'text-warn' };
 }
 
 /**
@@ -43,7 +43,7 @@ export function AnalysisErrorPanel({ error, onRetry }: { error: { code?: string;
     : error.code === 'earth_engine_throttled' ? 'Earth Engine is throttling requests'
     : error.code === 'analysis_timeout' || error.code === 'analysis_failed' ? 'Analysis could not be completed'
     : error.code === 'analysis_too_large' ? 'Analysis area exceeds the interactive limit'
-    : error.code && AREA_REFUSALS.has(error.code) ? 'Area size or shape not accepted' : 'Live analysis unavailable';
+    : error.code && AREA_REFUSALS.has(error.code) ? 'Area size or shape not accepted' : 'Analysis unavailable';
   // Retry only when it can succeed: the backend says so (retryable), or a refusal code says it cannot.
   const canRetry = error.retryable !== false && !(error.code && AREA_REFUSALS.has(error.code));
   return (

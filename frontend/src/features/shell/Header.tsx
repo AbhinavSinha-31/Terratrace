@@ -19,7 +19,7 @@ const NAV: { key: NavKey; label: string }[] = [
   { key: 'timemachine', label: 'Time Machine' },
   { key: 'featured', label: 'Featured' },
   { key: 'community', label: 'Community' },
-  { key: 'ask', label: 'Ask me anything' },
+  { key: 'ask', label: 'Ask TerraTrace' },
   { key: 'about', label: 'About' },
 ];
 
@@ -41,13 +41,14 @@ export function navigate(key: NavKey) {
 
 /** Public data status (product language only — no infrastructure or setup details). */
 export function dataStatus(h?: SystemHealth): { short: string; long: string; detail: string; ready: boolean } {
-  if (!h) return { short: 'Live', long: 'Live Earth Observation', detail: 'Checking availability…', ready: false };
+  // The data is archival (Landsat, Sentinel-2, Dynamic World), not a live feed: the badge credits the processing platform.
+  if (!h) return { short: 'Earth Engine', long: 'Powered by Google Earth Engine', detail: 'Checking availability…', ready: false };
   if (h.backend && h.analysis.status === 'ready') {
-    return { short: 'Live', long: 'Live Earth Observation', detail: 'Live analysis is available. Results are measured from Landsat, Sentinel-2 and Dynamic World imagery.', ready: true };
+    return { short: 'Earth Engine', long: 'Powered by Google Earth Engine', detail: 'Analyses run on Google Earth Engine over archived Landsat, Sentinel-2 and Dynamic World imagery. Figures come from published analyses only.', ready: true };
   }
   return {
-    short: 'Unavailable', long: 'Live analysis unavailable', ready: false,
-    detail: 'Live Earth observation is temporarily unavailable. You can keep exploring real imagery; TERRATRACE does not display estimated, simulated, or placeholder measurements.',
+    short: 'Unavailable', long: 'Analysis unavailable', ready: false,
+    detail: 'Earth Engine analysis is temporarily unavailable. You can keep exploring real imagery; TERRATRACE does not display estimated, simulated, or placeholder measurements.',
   };
 }
 /** Imagery is independent of analysis: live imagery may be READY while the analysis is unavailable. */
@@ -103,7 +104,7 @@ function StatusPill({ health }: { health?: SystemHealth }) {
           <div className="t-label mt-3 !text-[9px] text-ink-4">Analysis</div>
           <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink" data-testid="analysis-status-row"><span className={`h-2 w-2 rounded-full ${dot}`} />{s.long}</div>
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">{s.detail}</p>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-4">TERRATRACE never shows simulated results: measurements appear only for completed, validated live analyses.</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-4">TERRATRACE never shows simulated results: measurements appear only for completed, validated (published) analyses.</p>
           {(!s.ready || imageryStatus === 'unknown' || imageryStatus === 'unavailable') && (
             <button className="tt-press mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent/12 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20"
               onClick={() => { close(); for (const k of ['health', 'imagery', 'imagery-availability', 'basemaps']) void queryClient.invalidateQueries({ queryKey: [k] }); }}>
@@ -119,7 +120,7 @@ function notices(h?: SystemHealth): { tone: 'warn' | 'info'; title: string; body
   if (!h) return [];
   const out: { tone: 'warn' | 'info'; title: string; body: string }[] = [];
   if (!h.backend || h.analysis.status !== 'ready') {
-    out.push({ tone: 'warn', title: 'Live analysis unavailable', body: 'Live Earth observation is temporarily unavailable. Real imagery remains explorable; no measurements are shown.' });
+    out.push({ tone: 'warn', title: 'Analysis unavailable', body: 'Earth Engine analysis is temporarily unavailable. Real imagery remains explorable; no measurements are shown.' });
   }
   if (h.backend && h.explainer.status !== 'ready') out.push({ tone: 'info', title: 'Deterministic briefings', body: 'Completed analyses are explained by the deterministic TERRATRACE briefing, generated only from measured facts.' });
   if (h.geocoder.status !== 'ready') out.push({ tone: 'info', title: 'Place search limited', body: 'Featured investigations and coordinates remain searchable.' });

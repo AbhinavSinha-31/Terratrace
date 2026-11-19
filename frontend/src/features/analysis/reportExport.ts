@@ -89,7 +89,7 @@ function render(c: ReportContent, images: (string | null)[]): string {
       <div class="label">Event brief</div>
       <div class="id">#${esc(c.eventId)}</div>
       <div class="small">${esc(c.aoiName)}</div>
-      <div class="small">Generated ${esc(c.generated)} · Live Earth Engine analysis</div>
+      <div class="small">Generated ${esc(c.generated)} · Google Earth Engine analysis</div>
     </div>
   </header>
   <section class="figs">${figs}</section>

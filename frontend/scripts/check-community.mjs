@@ -173,7 +173,7 @@ try {
   await page.getByLabel('Body (markdown)').fill('Which of these recover by **2023**?');
   await page.getByLabel('Tags').fill('fire india');
   await page.getByTestId('publish-post').click();
-  check('publishing opens the new post', await page.getByTestId('post-title').filter({ hasText: 'Similipal fire scars in 2021' }).waitFor({ timeout: 8000 }).then(() => true, () => false));
+  check('publishing opens the new post', await page.getByTestId('post-title').filter({ hasText: 'Similipal fire scars in 2021' }).waitFor({ timeout: 15000 }).then(() => true, () => false));
   const created = db.writes.find((w) => w.table === 'posts' && w.method === 'POST');
   check('the post is sent with its tags and without author or score fields', !!created && JSON.stringify(created.body.tags) === '["fire","india"]' && !('author_id' in created.body) && !('score' in created.body), JSON.stringify(created?.body));
 

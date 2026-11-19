@@ -19,6 +19,8 @@ Nothing is invented: when Earth Engine cannot answer, the response says so (erro
 
 from __future__ import annotations
 
+import math
+
 import asyncio
 import json
 import logging
@@ -44,6 +46,16 @@ _inflight: dict[str, asyncio.Future] = {}
 # they are static base layers for the globe view. AOI imagery comes only from Earth Engine (decide()).
 GLOBE_MOSAIC_YEAR = 2025
 GLOBE_MOSAIC = f"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-{GLOBE_MOSAIC_YEAR}_3857/default/g/{{z}}/{{y}}/{{x}}.jpg"
+
+
+def thumbnail_for(bbox: list[float] | tuple[float, ...]) -> str:
+    """A card thumbnail for an area: the globe mosaic's zoom-10 tile around the bbox centre (imagery only)."""
+    lon, lat = (bbox[0] + bbox[2]) / 2, max(-85.0, min(85.0, (bbox[1] + bbox[3]) / 2))
+    n = 2 ** 10
+    x = int((lon + 180) / 360 * n) % n
+    r = math.radians(lat)
+    y = min(n - 1, max(0, int((1 - math.log(math.tan(r) + 1 / math.cos(r)) / math.pi) / 2 * n)))
+    return GLOBE_MOSAIC.format(z=10, x=x, y=y)
 
 
 def basemaps() -> dict[str, Any]:
@@ -184,7 +196,7 @@ async def availability(aid: str) -> dict[str, Any]:
     if cached:
         return cached
     if await asyncio.to_thread(_service_unavailable):
-        raise ImageryError(503, "service_unavailable", "Imagery availability cannot be checked right now: live Earth observation is temporarily unavailable.")
+        raise ImageryError(503, "service_unavailable", "Imagery availability cannot be checked right now: Earth Engine analysis is temporarily unavailable.")
     # Availability is measured over what is analysed (a featured region's declared subset, else the AOI), with the
     # same interactive limit as the analysis — checked BEFORE any computation.
     target = analysis_target(aoi)
@@ -234,7 +246,7 @@ async def _measure(aid: str, aoi: dict[str, Any], years: list[int], key: str) ->
     except EarthEngineError as e:
         log.warning("Imagery availability %s failed: %s — %s", aid, e.code, e.message)
         if e.code in ("ee_unconfigured", "ee_init_failed"):
-            raise ImageryError(503, "service_unavailable", "Imagery availability cannot be checked right now: live Earth observation is temporarily unavailable.") from None
+            raise ImageryError(503, "service_unavailable", "Imagery availability cannot be checked right now: Earth Engine analysis is temporarily unavailable.") from None
         if e.code == "analysis_timeout":
             raise ImageryError(504, "analysis_timeout", "Checking imagery availability exceeded the available computation window.") from None
         raise ImageryError(502, "imagery_check_failed") from None

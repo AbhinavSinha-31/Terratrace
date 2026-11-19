@@ -458,7 +458,7 @@ def _refusal(aid: str, y: int, s: str, target: dict[str, Any]) -> dict[str, Any]
                          reason=f"Quick scans are limited to {settings.interactive_max_km2:,.0f} km²; this area is {area:,.0f} km².")
     if not P.provider.credentials_configured():
         return _envelope(aid, y, s, "UNAVAILABLE", reason_code="ee_unconfigured", retryable=False,
-                         reason="Live Earth Engine is not configured on this server, so quick scans cannot run.")
+                         reason="Google Earth Engine is not configured on this server, so quick scans cannot run.")
     return None   # restricted mode is NOT a refusal: the scan runs, slower (restricted_mode())
 
 

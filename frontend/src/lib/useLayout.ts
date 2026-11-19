@@ -73,6 +73,6 @@ export function landingZoom(bp: Breakpoint, phase: 'intro' | 'explore'): number 
   const inset = landingInset(bp, 'intro');
   const availH = h - (inset.top ?? 0) - (inset.bottom ?? 0);
   const availW = w - (inset.left ?? 0) - (inset.right ?? 0);
-  const radius = Math.max(60, Math.min(availH, availW) * 0.47);
+  const radius = Math.max(60, Math.min(availH, availW) * 0.5);
   return Math.log2((radius * 2 * Math.PI) / 512);
 }

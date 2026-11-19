@@ -136,7 +136,7 @@ def _offline(facts: dict[str, Any], notice: str | None) -> dict[str, Any]:
 
 
 NO_ANALYSIS = (
-    "I don't have a completed satellite analysis for this area yet. Live Earth Engine analysis is required "
+    "I don't have a completed satellite analysis for this area yet. A completed Earth Engine analysis is required "
     "before I can interpret any results — I will not describe changes that have not been measured."
 )
 
@@ -151,7 +151,7 @@ def withheld() -> dict[str, Any]:
     return {
         "text": NO_ANALYSIS, "source": "none", "model": None, "fact_check": None,
         "facts_used": 0, "generated_at": datetime.now(timezone.utc).isoformat(), "cached": False,
-        "notice": "Explanation withheld: no completed live analysis.", "prompt_version": PROMPT_VERSION,
+        "notice": "Explanation withheld: no published analysis.", "prompt_version": PROMPT_VERSION,
     }
 
 

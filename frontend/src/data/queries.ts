@@ -165,7 +165,7 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
   const card = (status: CardStatus, detail: string | null = null, reason: string | null = null) => ({ status, detail, reason });
   if (isThis) {
     const r = inv.analysisResult;
-    if (inv.analysisStatus === 'running') return card('Processing', 'live Earth Engine computation');
+    if (inv.analysisStatus === 'running') return card('Processing', 'Earth Engine computation');
     if (inv.analysisStatus === 'complete') {
       const s = fromResult(r?.status, r?.reasonCode) ?? 'Unavailable';
       return card(s, s === 'Scientific validation required' ? pairs(r?.quality?.issues.map((i) => i.years)) : s === 'Area exceeds limit' ? limitDetail() : s === 'Unavailable' || s === 'Analysis failed' ? r?.reason ?? null : null, r?.reason ?? null);
@@ -182,7 +182,7 @@ export function useStudyCard(id: string): { status: CardStatus; detail: string |
   const d = stored.data;
   const s = fromResult(d?.status, d?.reasonCode);
   if (s) return card(s, s === 'Scientific validation required' ? pairs(d?.issueYears) : s === 'Area exceeds limit' ? limitDetail(d?.maximum_area_km2) : s === 'Unavailable' ? d?.reason ?? null : null, d?.reason ?? null);
-  if (d?.status === 'NOT_RUN') return health.analysis.status === 'ready' ? card('Not run', 'click to run live analysis') : card('Unavailable', 'Earth Engine unavailable');
+  if (d?.status === 'NOT_RUN') return health.analysis.status === 'ready' ? card('Not run', 'click to run the analysis') : card('Unavailable', 'Earth Engine unavailable');
   return card(stored.isError ? 'Unavailable' : '…');
 }
 

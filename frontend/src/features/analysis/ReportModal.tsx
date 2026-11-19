@@ -99,7 +99,7 @@ export function ReportModal() {
           <div className="text-right">
             <div className="t-label text-ink-3">Event brief</div>
             <div className="t-data mt-1 text-[14px] text-ink">#{p.id}</div>
-            <div className="text-[11px] text-ink-3">Generated {generated} · Live Earth Engine analysis</div>
+            <div className="text-[11px] text-ink-3">Generated {generated} · Google Earth Engine analysis</div>
           </div>
         </header>
         <section className="grid grid-cols-2 gap-4">

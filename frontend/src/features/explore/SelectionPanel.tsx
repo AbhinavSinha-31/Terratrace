@@ -141,10 +141,10 @@ function SelectionPanelBody({ selection }: { selection: NonNullable<ReturnType<t
         {tooSmall && <StateView compact kind="error" title="Area too small">Select at least {min} km² so change regions can exceed the minimum mapping unit.</StateView>}
         {invalidShape && <StateView compact kind="error" title="Invalid area shape"><span data-testid="area-invalid" data-code={invalidShape.code ?? ''}>{invalidShape.message}</span></StateView>}
         {tooHeavy && <StateView compact kind="error" title="Analysis area exceeds the interactive limit">Analysis area exceeds TerraTrace's {interactiveMax?.toLocaleString()} km² limit. Select a smaller area — no forest-change analysis is run for this one.</StateView>}
-        {!tooLarge && !tooSmall && !tooHeavy && backendDown && <StateView compact kind="service-unavailable" title="Live analysis unavailable">Live Earth observation is temporarily unavailable. TERRATRACE does not display estimated, simulated, or placeholder measurements.</StateView>}
+        {!tooLarge && !tooSmall && !tooHeavy && backendDown && <StateView compact kind="service-unavailable" title="Analysis unavailable">Earth Engine analysis is temporarily unavailable. TERRATRACE does not display estimated, simulated, or placeholder measurements.</StateView>}
         {!tooLarge && !tooSmall && !tooHeavy && !backendDown && health && !eeReady && (
-          <StateView compact kind="service-unavailable" title="Live analysis unavailable">
-            Live Earth observation is temporarily unavailable. You can still open the area to explore real imagery — no measurements will be shown.
+          <StateView compact kind="service-unavailable" title="Analysis unavailable">
+            Earth Engine analysis is temporarily unavailable. You can still open the area to explore real imagery — no measurements will be shown.
           </StateView>
         )}
         <Button
@@ -155,7 +155,7 @@ function SelectionPanelBody({ selection }: { selection: NonNullable<ReturnType<t
           {eeReady || !health ? 'Analyze forest change' : 'Open area · imagery only'}
         </Button>
         <div className="flex items-center justify-between">
-          <Badge tone={eeReady ? 'forest' : 'warn'}>{eeReady ? 'Live Earth observation' : 'Live analysis unavailable'}</Badge>
+          <Badge tone={eeReady ? 'forest' : 'warn'}>{eeReady ? 'Earth Engine ready' : 'Analysis unavailable'}</Badge>
           <div className="flex gap-1">
             <Tooltip content="Redraw as rectangle"><IconButton label="Redraw as rectangle" size="sm" onClick={() => setDrawTool('rect')}><SquareDashed size={14} /></IconButton></Tooltip>
             <Tooltip content="Redraw as polygon"><IconButton label="Redraw as polygon" size="sm" onClick={() => setDrawTool('polygon')}><Hexagon size={14} /></IconButton></Tooltip>

@@ -25,7 +25,7 @@ const ANALYSIS_TIMEOUT_MS = 200000;
 
 /** Public product language (mirrors backend app/errors.py). Never engineering or setup text. */
 export const PUBLIC = {
-  unavailable: 'Live Earth observation is temporarily unavailable for this investigation. TERRATRACE does not display estimated, simulated, or placeholder measurements.',
+  unavailable: 'Earth Engine analysis is temporarily unavailable for this investigation. TERRATRACE does not display estimated, simulated, or placeholder measurements.',
   timeout: 'The requested analysis exceeded the available computation window. No forest-change measurements were generated.',
   failed: 'The analysis could not be completed. No forest-change measurements were generated.',
 } as const;
@@ -157,7 +157,7 @@ export const client = {
       backend = false;
       return {
         backend: false, status: 'degraded', version: '—', engine: 'TERRATRACE ENGINE', dataMode: 'LIVE',
-        analysis: { status: 'offline', detail: 'Live analysis unavailable' },
+        analysis: { status: 'offline', detail: 'Analysis unavailable' },
         explainer: { status: 'offline', detail: 'Unavailable' },
         geocoder: { status: 'offline', detail: 'Offline gazetteer' },
         limits: { max_aoi_km2: 2500, min_aoi_km2: 0.5 },
@@ -373,11 +373,11 @@ export const client = {
   /** Explanations exist only for READY live facts, and only server-side. */
   async explain(facts: ExplanationFacts): Promise<Explanation> {
     const withheld = (notice: string): Explanation => ({ text: NO_ANALYSIS_TEXT, source: 'none', facts_used: 0, generated_at: new Date().toISOString(), notice });
-    if (facts.data_mode !== 'LIVE' || facts.analysis_status !== 'READY') return withheld('Explanation withheld: no completed live analysis.');
-    if (backend === false) return withheld('Explanations are available only for completed live analyses.');
+    if (facts.data_mode !== 'LIVE' || facts.analysis_status !== 'READY') return withheld('Explanation withheld: no published analysis.');
+    if (backend === false) return withheld('Explanations are available only for published analyses.');
     return request<Explanation>(`${API}/explain`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facts }), timeoutMs: 50000 });
   },
 };
 
 export const NO_ANALYSIS_TEXT =
-  "I don't have a completed satellite analysis for this area yet. Live Earth Engine analysis is required before I can interpret any results — I will not describe changes that have not been measured.";
+  "I don't have a completed satellite analysis for this area yet. A completed Earth Engine analysis is required before I can interpret any results — I will not describe changes that have not been measured.";

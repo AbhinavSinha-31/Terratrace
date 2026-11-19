@@ -124,7 +124,7 @@ def start(aid: str) -> dict[str, Any]:
                 "reason": f"Limited to {settings.interactive_max_km2:,.0f} km²; this area is {target['area_km2']:,.0f} km²."}
     if not P.provider.credentials_configured():
         return {"aoi_id": aid, "status": "UNAVAILABLE", "retryable": False,
-                "reason": "Live Earth Engine is not configured on this server."}
+                "reason": "Google Earth Engine is not configured on this server."}
     fut = _running.get(aid)
     if fut is None or fut.done():
         _failures.pop(aid, None)

@@ -13,7 +13,7 @@ const TIERS = {
     hint: 'Custom Random Forest classification and a reviewed research pipeline, with a PDF report. Accuracy is reported as agreement with reference labels.',
   },
   live: {
-    label: 'Live analysis', tone: 'accent', Icon: Activity,
+    label: 'Published analysis', tone: 'accent', Icon: Activity,
     hint: "TerraTrace's own forest-change method, computed for this area in Google Earth Engine and checked by its validity rules.",
   },
   quick: {

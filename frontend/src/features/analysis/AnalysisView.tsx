@@ -141,7 +141,7 @@ function ReadyToAnalyze({ name }: { name?: string }) {
         <p className="text-[12.5px] leading-relaxed text-ink-2">
           Baseline <b className="t-data text-ink">{b}</b> → comparison <b className="t-data text-ink">{c}</b>. No analysis has been run for these years yet.
         </p>
-        <Button variant="brand" onClick={() => useUi.getState().requestAnalysis()}>Run live analysis {b} → {c}</Button>
+        <Button variant="brand" onClick={() => useUi.getState().requestAnalysis()}>Run analysis {b} → {c}</Button>
         <div className="pt-2"><AreaContextPanel /></div>
         <div className="pt-2"><QuickScanPanel /></div>
       </div>

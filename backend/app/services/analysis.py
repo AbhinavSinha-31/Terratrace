@@ -91,7 +91,11 @@ def aoi_doc(aid: str) -> dict[str, Any]:
         raise AnalysisNotFound(aid)
     f = AOIS / f"{aid}.json"
     if f.exists():
-        return json.loads(f.read_text(encoding="utf-8"))
+        doc = json.loads(f.read_text(encoding="utf-8"))
+        if not doc.get("thumbnail_url") and doc.get("bbox"):
+            from . import imagery   # imagery imports analysis: imported here, not at module level
+            doc["thumbnail_url"] = imagery.thumbnail_for(doc["bbox"])   # imagery only (globe mosaic tile)
+        return doc
     raise AnalysisNotFound(aid)
 
 

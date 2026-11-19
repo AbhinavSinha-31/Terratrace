@@ -61,7 +61,7 @@ export function Overview() {
         <div className="t-label text-ink-3">Analysis window</div>
         <div className="mt-1.5 flex items-baseline justify-between gap-3">
           <div className="t-h1 t-data">{win.start} <span className="text-ink-3">→</span> {win.end}</div>
-          <Badge tone="forest">Live · Earth Engine</Badge>
+          <Badge tone="forest">Google Earth Engine</Badge>
         </div>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{aoi?.description}</p>
         {statement && (

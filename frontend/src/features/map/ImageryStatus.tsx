@@ -45,7 +45,7 @@ export function ImageryStatus() {
     return (
       <div className="min-w-0" {...attrs}>
         <div className={`t-label flex items-center gap-1.5 ${coveredByAnalysis ? 'text-live' : 'text-ink-2'}`}>
-          <Satellite size={11} />{coveredByAnalysis ? 'Analysis composite' : im.source === 'esri-current' ? 'Current basemap imagery · no analysis' : 'Live satellite imagery · no analysis'}
+          <Satellite size={11} />{coveredByAnalysis ? 'Analysis composite' : im.source === 'esri-current' ? 'Current basemap imagery · no analysis' : 'Satellite imagery · no analysis'}
         </div>
         <div className="t-data mt-1 truncate text-[12.5px] text-ink" data-testid="imagery-line" title={im.label}>{im.label}</div>
         {throttling && im.provider === 'Google Earth Engine'

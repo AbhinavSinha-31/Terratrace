@@ -97,14 +97,14 @@ def test_identical_concurrent_requests_share_one_computation(ee_ready, monkeypat
 
 def test_health_reveals_no_configuration_details(ee_ready):
     h = client.get("/api/health").json()
-    assert h["analysis"] == {"status": "ready", "detail": "Live Earth observation available"}
+    assert h["analysis"] == {"status": "ready", "detail": "Earth Engine analysis available"}
     assert "secret-proj" not in json.dumps(h) and not no_leaks(h)
 
 
 def test_unconfigured_health_is_public(monkeypatch):
     monkeypatch.setattr(analysis.ee_provider, "status", lambda: ("unconfigured", "set EE_PROJECT in backend/.env and run earthengine authenticate"))
     h = client.get("/api/health").json()
-    assert h["analysis"]["detail"] == "Live analysis unavailable" and not no_leaks(h)
+    assert h["analysis"]["detail"] == "Analysis unavailable" and not no_leaks(h)
 
 
 def test_validation_errors_are_public():

@@ -193,16 +193,6 @@ export function Author({ userId, name, avatar, official, when, size = 'sm', stro
   );
 }
 
-// ---------------------------------------------------------------- thumbnails
-/** Sentinel-2 cloudless (EOX) tile at zoom 10 around a bbox centre — the same imagery as the featured cards. */
-export function tileThumb(bbox: [number, number, number, number]): string {
-  const lon = (bbox[0] + bbox[2]) / 2, lat = (bbox[1] + bbox[3]) / 2, n = 2 ** 10;
-  const x = Math.floor(((lon + 180) / 360) * n);
-  const r = (lat * Math.PI) / 180;
-  const y = Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n);
-  return `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/${y}/${x}.jpg`;
-}
-
 // ---------------------------------------------------------------- loading
 export function PostCardSkeleton() {
   return (

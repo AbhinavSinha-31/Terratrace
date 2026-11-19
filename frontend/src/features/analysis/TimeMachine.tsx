@@ -166,7 +166,7 @@ export function TimeMachine({ compact = false }: { compact?: boolean }) {
         </div>
         {idle && (
           <div className="flex items-center gap-2" data-testid="pending-window">
-            <Button size="sm" variant="brand" className="!h-7" onClick={() => ui().requestAnalysis()}>Run live analysis {win.start} → {win.end}</Button>
+            <Button size="sm" variant="brand" className="!h-7" onClick={() => ui().requestAnalysis()}>Run analysis {win.start} → {win.end}</Button>
             <span className="text-[10.5px] text-ink-4">not yet analysed</span>
           </div>
         )}

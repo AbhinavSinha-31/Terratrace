@@ -98,7 +98,7 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
         <Badge tone="accent" icon={<BookOpenText size={11} />}>Landsat {years}</Badge>
         <span className="inline-flex items-center gap-1">
           <Badge>Precomputed analysis · interactive map</Badge>
-          <Tooltip content={`Computed from Landsat satellite data with TerraTrace's analysis pipeline. Results are fixed for ${d.study.years.join(' and ')}; live re-analysis is coming later.`}>
+          <Tooltip content={`Computed from Landsat satellite data with TerraTrace's analysis pipeline. Results are fixed for ${d.study.years.join(' and ')}; interactive re-analysis is coming later.`}>
             <button type="button" aria-label="About these results" className="tt-press grid h-6 w-6 place-items-center rounded-full text-ink-3 hover:text-ink">
               <Info size={13} />
             </button>
@@ -512,7 +512,7 @@ export function CaseStudyPage() {
                 <footer className="border-t border-line pt-4 text-[11.5px] leading-relaxed text-ink-4">
                   Precomputed case study generated {data.generated_utc.slice(0, 10)} by the TerraTrace analysis pipeline v{data.pipeline_version} from
                   precomputed tables (Landsat Collection 2 via Google Earth Engine; GLC-FCS30D, ESA WorldCover, Dynamic World labels; GHSL population).
-                  It is not a live TerraTrace analysis and is not counted in the homepage totals.
+                  It is not an interactive TerraTrace analysis and is not counted in the homepage totals.
                 </footer>
               </>
             )}

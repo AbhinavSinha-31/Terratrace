@@ -73,7 +73,7 @@ def test_featured_analysis_unavailable_without_earth_engine(aid):
         assert "exceeds TerraTrace's 1,500 km² limit" in env["reason"]
     else:
         assert env["reasonCode"] == "service_unavailable" and env["error"]["retryable"] is True
-        assert env["reason"].startswith("Live Earth observation is temporarily unavailable")
+        assert env["reason"].startswith("Earth Engine analysis is temporarily unavailable")
     assert not any(env.get(k) for k in METRIC_KEYS), "no metrics may be returned when unavailable"
     assert env["source"] == {"landsat": False, "sentinel2": False, "dynamicWorld": False, "hansen": False}
     assert env["aoi"]["id"] == aid

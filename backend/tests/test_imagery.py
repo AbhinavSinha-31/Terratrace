@@ -300,3 +300,12 @@ def test_tile_failure_caused_by_earth_engine_is_transient(monkeypatch):
     monkeypatch.setattr(imagery.ee_provider, "status", lambda: ("error", "HTTPSConnectionPool: Max retries exceeded (NameResolutionError)"))
     r = client.get(f"/api/imagery/tiles/{AID}/2020/10/1/2", follow_redirects=False)
     assert r.status_code == 503 and r.json()["detail"]["retryable"] is True
+
+
+def test_custom_areas_get_a_backend_thumbnail_like_the_featured_cards():
+    from app.services import analysis
+    from app.services.imagery import thumbnail_for
+    # The featured Rondônia card's own thumbnail is this same tile (zoom 10, y 540, x 331).
+    assert thumbnail_for([-63.62, -10.05, -63.18, -9.72]).endswith("/g/10/540/331.jpg")
+    aid, _ = analysis.register_aoi({"type": "Polygon", "coordinates": [[[77.0, 28.4], [77.1, 28.4], [77.1, 28.5], [77.0, 28.5], [77.0, 28.4]]]}, "t")
+    assert analysis.aoi_doc(aid)["thumbnail_url"].startswith("https://tiles.maps.eox.at/")

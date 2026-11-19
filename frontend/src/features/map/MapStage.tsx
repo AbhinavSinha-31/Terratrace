@@ -167,9 +167,17 @@ function OrbitOverlay() {
         <ellipse rx={r * 1.32} ry={r * 0.36} fill="none" stroke="url(#orbit-g)" strokeWidth="1" />
         <ellipse rx={r * 1.18} ry={r * 0.62} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1" transform="rotate(38)" />
         {!reduced && (
-          <circle r="2.6" fill="#e9fffc">
-            <animateMotion dur="26s" repeatCount="indefinite" path={`M ${r * 1.32} 0 A ${r * 1.32} ${r * 0.36} 0 1 1 ${-r * 1.32} 0 A ${r * 1.32} ${r * 0.36} 0 1 1 ${r * 1.32} 0`} />
-          </circle>
+          // A small satellite (body + two solar panels, turned along its orbit) — clearly not a stray dot.
+          <g data-testid="orbit-satellite">
+            <animateMotion dur="26s" repeatCount="indefinite" rotate="auto" path={`M ${r * 1.32} 0 A ${r * 1.32} ${r * 0.36} 0 1 1 ${-r * 1.32} 0 A ${r * 1.32} ${r * 0.36} 0 1 1 ${r * 1.32} 0`} />
+            <circle r="9" fill="#45d0c4" opacity="0.14" />
+            <line x1="0" y1="-3" x2="0" y2="-4.2" stroke="#9fe9e2" strokeWidth="0.8" />
+            <line x1="0" y1="3" x2="0" y2="4.2" stroke="#9fe9e2" strokeWidth="0.8" />
+            <rect x="-2.4" y="-10.2" width="4.8" height="6" rx="0.6" fill="#1b6f88" stroke="#7fd6ff" strokeWidth="0.6" />
+            <rect x="-2.4" y="4.2" width="4.8" height="6" rx="0.6" fill="#1b6f88" stroke="#7fd6ff" strokeWidth="0.6" />
+            <rect x="-3" y="-3" width="6" height="6" rx="1" fill="#e9fffc" />
+            <circle cx="3.6" r="0.9" fill="#45d0c4" />
+          </g>
         )}
       </g>
     </svg>
