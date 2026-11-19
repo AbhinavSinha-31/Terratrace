@@ -4,10 +4,10 @@ import { MessagesSquare, X } from 'lucide-react';
 import { IconButton } from '../../design';
 import { GENERAL, useChat } from '../../state/chat';
 import { ChatPanel } from './ChatPanel';
-import { GENERAL_STARTERS, GREETING } from './starters';
+import { GENERAL_STARTERS, GREETING, ASK_SUBTITLE } from './starters';
 
 
-/** The "Ask me anything" page: a full page over the map (general questions; no area facts). */
+/** The "Ask TerraTrace" page: a full page over the map (general questions; no area facts). */
 export function AskPage() {
   const open = useChat((s) => s.askOpen);
   const close = useChat((s) => s.closeAsk);
@@ -28,8 +28,8 @@ export function AskPage() {
               <div className="flex items-center gap-3">
                 <div className="grid h-10 w-10 place-items-center rounded-md bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.35)]"><MessagesSquare size={19} /></div>
                 <div>
-                  <h1 id="ask-title" className="t-h1">Ask me anything</h1>
-                  <p className="text-[12.5px] text-ink-3">About forests, Earth observation and TerraTrace.</p>
+                  <h1 id="ask-title" className="t-h1">Ask TerraTrace</h1>
+                  <p className="text-[12.5px] text-ink-3">{ASK_SUBTITLE}</p>
                 </div>
               </div>
               <IconButton label="Close" onClick={close}><X size={17} /></IconButton>

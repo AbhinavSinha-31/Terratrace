@@ -407,3 +407,26 @@ re-run before the chat is enabled for anyone.
   still be described loosely (gross loss transitions called "deforestation"), and qualitative statements ("the forest
   is healthy") must cite a fact but are not verified against it.
 * **Reference segments** may paraphrase a cited entry inaccurately if they state no number.
+
+## 12. Land cover, urban expansion, heat and carbon (quick scans) — and year limits
+
+These are TerraTrace measurements from public datasets (see docs/QUICKSCAN_PLAN.md for the full rules); they are
+labelled "agreement, not accuracy" and are never mixed with the forest figures above.
+
+| Measurement | Dataset | First year | Rule |
+|---|---|---|---|
+| Satellite imagery | Landsat Collection 2 | 1984 | imagery only |
+| Satellite imagery | Sentinel-2 SR Harmonized | 2017 | imagery only |
+| Forest and forest change | Sentinel-2 + Dynamic World | 2016 | sections 1–7 |
+| Land cover (LULC) | Dynamic World V1 | 2016 (first full year) | annual mean probability, top class, 30 m mode |
+| Land surface temperature | Landsat 8 (from 2013) and 9 (from late 2021), C2 L2 `ST_B10` | 2013 | median of ≥ 5 clear scenes per season |
+| Above-ground biomass carbon (estimate) | ESA CCI Biomass v6.0 × 0.47 | 2007, 2010, 2015–2022 | change measured 2015 → 2022 |
+
+- **Study-design classes.** Forest (trees), Cropland (crops), Built-up (built), Water, Barren (bare), Grass/Shrub
+  (grass + shrub and scrub); flooded vegetation and snow/ice are listed separately.
+- **Urban expansion** = the change in Dynamic World *built* area between two annual scans of the same area and season:
+  a net change in mapped area per class, not a pixel-by-pixel transition map.
+- **Surface urban heat island** = mean daytime LST of built-up land − mean LST of a reference, area-weighted, water
+  excluded: (a) all other land; (b) vegetated land only (trees, crops, grass, shrub, flooded vegetation; bare ground
+  excluded). Reported only when built-up land is ≥ 5 % of the land and ≥ 2 km² (and the reference ≥ 2 km²). Landsat
+  passes at about 10:30 local time: a surface, not an air, temperature.

@@ -76,7 +76,7 @@ def test_no_stored_scan_no_quick_scan_facts():
 
 def test_the_prompt_explains_how_quick_scan_facts_may_be_described():
     text = prompt.system_instruction("Hasdeo Arand", [], [])
-    assert prompt.PROMPT_VERSION == "chat-4"
+    assert prompt.PROMPT_VERSION == "chat-5"
     for must in ("never call it forest cover", "never call it total, ecosystem or soil carbon", "never \"TerraTrace's classification\""):
         assert must in text
 
