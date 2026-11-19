@@ -40,7 +40,17 @@ const session = (u) => {
 const state = { profile: null, signedIn: null, calls: [], scans: [] };
 const json = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+// A 1×1 PNG served for uploaded avatars.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+
 async function fakeSupabase(context) {
+  await context.route(/\/storage\/v1\/object\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    state.calls.push({ method: req.method(), path: url.pathname, query: url.search, body: null, headers: req.headers() });
+    if (url.pathname.includes('/object/public/')) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
+    return json(route, 200, { Key: url.pathname.replace(/^.*\/object\//, ''), Id: 'obj-1' });
+  });
   await context.route(/\/auth\/v1\//, async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -153,6 +163,18 @@ try {
     const patch = lastCall('/rest/v1/profiles', 'PATCH');
     check('update sends only display_name, scoped to the user', !!patch && JSON.stringify(patch.body) === '{"display_name":"Reader Prime"}' && patch.query.includes(`id=eq.${USER_ID}`), JSON.stringify(patch));
     check('header picks up the new name', ((await page.getByTestId('account-button').getAttribute('aria-label')) ?? '').includes('Reader Prime'));
+
+    // 4a. avatar: initials first; upload → Storage (own folder) → profiles.avatar_url → shown in the page and the nav
+    check('without a photo the avatar shows initials', (await page.getByTestId('avatar-editor').locator('[data-avatar="initials"]').innerText()) === 'RP');
+    await page.getByTestId('avatar-input').setInputFiles({ name: 'me.txt', mimeType: 'text/plain', buffer: Buffer.from('x') });
+    check('a non-image file is refused before upload', await page.getByTestId('avatar-error').isVisible() && !lastCall('/avatars/', 'POST'));
+    await page.getByTestId('avatar-input').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: PNG });
+    check('the photo appears after upload', await page.getByTestId('avatar-editor').locator('img[data-avatar="image"]').waitFor({ timeout: 8000 }).then(() => true, () => false));
+    const upload = [...state.calls].reverse().find((c) => c.path.includes('/storage/v1/object/avatars/'));
+    check("it is uploaded into the user's own folder with their token", !!upload && upload.path.endsWith(`/avatars/${USER_ID}/avatar`) && upload.headers.authorization?.startsWith('Bearer ey'), upload?.path);
+    const saved = lastCall('/rest/v1/profiles', 'PATCH');
+    check('profiles.avatar_url is set to the public URL', /\/storage\/v1\/object\/public\/avatars\/.+\/avatar\?v=\d+$/.test(saved?.body?.avatar_url ?? ''), JSON.stringify(saved?.body));
+    check('the nav account button shows the photo', await page.getByTestId('account-button').locator('img[data-avatar="image"]').waitFor({ timeout: 8000 }).then(() => true, () => false));
 
     // 4b. My scans: listed from Supabase with the user's token, and reopened as an analysis link
     state.scans = [{ id: '0b8c7a52-5d0e-4a8e-9a43-2f3c2f7f9a10', user_id: USER_ID, aoi_id: 'rondonia-frontier', name: 'Rondônia frontier', baseline: 2019, comparison: 2025,

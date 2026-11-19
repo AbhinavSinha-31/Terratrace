@@ -57,7 +57,10 @@ async function fake(context) {
       db.writes.push({ table, method, body: req.postDataJSON?.() ?? null, authed });
       if (!authed) return json(route, 401, { code: '42501', message: 'permission denied' });
     }
-    if (table === 'profiles') return json(route, 200, single ? { id: USER_ID, display_name: 'Reader One', avatar_url: null, created_at: now(), updated_at: now() } : []);
+    if (table === 'profiles') {
+      const row = { id: USER_ID, display_name: 'Reader One', avatar_url: null, created_at: now(), updated_at: now() };
+      return json(route, 200, single ? row : [row]);   // maybeSingle() asks for an array
+    }
     if (table === 'saved_scans') return json(route, 200, []);
     if (table === 'post_feed') {
       const id = eqParam(url, 'id');
@@ -121,6 +124,10 @@ try {
   check('Community nav opens #/community with the feed', (await visible('post-card')) && hash() === '#/community', hash());
   const navHeights = await page.getByRole('navigation', { name: 'Primary' }).getByRole('button').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
   check('nav labels stay on one line at 1366 px', navHeights.every((h) => h <= 64), JSON.stringify(navHeights));
+  const seedCard = page.getByTestId('post-card').filter({ hasText: 'Rondônia deforestation frontier' });
+  check('official posts show the TERRATRACE logo and an Official badge', (await seedCard.getByTestId('official-badge').isVisible()) && (await seedCard.locator('[data-avatar="official"] svg').count()) === 1);
+  check('a post linked to an analysis shows its thumbnail', await seedCard.getByTestId('post-thumb').isVisible());
+  check('the time has the full date in its title', /\d{4}/.test((await seedCard.locator('time').getAttribute('title')) ?? ''));
   await page.getByTestId('post-link').first().click();
   check('a guest can open a post', (await visible('post-page')) && hash().startsWith('#/community/'), hash());
   check('the linked analysis shows figures from the backend', (await visible('analysis-card')) && await page.getByTestId('analysis-card').getByText('−2,500 ha').isVisible());
@@ -136,12 +143,14 @@ try {
   await page.getByTestId('sign-in-dialog').waitFor({ state: 'detached', timeout: 8000 });
   await page.getByTestId('upvote').first().click();
   await page.waitForTimeout(500);
+  check('my vote lights the control in the accent colour', (await page.getByTestId('vote-post').first().getAttribute('data-voted')) === '1');
   check('a signed-in upvote inserts one vote (+1)', db.votes.length === 1 && db.votes[0].value === 1 && db.posts[0].score === 1, JSON.stringify(db.votes));
   await page.getByTestId('downvote').first().click();
   await page.waitForTimeout(500);
   check('switching to a downvote updates the same vote (-1)', db.votes.length === 1 && db.votes[0].value === -1 && db.posts.find((p) => p.id === SEED).score === -1, JSON.stringify(db.votes));
 
   // comment + threaded reply
+  check('the comment box shows my avatar', (await page.getByTestId('comment-form').locator('[data-avatar="initials"]').innerText()) === 'RO');
   await page.getByTestId('comment-form').getByLabel('Comment').fill('The road network matters **a lot** here.');
   await page.getByTestId('comment-form').getByRole('button', { name: 'Comment' }).click();
   check('a comment is posted and rendered as markdown', await page.getByTestId('comment').locator('strong', { hasText: 'a lot' }).waitFor({ timeout: 8000 }).then(() => true, () => false));
@@ -150,6 +159,7 @@ try {
   await page.getByTestId('reply-form').getByRole('button', { name: 'Reply' }).click();
   await page.getByText('Agreed — see the fishbone pattern.').waitFor({ timeout: 8000 });
   const reply = db.comments.find((c) => c.body.startsWith('Agreed'));
+  check('comments show the author avatar and name', (await page.getByTestId('comment').first().locator('[data-avatar]').count()) >= 1 && (await page.getByTestId('comment').first().getByTestId('author-name').first().innerText()) === 'Reader One');
   check('a reply is stored under its parent (threaded)', !!reply && reply.parent_id === db.comments[0].id, JSON.stringify(db.comments));
   await page.waitForTimeout(800);
   const nested = await page.getByTestId('comment').first().getByTestId('comment').count();
@@ -158,6 +168,7 @@ try {
   // new post from "Discuss" (pre-filled analysis) → publish → post page
   await page.goto(`${BASE}#/community/new`, { waitUntil: 'domcontentloaded' });
   await visible('new-post-form');
+  check('the composer shows who is posting', (await page.getByTestId('composer-author').innerText()).includes('Reader One'));
   await page.getByLabel('Title').fill('Similipal fire scars in 2021');
   await page.getByLabel('Body (markdown)').fill('Which of these recover by **2023**?');
   await page.getByLabel('Tags').fill('fire india');
@@ -169,6 +180,7 @@ try {
   // tag filter
   await page.goto(`${BASE}#/community?tag=deforestation`, { waitUntil: 'domcontentloaded' });
   await visible('post-card');
+  check('the active tag filter is highlighted', (await page.locator('[data-active="true"]').innerText()).includes('deforestation'));
   check('a tag link filters the feed', (await page.getByTestId('post-card').count()) === 1 && hash() === '#/community?tag=deforestation');
 
   // phone

@@ -21,6 +21,19 @@ const SUPABASE_STUB = `
   grant execute on function auth.uid() to anon, authenticated;
   -- Supabase grants every new public table to the API roles; RLS and explicit revokes must do the protecting.
   alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  -- Supabase Storage (only what the avatars migration relies on): buckets, objects with RLS on, storage.foldername().
+  create schema storage;
+  create table storage.buckets (id text primary key, name text not null, public boolean default false,
+                                file_size_limit bigint, allowed_mime_types text[]);
+  create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets (id),
+                                name text not null, owner uuid default auth.uid(), unique (bucket_id, name));
+  alter table storage.objects enable row level security;
+  create function storage.foldername(name text) returns text[] language sql immutable
+    as $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+  grant usage on schema storage to anon, authenticated, service_role;
+  grant all on storage.objects to anon, authenticated;
+  grant select on storage.buckets to anon, authenticated;
+  grant execute on function storage.foldername(text) to anon, authenticated;
 `;
 
 const db = new PGlite();
@@ -215,6 +228,33 @@ check('trigger functions are not callable by users', !!r.error, JSON.stringify(r
 
 await db.exec(`delete from auth.users where id = '${plain.id}'`);
 check('deleting the auth user deletes the profile', (await rows('select 1 from public.profiles where id = $1', [plain.id])).length === 0);
+
+// ---- avatars storage (20261120090000_avatars_storage.sql)
+const [bucket] = await rows(`select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'avatars'`);
+check('the avatars bucket exists, public, 2 MB, images only', bucket?.public === true && Number(bucket.file_size_limit) === 2097152 && bucket.allowed_mime_types.includes('image/png'), JSON.stringify(bucket));
+r = await as('authenticated', google.id, `insert into storage.objects (bucket_id, name) values ('avatars', $1) returning id`, [`${google.id}/avatar`]);
+check('a user can upload their own avatar', r.rows?.length === 1, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into storage.objects (bucket_id, name) values ('avatars', $1)`, [`${early.id}/avatar`]);
+check("a user cannot upload into someone else's folder", !!r.error, JSON.stringify(r));
+r = await as('authenticated', google.id, `insert into storage.objects (bucket_id, name) values ('avatars', 'avatar')`);
+check('a file outside any user folder is refused', !!r.error, JSON.stringify(r));
+r = await as('anon', null, `insert into storage.objects (bucket_id, name) values ('avatars', $1)`, [`${google.id}/x`]);
+check('guests cannot upload', !!r.error, JSON.stringify(r));
+r = await as('authenticated', early.id, `update storage.objects set name = name where bucket_id = 'avatars' and name = $1 returning id`, [`${google.id}/avatar`]);
+check("a user cannot replace someone else's avatar", r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', early.id, `delete from storage.objects where bucket_id = 'avatars' and name = $1 returning id`, [`${google.id}/avatar`]);
+check("a user cannot delete someone else's avatar", r.rows?.length === 0, JSON.stringify(r));
+r = await as('anon', null, `select name from storage.objects where bucket_id = 'avatars'`);
+check('nobody can list the bucket through the API (public URLs only)', r.rows?.length === 0, JSON.stringify(r));
+r = await as('authenticated', google.id, `select name from storage.objects where bucket_id = 'avatars'`);
+check('the owner sees only their own file (needed for replace)', r.rows?.length === 1 && r.rows[0].name === `${google.id}/avatar`, JSON.stringify(r));
+r = await as('authenticated', google.id, `update public.profiles set avatar_url = 'https://kmjranrbtlxbsvrtpxpl.supabase.co/storage/v1/object/public/avatars/x/avatar?v=1' where id = $1 returning avatar_url`, [google.id]);
+check('the public Storage URL can be saved as avatar_url', r.rows?.length === 1, JSON.stringify(r));
+r = await as('anon', null, `select author_avatar from public.post_feed limit 1`);
+check('post_feed exposes author_name and author_avatar', !r.error, JSON.stringify(r));
+let twice = null;
+try { await db.exec(readFileSync(join(MIGRATIONS, '20261120090000_avatars_storage.sql'), 'utf8')); } catch (e) { twice = e.message; }
+check('the avatars migration can be run again safely', twice === null, twice ?? '');
 
 // ---- repair migration (20261118090000_repair_data_api.sql): idempotent, and explicit when tables are missing
 const repair = readFileSync(join(MIGRATIONS, '20261118090000_repair_data_api.sql'), 'utf8');

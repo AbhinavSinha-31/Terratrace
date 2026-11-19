@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowUpRight, Flame, Clock, MessageSquare, PenSquare, Search, Satellite, Trash2, Trophy, Reply, Pencil } from 'lucide-react';
-import { Button, Segmented, Skeleton, StateView } from '../../design';
+import { ArrowUpRight, Flame, Clock, MapPin, MessageSquare, MessagesSquare, PenSquare, Search, Satellite, Trash2, Trophy, Reply, Pencil } from 'lucide-react';
+import { Avatar, Button, Segmented, Skeleton, StateView } from '../../design';
 import { client } from '../../data/client';
+import { useStudyAreas } from '../../data/queries';
 import { fmtHa } from '../../lib/format';
 import { useUi, type OverlayPage } from '../../state/store';
 import { openSignIn, requireSignIn, useAuth } from '../../state/auth';
+import { useMe } from '../account/profile';
 import { FullPage } from '../shell/FullPage';
 import { Markdown } from './Markdown';
 import { useCompose } from './compose';
@@ -14,10 +16,33 @@ import {
   LIMITS, TAG, parseTags, useAddComment, useComments, useCreatePost, useDeleteComment, useDeletePost, useFeed,
   useMyFeedVotes, useMyVotes, usePost, useUpdatePost, type Comment, type Post, type Sort,
 } from './api';
-import { Author, CommunityToasts, ErrorBody, FormError, Input, Labeled, TagChip, TextArea, VoteControl, toast, toastError } from './ui';
+import {
+  Author, CommentSkeleton, CommunityToasts, ErrorBody, FormError, Input, Labeled, PostCardSkeleton, TagChip, TextArea, TimeAgo,
+  VoteControl, tileThumb, toast, toastError,
+} from './ui';
 
 const go = (page: OverlayPage) => useUi.getState().openPage(page);
 const SUGGESTED_TAGS = ['deforestation', 'india', 'amazon', 'mining', 'fire', 'urban-heat', 'land-cover', 'methods', 'featured'];
+
+/** Thumbnail of a post's linked analysis: the featured area's own card image, else satellite imagery at its bbox. */
+function useAnalysisThumb(post: Pick<Post, 'aoi_id' | 'bbox'>): string | null {
+  const featured = useStudyAreas().data?.items;
+  if (!post.aoi_id) return null;
+  const f = featured?.find((a) => a.id === post.aoi_id);
+  if (f?.thumbnail_url) return f.thumbnail_url;
+  return post.bbox ? tileThumb(post.bbox) : null;
+}
+
+function Thumb({ src, className = '' }: { src: string; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return null;
+  return (
+    <div className={`relative shrink-0 overflow-hidden rounded-md bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.08)] ${className}`} data-testid="post-thumb">
+      <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.06]" />
+      <span className="absolute bottom-1 left-1 flex items-center gap-0.5 rounded-sm bg-black/60 px-1 py-px text-[9px] font-medium uppercase tracking-wider text-ink-2"><Satellite size={9} /> analysis</span>
+    </div>
+  );
+}
 
 // ------------------------------------------------------------------------------------- measured analysis card
 /** The analysis a post is about, with figures read from the TERRATRACE backend (never from the post). */
@@ -63,20 +88,29 @@ function AnalysisCard({ aoiId, baseline, comparison, region }: { aoiId: string; 
 }
 
 // ------------------------------------------------------------------------------------------------------- feed
+/** A feed row. The title is a stretched link (the whole card opens the post); votes, tags and time sit above it. */
 function PostCard({ post, myVote }: { post: Post; myVote: -1 | 0 | 1 }) {
+  const thumb = useAnalysisThumb(post);
+  const excerpt = post.body.replace(/[#*_>`[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 240);
   return (
-    <li className="tt-panel flex gap-3 p-3.5" data-testid="post-card">
+    <li className="group tt-panel relative flex gap-3 p-4 transition duration-200 hover:-translate-y-px hover:bg-white/[0.025] hover:shadow-[0_0_0_1px_rgba(69,208,196,0.28),0_14px_32px_-18px_rgba(69,208,196,0.45)] sm:gap-4" data-testid="post-card">
       <VoteControl kind="post" id={post.id} score={post.score} myVote={myVote} />
       <div className="min-w-0 flex-1">
-        <Author name={post.author_name} avatar={post.author_avatar} official={!post.author_id} when={post.created_at} size={18} />
-        <button onClick={() => go({ kind: 'post', id: post.id })} className="tt-press mt-1 block text-left text-[15px] font-semibold leading-snug text-ink hover:text-accent" data-testid="post-link">{post.title}</button>
-        <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-3">{post.body.replace(/[#*_>`[\]()-]/g, '').slice(0, 280)}</p>
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {post.region && <span className="text-[11px] text-ink-3">{post.region}</span>}
+        <Author userId={post.author_id} name={post.author_name} avatar={post.author_avatar} official={!post.author_id} when={post.created_at} />
+        <h2 className="mt-2">
+          <button onClick={() => go({ kind: 'post', id: post.id })} data-testid="post-link"
+            className="text-left text-[16px] font-semibold leading-snug tracking-[-0.01em] text-ink transition-colors after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] group-hover:text-accent focus-visible:outline-none focus-visible:after:shadow-[0_0_0_2px_rgba(69,208,196,0.7)]">
+            {post.title}
+          </button>
+        </h2>
+        {excerpt && <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-ink-3">{excerpt}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {post.region && <span className="mr-1 flex items-center gap-1 text-[11px] text-ink-3"><MapPin size={12} />{post.region}</span>}
           {post.tags.map((t) => <TagChip key={t} label={t} onClick={() => go({ kind: 'community', tag: t })} />)}
-          <span className="ml-auto flex items-center gap-1 text-[11.5px] text-ink-3"><MessageSquare size={13} /> {post.comment_count}</span>
+          <span className="ml-auto flex items-center gap-1 pl-2 text-[11.5px] text-ink-3" aria-label={`${post.comment_count} comments`}><MessageSquare size={13} /> {post.comment_count}</span>
         </div>
       </div>
+      {thumb && <Thumb src={thumb} className="hidden h-[92px] w-[132px] self-center sm:block" />}
     </li>
   );
 }
@@ -88,36 +122,48 @@ function Feed({ tag }: { tag: string | null }) {
   const feed = useFeed(sort, tag, search);
   const posts = useMemo(() => feed.data?.pages.flat() ?? [], [feed.data]);
   const votes = useMyFeedVotes(posts.map((p) => p.id)).data ?? {};
+  const startPost = () => { useCompose.getState().set(null); go({ kind: 'new-post' }); requireSignIn('Sign in to start a discussion.'); };
+  const filtered = !!(search || tag);
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 id="community-title" className="t-h1 text-ink">Community</h1>
-          <p className="mt-1 max-w-[560px] text-[12.5px] leading-relaxed text-ink-3">Discuss analyses and research reports: what the satellite record shows, what drives it, and what it misses. Anyone can read; sign in to post, comment and vote.</p>
+          <p className="mt-1.5 max-w-[560px] text-[12.5px] leading-relaxed text-ink-3">Discuss analyses and research reports: what the satellite record shows, what drives it, and what it misses. Anyone can read; sign in to post, comment and vote.</p>
         </div>
-        <Button variant="brand" icon={<PenSquare size={15} />} onClick={() => { useCompose.getState().set(null); go({ kind: 'new-post' }); requireSignIn('Sign in to start a discussion.'); }} data-testid="new-post">New post</Button>
+        <Button variant="brand" icon={<PenSquare size={15} />} onClick={startPost} data-testid="new-post">New post</Button>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Segmented label="Sort posts" value={sort} onChange={(v) => setSort(v)} options={[
-          { value: 'hot', label: <span className="flex items-center gap-1"><Flame size={13} />Hot</span> },
-          { value: 'new', label: <span className="flex items-center gap-1"><Clock size={13} />New</span> },
-          { value: 'top', label: <span className="flex items-center gap-1"><Trophy size={13} />Top</span> },
-        ]} />
-        <form className="relative min-w-[200px] flex-1" onSubmit={(e) => { e.preventDefault(); setSearch(draft); }} role="search">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
-          <Input aria-label="Search posts" placeholder="Search posts (press Enter)" value={draft} onChange={(e) => { setDraft(e.target.value); if (!e.target.value) setSearch(''); }} className="pl-8" data-testid="community-search" />
-        </form>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented label="Sort posts" value={sort} onChange={(v) => setSort(v)} options={[
+            { value: 'hot', label: <span className="flex items-center gap-1"><Flame size={13} />Hot</span> },
+            { value: 'new', label: <span className="flex items-center gap-1"><Clock size={13} />New</span> },
+            { value: 'top', label: <span className="flex items-center gap-1"><Trophy size={13} />Top</span> },
+          ]} />
+          <form className="relative min-w-[200px] flex-1" onSubmit={(e) => { e.preventDefault(); setSearch(draft); }} role="search">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
+            <Input aria-label="Search posts" placeholder="Search posts (press Enter)" value={draft} onChange={(e) => { setDraft(e.target.value); if (!e.target.value) setSearch(''); }} className="pl-8" data-testid="community-search" />
+          </form>
+        </div>
+        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 py-1" role="group" aria-label="Filter by tag">
+          <TagChip label="all" active={!tag} onClick={() => go({ kind: 'community' })} />
+          {SUGGESTED_TAGS.map((t) => <TagChip key={t} label={t} active={tag === t} onClick={() => go(tag === t ? { kind: 'community' } : { kind: 'community', tag: t })} />)}
+        </div>
       </div>
-      <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-        <TagChip label="all" active={!tag} onClick={() => go({ kind: 'community' })} />
-        {SUGGESTED_TAGS.map((t) => <TagChip key={t} label={t} active={tag === t} onClick={() => go({ kind: 'community', tag: t })} />)}
-      </div>
-      {feed.isLoading ? <div className="space-y-3"><Skeleton className="h-24 rounded-md" /><Skeleton className="h-24 rounded-md" /></div>
+      {feed.isLoading ? <ul className="space-y-3.5" aria-busy="true" aria-label="Loading posts">{[0, 1, 2].map((i) => <PostCardSkeleton key={i} />)}</ul>
         : feed.isError ? <StateView kind="error" title="The community could not be loaded" onRetry={() => feed.refetch()}><ErrorBody error={feed.error} /></StateView>
-        : !posts.length ? <StateView kind="empty" title={search || tag ? 'No posts match' : 'No posts yet'}>{search || tag ? 'Try another search or tag.' : 'Start the first discussion.'}</StateView>
-        : (
+        : !posts.length ? (
+          <div className="tt-panel" data-testid="community-empty">
+            <StateView kind="empty" title={filtered ? 'No posts match' : 'No discussions yet'}
+              action={filtered
+                ? <Button size="sm" variant="secondary" onClick={() => { setDraft(''); setSearch(''); go({ kind: 'community' }); }}>Clear filters</Button>
+                : <Button size="sm" variant="brand" icon={<PenSquare size={14} />} onClick={startPost}>Start the first discussion</Button>}>
+              {filtered ? `Nothing found${search ? ` for “${search}”` : ''}${tag ? ` in #${tag}` : ''}. Try another search or tag.` : 'Share what you found in an analysis, or ask the community about an area.'}
+            </StateView>
+          </div>
+        ) : (
           <>
-            <ul className="space-y-3">{posts.map((p) => <PostCard key={p.id} post={p} myVote={votes[p.id] ?? 0} />)}</ul>
+            <ul className="space-y-3.5">{posts.map((p) => <PostCard key={p.id} post={p} myVote={votes[p.id] ?? 0} />)}</ul>
             {feed.hasNextPage && <div className="flex justify-center"><Button variant="secondary" onClick={() => void feed.fetchNextPage()} disabled={feed.isFetchingNextPage}>{feed.isFetchingNextPage ? 'Loading…' : 'Load more'}</Button></div>}
           </>
         )}
@@ -129,58 +175,91 @@ function Feed({ tag }: { tag: string | null }) {
 function CommentForm({ postId, parentId, onDone, autoFocus }: { postId: string; parentId: string | null; onDone?: () => void; autoFocus?: boolean }) {
   const [body, setBody] = useState('');
   const add = useAddComment(postId);
-  const signedIn = useAuth((s) => s.status === 'signed-in');
+  const me = useMe();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!requireSignIn('Sign in to comment.')) return;
     if (!body.trim()) return;
     add.mutate({ body: body.trim(), parentId }, { onSuccess: () => { setBody(''); onDone?.(); }, onError: (err) => toastError(err) });
   };
-  if (!signedIn && !parentId) {
-    return <button className="tt-panel tt-press w-full p-3 text-left text-[12.5px] text-ink-3 hover:text-ink" onClick={() => openSignIn('Sign in to comment. Reading works without an account.')} data-testid="comment-sign-in">Sign in to join the discussion…</button>;
+  if (!me && !parentId) {
+    return (
+      <button className="tt-panel tt-press flex w-full items-center gap-3 p-3 text-left text-[12.5px] text-ink-3 hover:text-ink" onClick={() => openSignIn('Sign in to comment. Reading works without an account.')} data-testid="comment-sign-in">
+        <MessagesSquare size={16} className="text-accent" /> Sign in to join the discussion…
+      </button>
+    );
   }
   return (
-    <form onSubmit={submit} className="space-y-2" data-testid={parentId ? 'reply-form' : 'comment-form'}>
-      <TextArea aria-label={parentId ? 'Reply' : 'Comment'} rows={parentId ? 2 : 3} maxLength={LIMITS.comment} value={body} onChange={(e) => setBody(e.target.value)} placeholder={parentId ? 'Write a reply (markdown)…' : 'Add a comment (markdown)…'} autoFocus={autoFocus} />
-      <div className="flex gap-2">
-        <Button type="submit" size="sm" variant="brand" disabled={add.isPending || !body.trim()}>{add.isPending ? 'Posting…' : parentId ? 'Reply' : 'Comment'}</Button>
-        {onDone && <Button type="button" size="sm" variant="ghost" onClick={onDone}>Cancel</Button>}
+    <form onSubmit={submit} className="flex gap-2.5" data-testid={parentId ? 'reply-form' : 'comment-form'}>
+      {me && <Avatar name={me.name} src={me.avatar} userId={me.id} size={parentId ? 'sm' : 'md'} className="mt-0.5" />}
+      <div className="min-w-0 flex-1 space-y-2">
+        <TextArea aria-label={parentId ? 'Reply' : 'Comment'} rows={parentId ? 2 : 3} maxLength={LIMITS.comment} value={body} onChange={(e) => setBody(e.target.value)} placeholder={parentId ? 'Write a reply (markdown)…' : 'Add a comment (markdown)…'} autoFocus={autoFocus} />
+        <div className="flex gap-2">
+          <Button type="submit" size="sm" variant="brand" disabled={add.isPending || !body.trim()}>{add.isPending ? 'Posting…' : parentId ? 'Reply' : 'Comment'}</Button>
+          {onDone && <Button type="button" size="sm" variant="ghost" onClick={onDone}>Cancel</Button>}
+        </div>
       </div>
     </form>
   );
 }
 
+/** One comment and its replies. Replies hang off a thread line under the parent's avatar (indent capped on phones). */
 function CommentNode({ c, kids, votes, depth }: { c: Comment; kids: Map<string | null, Comment[]>; votes: Record<string, -1 | 0 | 1>; depth: number }) {
   const [replying, setReplying] = useState(false);
   const uid = useAuth((s) => s.session?.user.id ?? null);
   const del = useDeleteComment(c.post_id);
   const children = kids.get(c.id) ?? [];
+  const name = c.author?.display_name ?? null;
   return (
-    <li className="flex gap-2" data-testid="comment">
-      <VoteControl kind="comment" id={c.id} score={c.score} myVote={votes[c.id] ?? 0} compact />
-      <div className="min-w-0 flex-1">
-        {c.deleted ? <span className="text-[11.5px] italic text-ink-4">[deleted]</span> : (
-          <>
-            <Author name={c.author?.display_name ?? null} avatar={c.author?.avatar_url ?? null} when={c.created_at} size={18} />
-            <Markdown className="mt-1">{c.body}</Markdown>
-            <div className="mt-1 flex gap-3 text-[11.5px]">
-              {depth < 6 && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-ink" onClick={() => { if (requireSignIn('Sign in to reply.')) setReplying((v) => !v); }} data-testid="reply"><Reply size={12} /> Reply</button>}
-              {uid === c.author_id && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-bad" onClick={() => { if (window.confirm('Delete this comment? Replies stay.')) del.mutate(c.id, { onError: (e) => toastError(e) }); }}><Trash2 size={12} /> Delete</button>}
-            </div>
-          </>
-        )}
-        {replying && <div className="mt-2"><CommentForm postId={c.post_id} parentId={c.id} onDone={() => setReplying(false)} autoFocus /></div>}
-        {children.length > 0 && (
-          <ul className="mt-3 space-y-3 border-l border-line pl-3">
-            {children.map((k) => <CommentNode key={k.id} c={k} kids={kids} votes={votes} depth={depth + 1} />)}
-          </ul>
-        )}
+    <li className="relative" data-testid="comment">
+      <div className="flex gap-2.5">
+        <div className="flex flex-col items-center">
+          {c.deleted
+            ? <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/[0.04] text-[10px] text-ink-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">–</span>
+            : <Avatar name={name || 'Member'} src={c.author?.avatar_url} userId={c.author_id} size="sm" />}
+          {children.length > 0 && <span aria-hidden className="mt-1.5 w-px flex-1 bg-white/[0.09]" />}
+        </div>
+        <div className="min-w-0 flex-1 pb-1">
+          {c.deleted ? <div className="flex h-6 items-center text-[11.5px] italic text-ink-4">[deleted]</div> : (
+            <>
+              <div className="flex h-6 min-w-0 items-center gap-2 text-[11.5px] text-ink-3">
+                <span className="truncate font-semibold text-ink" data-testid="author-name">{name || 'Member'}</span>
+                <span aria-hidden className="text-ink-4">·</span>
+                <TimeAgo when={c.created_at} />
+              </div>
+              <Markdown className="mt-0.5">{c.body}</Markdown>
+              <div className="mt-1.5 flex items-center gap-3 text-[11.5px]">
+                <VoteControl kind="comment" id={c.id} score={c.score} myVote={votes[c.id] ?? 0} compact />
+                {depth < 6 && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-ink" onClick={() => { if (requireSignIn('Sign in to reply.')) setReplying((v) => !v); }} data-testid="reply"><Reply size={12} /> Reply</button>}
+                {uid === c.author_id && <button className="tt-press flex items-center gap-1 text-ink-3 hover:text-bad" onClick={() => { if (window.confirm('Delete this comment? Replies stay.')) del.mutate(c.id, { onError: (e) => toastError(e) }); }}><Trash2 size={12} /> Delete</button>}
+              </div>
+            </>
+          )}
+          {replying && <div className="mt-2.5"><CommentForm postId={c.post_id} parentId={c.id} onDone={() => setReplying(false)} autoFocus /></div>}
+          {children.length > 0 && (
+            <ul className={`mt-3 space-y-4 ${depth >= 3 ? '-ml-8 sm:ml-0' : ''}`}>
+              {children.map((k) => <CommentNode key={k.id} c={k} kids={kids} votes={votes} depth={depth + 1} />)}
+            </ul>
+          )}
+        </div>
       </div>
     </li>
   );
 }
 
 // ------------------------------------------------------------------------------------------------------- post
+function PostSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading the post">
+      <div className="flex items-center gap-2.5"><Skeleton className="h-9 w-9 rounded-full" /><Skeleton className="h-3.5 w-40 rounded" /></div>
+      <Skeleton className="h-8 w-3/4 rounded-md" />
+      <div className="flex gap-1.5"><Skeleton className="h-7 w-20 rounded-full" /><Skeleton className="h-7 w-16 rounded-full" /></div>
+      <Skeleton className="h-28 rounded-md" />
+      <div className="space-y-2"><Skeleton className="h-3 w-full rounded" /><Skeleton className="h-3 w-11/12 rounded" /><Skeleton className="h-3 w-2/3 rounded" /></div>
+    </div>
+  );
+}
+
 function PostView({ id }: { id: string }) {
   const post = usePost(id);
   const comments = useComments(id);
@@ -195,19 +274,26 @@ function PostView({ id }: { id: string }) {
     return m;
   }, [list]);
 
-  if (post.isLoading) return <div className="space-y-3"><Skeleton className="h-10 w-2/3 rounded-md" /><Skeleton className="h-40 rounded-md" /></div>;
+  if (post.isLoading) return <PostSkeleton />;
   if (post.isError) return <StateView kind="error" title="This post could not be loaded" onRetry={() => post.refetch()}><ErrorBody error={post.error} /></StateView>;
   const p = post.data;
   if (!p) return <StateView kind="empty" title="Post not found">It may have been deleted by its author.</StateView>;
   return (
-    <article className="space-y-6" data-testid="post-page">
+    <article className="space-y-7" data-testid="post-page">
       {editing ? <PostEditor post={p} onDone={() => setEditing(false)} /> : (
-        <div className="flex gap-3">
+        <div className="flex gap-3 sm:gap-4">
           <VoteControl kind="post" id={p.id} score={p.score} myVote={votes[p.id] ?? 0} />
-          <div className="min-w-0 flex-1 space-y-3">
-            <Author name={p.author_name} avatar={p.author_avatar} official={!p.author_id} when={p.created_at} />
-            <h1 id="community-title" className="t-h1 text-ink" data-testid="post-title">{p.title}</h1>
-            {p.tags.length > 0 && <div className="flex flex-wrap gap-1.5">{p.tags.map((t) => <TagChip key={t} label={t} onClick={() => go({ kind: 'community', tag: t })} />)}</div>}
+          <div className="min-w-0 flex-1 space-y-4">
+            <header className="space-y-3">
+              <Author userId={p.author_id} name={p.author_name} avatar={p.author_avatar} official={!p.author_id} when={p.created_at} size="md" strong />
+              <h1 id="community-title" className="text-[22px] font-semibold leading-tight tracking-[-0.015em] text-ink sm:text-[26px]" data-testid="post-title">{p.title}</h1>
+              {(p.region || p.tags.length > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {p.region && <span className="mr-1 flex items-center gap-1 text-[11.5px] text-ink-3"><MapPin size={12} />{p.region}</span>}
+                  {p.tags.map((t) => <TagChip key={t} label={t} onClick={() => go({ kind: 'community', tag: t })} />)}
+                </div>
+              )}
+            </header>
             {p.aoi_id && <AnalysisCard aoiId={p.aoi_id} baseline={p.baseline} comparison={p.comparison} region={p.region} />}
             <Markdown className="text-[13.5px]">{p.body}</Markdown>
             {uid && uid === p.author_id && (
@@ -220,12 +306,13 @@ function PostView({ id }: { id: string }) {
           </div>
         </div>
       )}
-      <section aria-label="Comments" className="space-y-4 border-t border-line pt-5">
-        <h2 className="t-h2 text-ink">{p.comment_count} comment{p.comment_count === 1 ? '' : 's'}</h2>
+      <section aria-label="Comments" className="space-y-5 border-t border-line pt-6">
+        <h2 className="t-h2 flex items-center gap-2 text-ink"><MessageSquare size={16} className="text-accent" />{p.comment_count} comment{p.comment_count === 1 ? '' : 's'}</h2>
         <CommentForm postId={p.id} parentId={null} />
-        {comments.isLoading ? <Skeleton className="h-16 rounded-md" />
+        {comments.isLoading ? <div className="space-y-4"><CommentSkeleton /><CommentSkeleton /></div>
           : comments.isError ? <StateView kind="error" title="Comments could not be loaded" onRetry={() => comments.refetch()} compact><ErrorBody error={comments.error} /></StateView>
-          : <ul className="space-y-4">{(kids.get(null) ?? []).map((c) => <CommentNode key={c.id} c={c} kids={kids} votes={votes} depth={0} />)}</ul>}
+          : !list.length ? <p className="text-[12.5px] text-ink-3" data-testid="comments-empty">No comments yet — start the conversation.</p>
+          : <ul className="space-y-5">{(kids.get(null) ?? []).map((c) => <CommentNode key={c.id} c={c} kids={kids} votes={votes} depth={0} />)}</ul>}
       </section>
     </article>
   );
@@ -263,7 +350,7 @@ function PostEditor({ post, onDone }: { post: Post; onDone(): void }) {
 
 function NewPost() {
   const subject = useCompose((s) => s.subject);
-  const status = useAuth((s) => s.status);
+  const me = useMe();
   const create = useCreatePost();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -291,9 +378,17 @@ function NewPost() {
     });
   };
   return (
-    <form onSubmit={submit} className="space-y-4" data-testid="new-post-form">
-      <h1 id="community-title" className="t-h1 text-ink">{subject ? 'Discuss this analysis' : 'New post'}</h1>
-      {status !== 'signed-in' && <FormError>You can draft here, but publishing needs an account. <button type="button" className="underline" onClick={() => openSignIn('Sign in to publish your post.')}>Sign in</button></FormError>}
+    <form onSubmit={submit} className="space-y-5" data-testid="new-post-form">
+      <div className="space-y-3">
+        <h1 id="community-title" className="t-h1 text-ink">{subject ? 'Discuss this analysis' : 'New post'}</h1>
+        {me && (
+          <div className="flex items-center gap-2.5 text-[12px] text-ink-3" data-testid="composer-author">
+            <Avatar name={me.name} src={me.avatar} userId={me.id} size="md" />
+            <span>Posting as <b className="font-semibold text-ink">{me.name}</b></span>
+          </div>
+        )}
+      </div>
+      {!me && <FormError>You can draft here, but publishing needs an account. <button type="button" className="underline" onClick={() => openSignIn('Sign in to publish your post.')}>Sign in</button></FormError>}
       {subject?.aoiId && <AnalysisCard aoiId={subject.aoiId} baseline={subject.baseline ?? null} comparison={subject.comparison ?? null} region={subject.region ?? null} />}
       <Labeled label="Title" id="post-title" count={title.length} max={LIMITS.title}><Input id="post-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={LIMITS.title} required minLength={3} /></Labeled>
       <Labeled label="Body (markdown)" id="post-body" count={body.length} max={LIMITS.body}
@@ -301,7 +396,10 @@ function NewPost() {
         {preview ? <div className="tt-panel min-h-[160px] p-3"><Markdown>{body || '*Nothing to preview yet.*'}</Markdown></div>
           : <TextArea id="post-body" rows={10} value={body} onChange={(e) => setBody(e.target.value)} maxLength={LIMITS.body} required />}
       </Labeled>
-      <Labeled label="Tags" id="post-tags" hint="Up to 6, space or comma separated (e.g. deforestation india)."><Input id="post-tags" value={tags.raw} onChange={(e) => tags.setRaw(e.target.value)} /></Labeled>
+      <Labeled label="Tags" id="post-tags" hint="Up to 6, space or comma separated (e.g. deforestation india).">
+        <Input id="post-tags" value={tags.raw} onChange={(e) => tags.setRaw(e.target.value)} />
+        {tags.tags.length > 0 && !tags.error && <div className="mt-2 flex flex-wrap gap-1.5">{tags.tags.map((t) => <TagChip key={t} label={t} />)}</div>}
+      </Labeled>
       <FormError>{tags.error}</FormError>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="brand" disabled={create.isPending || !title.trim() || !body.trim() || !!tags.error} data-testid="publish-post">{create.isPending ? 'Publishing…' : 'Publish'}</Button>

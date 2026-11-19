@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, KeyRound, LogOut, Mail, TriangleAlert, CheckCircle2, Sparkles } from 'lucide-react';
-import { Button, Skeleton, StateView } from '../../design';
+import { ArrowLeft, Camera, KeyRound, Loader2, LogOut, Mail, TriangleAlert, CheckCircle2, Sparkles, Trash2 } from 'lucide-react';
+import { Avatar, Button, Skeleton, StateView } from '../../design';
 import { useUi } from '../../state/store';
 import { sendPasswordReset, setNewPassword, signInWithEmail, signInWithGoogle, signInWithMagicLink, signOut, signUpWithEmail, useAuth } from '../../state/auth';
 import { GOOGLE_ENABLED } from '../../lib/supabase';
-import { identity, useProfile, useUpdateProfile } from './profile';
-import { UserAvatar } from './UserAvatar';
-
-export { UserAvatar };
+import { AVATAR_TYPES, avatarError, checkAvatarFile, identity, useAvatar, useProfile, useUpdateProfile } from './profile';
 
 const message = (e: unknown) => (e instanceof Error && e.message ? e.message : 'Something went wrong. Try again.');
 
@@ -154,6 +151,40 @@ function RecoveryPanel() {
   );
 }
 
+/** The user's photo with "Change photo" / "Remove": uploads to the avatars bucket and saves profiles.avatar_url. */
+function AvatarEditor({ name, src, userId, canEdit }: { name: string; src: string | null; userId: string; canEdit: boolean }) {
+  const { upload, remove } = useAvatar();
+  const input = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const busy = upload.isPending || remove.isPending;
+  const pick = (f: File | undefined) => {
+    if (!f) return;
+    const bad = checkAvatarFile(f);
+    setProblem(bad);
+    if (!bad) upload.mutate(f, { onError: (e) => setProblem(avatarError(e)), onSuccess: () => setProblem(null) });
+  };
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-1.5" data-testid="avatar-editor">
+      <div className="relative">
+        <Avatar name={name} src={src} userId={userId} size="lg" />
+        {busy && <span className="absolute inset-0 grid place-items-center rounded-full bg-black/55"><Loader2 size={20} className="animate-spin text-accent" /></span>}
+      </div>
+      {canEdit && (
+        <div className="flex gap-1">
+          <input ref={input} type="file" accept={AVATAR_TYPES.join(',')} className="sr-only" aria-label="Choose a profile photo" data-testid="avatar-input"
+            onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
+          <button type="button" disabled={busy} onClick={() => input.current?.click()} className="tt-press flex items-center gap-1 rounded-sm px-1.5 py-1 text-[11px] text-accent hover:bg-hover" data-testid="avatar-change">
+            <Camera size={12} /> {src ? 'Change' : 'Add photo'}
+          </button>
+          {src && <button type="button" disabled={busy} onClick={() => remove.mutate(undefined, { onError: (e) => setProblem(avatarError(e)) })}
+            className="tt-press flex items-center gap-1 rounded-sm px-1.5 py-1 text-[11px] text-ink-3 hover:bg-hover hover:text-ink" aria-label="Remove photo"><Trash2 size={12} /></button>}
+        </div>
+      )}
+      {problem && <p role="alert" className="max-w-[180px] text-center text-[10.5px] leading-snug text-[#ff8a80]" data-testid="avatar-error">{problem}</p>}
+    </div>
+  );
+}
+
 function AccountPanel() {
   const user = useAuth((s) => s.session!.user);
   const close = useUi((s) => s.closeProfile);
@@ -179,8 +210,8 @@ function AccountPanel() {
 
   return (
     <div className="space-y-6" data-testid="account-panel">
-      <div className="flex items-center gap-4">
-        <UserAvatar name={who.name} src={who.avatar} size={64} />
+      <div className="flex items-start gap-4">
+        <AvatarEditor name={who.name} src={who.avatar} userId={user.id} canEdit={!!profile} />
         <div className="min-w-0">
           <h1 id="profile-title" className="t-h1 truncate text-ink" data-testid="profile-name">{who.name}</h1>
           {who.email && <p className="truncate text-[12.5px] text-ink-3">{who.email}</p>}

@@ -5,6 +5,7 @@ export { Panel, Card, SectionLabel, Kbd, Divider } from './Surface';
 export { Badge, StatusDot, SeverityBadge, EvidenceBadge } from './Badge';
 export { Tooltip } from './Tooltip';
 export { Modal } from './Modal';
+export { Avatar, type AvatarSize } from './Avatar';
 export { Popover } from './Popover';
 export { Metric, AnimatedNumber, useAnimatedNumber } from './Metric';
 export { Switch, LayerToggle, Segmented, Menu } from './Controls';

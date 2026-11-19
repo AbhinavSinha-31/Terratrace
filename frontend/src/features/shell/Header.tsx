@@ -5,13 +5,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
 import { useImageryState } from '../../data/viewState';
-import { IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
+import { Avatar, IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
 import type { SystemHealth } from '../../data/contracts';
 import { useBreakpoint } from '../../lib/useLayout';
 import { useChat } from '../../state/chat';
 import { openSignIn, signOut, useAuth } from '../../state/auth';
 import { identity, useProfile } from '../account/profile';
-import { UserAvatar } from '../account/UserAvatar';
 
 type NavKey = 'explore' | 'analysis' | 'timemachine' | 'featured' | 'community' | 'ask' | 'about';
 const NAV: { key: NavKey; label: string }[] = [
@@ -203,7 +202,7 @@ function openProfile() {
 
 const menuItem = 'tt-press flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink';
 
-function Avatar() {
+function AccountMenu() {
   const status = useAuth((s) => s.status);
   const user = useAuth((s) => s.session?.user ?? null);
   const { data: profile } = useProfile();
@@ -214,7 +213,7 @@ function Avatar() {
       width={260}
       trigger={(p) => (
         <button {...p} aria-label={who ? `Account menu — ${who.name}` : 'Account menu'} data-testid="account-button" className="tt-press grid h-9 w-9 place-items-center rounded-full bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20">
-          {who ? <UserAvatar name={who.name} src={who.avatar} size={36} /> : <UserRound size={16} />}
+          {who && user ? <Avatar name={who.name} src={who.avatar} userId={user.id} size="md" /> : <UserRound size={16} />}
         </button>
       )}
     >
@@ -222,7 +221,7 @@ function Avatar() {
         <div className="p-2">
           {who ? (
             <div className="flex items-center gap-2.5 px-2.5 py-2">
-              <UserAvatar name={who.name} src={who.avatar} size={32} />
+              <Avatar name={who.name} src={who.avatar} userId={user?.id} size="md" />
               <div className="min-w-0">
                 <div className="truncate text-[12.5px] font-medium text-ink">{who.name}</div>
                 {who.email && <div className="truncate text-[11px] text-ink-3">{who.email}</div>}
@@ -262,7 +261,7 @@ function AccountMenuEntry({ onPick }: { onPick(): void }) {
   const who = user ? identity(user, profile) : null;
   return (
     <button onClick={() => { onPick(); openProfile(); }} data-testid="menu-account" className="tt-press mt-auto flex h-14 w-full items-center gap-3 rounded-md border-t border-line px-3 text-[14px] text-ink-2">
-      {who ? <><UserAvatar name={who.name} src={who.avatar} size={30} /><span className="min-w-0 truncate">{who.name}</span></> : <><LogIn size={17} /> Sign in</>}
+      {who ? <><Avatar name={who.name} src={who.avatar} userId={user?.id} size="md" /><span className="min-w-0 truncate">{who.name}</span></> : <><LogIn size={17} /> Sign in</>}
     </button>
   );
 }
@@ -309,7 +308,7 @@ export function Header() {
         {bp === 'mobile' || bp === 'tablet' ? (
           <IconButton label="Menu" onClick={() => setMenu(true)}><MenuIcon size={18} /></IconButton>
         ) : (
-          <Avatar />
+          <AccountMenu />
         )}
       </div>
 
