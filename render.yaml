@@ -1,0 +1,43 @@
+# Render Blueprint — TERRATRACE backend (FastAPI + Google Earth Engine). The frontend is on Vercel (frontend/vercel.json).
+# Render → New → Blueprint → this repository. Secrets are "sync: false": Render asks for their values once.
+services:
+  - type: web
+    name: terratrace-api
+    runtime: python
+    rootDir: backend
+    # Starter or above: the free plan sleeps after inactivity (in-memory analysis jobs are lost) and has no disk.
+    plan: starter
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    # One worker: analysis jobs, quick scans and rate limits live in this process's memory. $PORT is set by Render.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /api/health/live
+    autoDeploy: true
+    # Persistent cache (stored analyses, quick scans, map tiles). Without a disk the cache starts empty after every
+    # deploy and results are recomputed on Earth Engine.
+    disk:
+      name: terratrace-cache
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.14.0"
+      - key: TT_CACHE_DIR
+        value: /var/data/cache
+      - key: EE_PROJECT
+        value: terratrace-509821
+      # Upload the service-account JSON as a Secret File named ee-service-account.json (Render → Environment → Secret Files).
+      - key: EE_SERVICE_ACCOUNT_KEY
+        value: /etc/secrets/ee-service-account.json
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TT_CHAT_ENABLED
+        value: "true"
+      - key: TT_LLM_TIER
+        value: free
+      - key: DEV_DIAGNOSTICS
+        value: "false"

@@ -1,6 +1,6 @@
 # TERRATRACE
 
-**Explainable satellite intelligence for forest change, land cover and urban heat — anywhere on Earth.**
+**See how the land is changing — and the evidence behind it.** Forest loss, urban expansion, land cover and urban heat, from archived satellite data, anywhere on Earth.
 
 TERRATRACE turns public Earth-observation archives into transparent, reproducible measurements: forest loss and gain,
 land use / land cover (LULC), land surface temperature (LST) and the surface urban heat island (UHI), and an estimate
@@ -185,9 +185,10 @@ cd frontend; npm run test:auth; npm run test:community; npm run test:integrity; 
 
 ## Deployment
 
-Frontend on **Vercel**, backend on **Railway** (one container from the repo-root `Dockerfile`, persistent volume),
-accounts and community on **Supabase**. Exact environment variables per platform, redirect URLs and Google OAuth:
-[DEPLOY.md](DEPLOY.md). Open items before going public: [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md).
+Frontend on **Vercel** (project Root Directory `frontend`), backend on **Render** (`render.yaml`, root directory
+`backend`, one worker, persistent disk), accounts and community on **Supabase**. Build/start commands, every
+environment variable per platform, redirect URLs and Google OAuth: [DEPLOY.md](DEPLOY.md). Open items before going
+public: [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md).
 
 ## Roadmap
 

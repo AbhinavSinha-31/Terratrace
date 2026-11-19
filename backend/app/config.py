@@ -35,17 +35,19 @@ _ORIGIN = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d{1,5})?$")
 
 
 def _cors_origins() -> tuple[str, ...]:
-    """Browser origins allowed to call the API: the local dev server plus TT_CORS_ORIGINS (comma-separated exact
-    origins, e.g. https://terratrace.vercel.app). A wildcard or anything that is not a bare origin is ignored."""
+    """Browser origins allowed to call the API: the local dev server plus ALLOWED_ORIGINS / TT_CORS_ORIGINS (comma-
+    separated exact origins, e.g. https://terratrace.vercel.app; both are read). A wildcard or anything that is not a
+    bare origin is ignored."""
     extra = []
-    for o in os.environ.get("TT_CORS_ORIGINS", "").split(","):
+    raw = ",".join(os.environ.get(k, "") for k in ("ALLOWED_ORIGINS", "TT_CORS_ORIGINS"))
+    for o in raw.split(","):
         o = o.strip().rstrip("/")
         if not o:
             continue
         if _ORIGIN.fullmatch(o):
             extra.append(o)
         else:
-            logging.getLogger("terratrace.config").warning("TT_CORS_ORIGINS entry %r is not an exact origin; ignored", o)
+            logging.getLogger("terratrace.config").warning("ALLOWED_ORIGINS entry %r is not an exact origin; ignored", o)
     return tuple(dict.fromkeys((*DEV_ORIGINS, *extra)))
 
 
@@ -75,8 +77,10 @@ class Settings:
 
     # Google Earth Engine (LIVE mode). Either a service-account key file or `earthengine authenticate`.
     ee_project: str | None = os.environ.get("EE_PROJECT") or None
-    ee_service_account_key: str | None = os.environ.get("EE_SERVICE_ACCOUNT_KEY") or None
-    # The same key's JSON CONTENT, for hosts that only offer environment variables (Railway, Render, Fly). Never logged.
+    # PATH of the service-account JSON key, e.g. a Render Secret File: /etc/secrets/ee-service-account.json.
+    # GOOGLE_APPLICATION_CREDENTIALS (the Google-standard name) is read when EE_SERVICE_ACCOUNT_KEY is not set.
+    ee_service_account_key: str | None = os.environ.get("EE_SERVICE_ACCOUNT_KEY") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or None
+    # The same key's JSON CONTENT, for hosts that only offer environment variables (Render, Fly, …). Never logged.
     ee_service_account_json: str | None = os.environ.get("EE_SERVICE_ACCOUNT_JSON") or None
     ee_timeout_s: float = _float("EE_TIMEOUT_S", 120.0)
     # Per-request HTTP deadline for Earth Engine calls (getInfo / getMapId). Without it a request can block a worker

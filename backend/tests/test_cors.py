@@ -26,3 +26,23 @@ def test_configured_origins_are_exact_and_wildcards_are_ignored(monkeypatch):
 
 def test_no_wildcard_in_the_running_app():
     assert "*" not in config.settings.cors_origins and all(o.startswith("http") for o in config.settings.cors_origins)
+
+
+def test_allowed_origins_env_is_read_too(monkeypatch):
+    """Render / Vercel deployments set ALLOWED_ORIGINS; the older TT_CORS_ORIGINS still works alongside it."""
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://terratrace.vercel.app, https://*.vercel.app")
+    monkeypatch.setenv("TT_CORS_ORIGINS", "https://terratrace.example.org")
+    origins = config._cors_origins()
+    assert origins == (*config.DEV_ORIGINS, "https://terratrace.vercel.app", "https://terratrace.example.org")
+
+
+def test_key_file_path_from_google_application_credentials(monkeypatch):
+    import importlib
+    monkeypatch.delenv("EE_SERVICE_ACCOUNT_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/etc/secrets/ee-service-account.json")
+    fresh = importlib.reload(config)
+    try:
+        assert fresh.settings.ee_service_account_key == "/etc/secrets/ee-service-account.json"
+    finally:
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS")
+        importlib.reload(config)

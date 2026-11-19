@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -34,8 +34,32 @@ function ipv6LoopbackForward(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), ipv6LoopbackForward()],
+/**
+ * Production builds: link-preview tags need ABSOLUTE URLs, so "/og-image.png" in index.html becomes VITE_SITE_URL +
+ * "/og-image.png" (left relative when VITE_SITE_URL is unset). Also warns when no backend URL is configured: the
+ * bundle then calls "/api" on its own host, which only works when the backend serves the frontend (single-port mode).
+ */
+function productionSiteConfig(env: Record<string, string>): Plugin {
+  const site = (env.VITE_SITE_URL || '').replace(/\/+$/, '');
+  return {
+    name: 'tt-production-site-config',
+    apply: 'build',
+    configResolved(cfg) {
+      if (!env.VITE_API_URL && !env.VITE_API_BASE) {
+        cfg.logger.warn('[terratrace] VITE_API_URL is not set: the build will call /api on its own host. On Vercel, set VITE_API_URL to the backend URL.');
+      }
+    },
+    transformIndexHtml(html) {
+      if (!site) return html;
+      return html
+        .replaceAll('content="/og-image.png"', `content="${site}/og-image.png"`)
+        .replace('<meta property="og:type"', `<meta property="og:url" content="${site}/" />\n    <meta property="og:type"`);
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), tailwindcss(), ipv6LoopbackForward(), productionSiteConfig(loadEnv(mode, process.cwd(), 'VITE_'))],
   server: {
     // IPv4 loopback: Node's default "localhost" can bind only ::1, which refuses http://127.0.0.1:5173.
     host: '127.0.0.1',
@@ -60,4 +84,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
