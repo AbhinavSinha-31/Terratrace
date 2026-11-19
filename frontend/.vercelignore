@@ -1,52 +1,15 @@
-# Only the frontend is deployed to Vercel; nothing below is ever uploaded.
-
-# --- secrets & credentials
+# Vercel project Root Directory = frontend/. Nothing below is ever uploaded (git deploys only send tracked files; this
+# also covers `vercel deploy` from a local folder).
 .env
 .env.*
 !.env.example
-**/.env
-**/.env.*
-!**/.env.example
 *.pem
 *.key
-*.p12
-*.token
-access_token
-*service-account*.json
-*-ee-key*.json
-**/credentials.json
-**/*credentials*.json
-application_default_credentials.json
-kaggle.json
-**/kaggle.json
-.kaggle/
-.config/earthengine/
-
 *-key.json
 *_key.json
-sa-*.json
-
-# --- backend (hosted separately), research pipeline, database migrations, local environments / caches
-/backend
-/analysis
-/supabase
-/Dockerfile
-.venv/
-**/.venv/
-venv/
-.cache/
-**/.cache/
-__pycache__/
-*.pyc
-.pytest_cache/
-
-# --- dependencies & builds (Vercel installs and builds itself)
+*service-account*.json
+**/credentials.json
 node_modules/
-**/node_modules/
-frontend/dist/
-
-# --- local-only material
-/ml
-/docs
-/TERRATRACE_*.md
+dist/
+scripts/
 *.log
