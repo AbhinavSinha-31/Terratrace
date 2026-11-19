@@ -85,14 +85,14 @@ function StatusPill({ health }: { health?: SystemHealth }) {
         <button
           {...p}
           data-testid="data-status"
-          className="tt-press flex h-9 items-center gap-2.5 rounded-md bg-white/[0.03] px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.1)] hover:bg-hover"
+          className="tt-press flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md bg-white/[0.03] px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.1)] hover:bg-hover"
         >
           <span className="relative flex h-2 w-2">
             <span className={`absolute inset-0 rounded-full ${dot} ${s.ready ? 'animate-blink' : ''}`} />
             <span className={`relative h-2 w-2 rounded-full ${dot}`} />
           </span>
-          <span className="hidden lg:inline">{s.long}</span>
-          <span className="lg:hidden">{s.short}</span>
+          <span className="hidden min-[1440px]:inline">{s.long}</span>
+          <span className="hidden min-[1024px]:inline min-[1440px]:hidden">{s.short}</span>
           <ChevronDown size={13} className="text-ink-3" />
         </button>
       )}
@@ -267,6 +267,35 @@ function AccountMenuEntry({ onPick }: { onPick(): void }) {
   );
 }
 
+/** Less-used links: inside "More" between 900 and 1279 px (all links show from 1280 px; below 900 px, the menu). */
+const COLLAPSED: NavKey[] = ['featured', 'about'];
+
+function MoreMenu({ active }: { active: NavKey }) {
+  const items = NAV.filter((n) => COLLAPSED.includes(n.key));
+  const on = items.some((n) => n.key === active);
+  return (
+    <div className="flex h-full items-stretch min-[1280px]:hidden">
+      <Popover
+        label="More"
+        width={200}
+        trigger={(p) => (
+          <button {...p} data-testid="nav-more"
+            className={`tt-press relative flex h-16 items-center gap-1 whitespace-nowrap px-3.5 text-[13px] font-medium transition-colors ${on ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
+            More <ChevronDown size={13} />
+            {on && <motion.span layoutId="nav-ind" className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent shadow-[0_0_10px_rgba(69,208,196,0.8)]" />}
+          </button>
+        )}
+      >
+        {(close) => (
+          <div className="p-2">
+            {items.map((n) => <button key={n.key} className={menuItem} onClick={() => { close(); navigate(n.key); }}>{n.label}</button>)}
+          </div>
+        )}
+      </Popover>
+    </div>
+  );
+}
+
 export function Header() {
   const view = useUi((s) => s.view);
   const aboutOpen = useUi((s) => s.aboutOpen);
@@ -280,24 +309,25 @@ export function Header() {
   return (
     <header className="tt-header relative z-50 flex h-16 items-center gap-6 px-4 sm:px-6">
       <button onClick={() => useUi.getState().goExplore('intro')} aria-label="TERRATRACE — home" className="tt-press shrink-0 rounded-md">
-        {bp === 'mobile' ? <TerratraceMark size={28} /> : <TerratraceLogo size="md" />}
+        <span className="min-[1600px]:hidden"><TerratraceMark size={28} /></span>
+        <span className="hidden min-[1600px]:inline"><TerratraceLogo size="md" /></span>
       </button>
 
-      {bp !== 'mobile' && (
-        <nav aria-label="Primary" className="ml-4 hidden h-full items-stretch gap-1 md:flex">
-          {NAV.map((n) => (
-            <button
-              key={n.key}
-              onClick={() => navigate(n.key)}
-              aria-current={active === n.key ? 'page' : undefined}
-              className={`tt-press relative whitespace-nowrap px-3.5 text-[13px] font-medium transition-colors ${active === n.key ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}
-            >
-              {n.label}
-              {active === n.key && <motion.span layoutId="nav-ind" className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent shadow-[0_0_10px_rgba(69,208,196,0.8)]" />}
-            </button>
-          ))}
-        </nav>
-      )}
+      {/* ≥ 1280 px: every link. 900–1279 px: Featured and About go into "More". < 900 px: the menu button. */}
+      <nav aria-label="Primary" className="hidden h-full items-stretch gap-0.5 min-[900px]:flex min-[1280px]:ml-4 min-[1280px]:gap-1">
+        {NAV.map((n) => (
+          <button
+            key={n.key}
+            onClick={() => navigate(n.key)}
+            aria-current={active === n.key ? 'page' : undefined}
+            className={`tt-press relative whitespace-nowrap px-3 text-[13px] font-medium transition-colors min-[1280px]:px-3.5 ${COLLAPSED.includes(n.key) ? 'hidden min-[1280px]:block' : ''} ${active === n.key ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}
+          >
+            {n.label}
+            {active === n.key && <motion.span layoutId="nav-ind" className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent shadow-[0_0_10px_rgba(69,208,196,0.8)]" />}
+          </button>
+        ))}
+        <MoreMenu active={active} />
+      </nav>
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
         <StatusPill health={health} />
@@ -306,11 +336,8 @@ export function Header() {
         </IconButton>
         {bp !== 'mobile' && <Notifications health={health} />}
         {bp !== 'mobile' && <SettingsMenu />}
-        {bp === 'mobile' || bp === 'tablet' ? (
-          <IconButton label="Menu" onClick={() => setMenu(true)}><MenuIcon size={18} /></IconButton>
-        ) : (
-          <AccountMenu />
-        )}
+        <span className="min-[900px]:hidden"><IconButton label="Menu" onClick={() => setMenu(true)}><MenuIcon size={18} /></IconButton></span>
+        <span className="hidden min-[900px]:block"><AccountMenu /></span>
       </div>
 
       <AnimatePresence>

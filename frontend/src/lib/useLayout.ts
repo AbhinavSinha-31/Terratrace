@@ -7,7 +7,7 @@ function current(): Breakpoint {
   const w = window.innerWidth;
   if (w < 768) return 'mobile';
   if (w < 1024) return 'tablet';
-  if (w < 1320) return 'desktop';
+  if (w < 1280) return 'desktop';
   return 'wide';
 }
 
@@ -43,7 +43,11 @@ const featuredRowHeight = (h: number) => Math.round(Math.min(300, Math.max(220, 
 function globeSlot(): Partial<Padding> | null {
   const r = document.querySelector('[data-globe-slot]')?.getBoundingClientRect();
   if (!r || r.width < 50 || r.height < 50) return null;
-  return { top: Math.round(r.top), left: Math.round(r.left), right: Math.round(window.innerWidth - r.right), bottom: Math.round(window.innerHeight - r.bottom) };
+  // Clipped to the visible viewport (below the header): the globe never extends past a screen edge, even when the
+  // landing scrolls or the slot is taller than the window.
+  const top = Math.max(r.top, CHROME.header + 8), bottom = Math.min(r.bottom, window.innerHeight - 8);
+  if (bottom - top < 120) return null;
+  return { top: Math.round(top), left: Math.round(Math.max(0, r.left)), right: Math.round(Math.max(0, window.innerWidth - r.right)), bottom: Math.round(window.innerHeight - bottom) };
 }
 
 /**

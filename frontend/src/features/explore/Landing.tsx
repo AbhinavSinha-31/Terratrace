@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, Building2, ChevronRight, Database, Layers3, ShieldCheck, Trees } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -38,6 +38,7 @@ function Hero({ search = true }: { search?: boolean }) {
       </p>
       {/* The main call to action: search a place, or draw an area (the old "Explore Earth" / "Explore anywhere" entries). */}
       {search && <div className="mt-[clamp(16px,2.8vh,28px)] max-w-[560px]" data-testid="hero-search"><SearchBar /></div>}
+      <QuickStart />
       <div className="mt-[clamp(20px,3.2vh,36px)] grid max-w-[560px] grid-cols-3 gap-4 [@media(max-height:960px)]:hidden">
         {[
           { icon: Database, t: 'Decades of data', d: 'Landsat + Sentinel-2' },
@@ -137,23 +138,88 @@ function UrbanOverview() {
   );
 }
 
-function ForestOverview() {
-  const areas = useStudyAreas();
+const isControlArea = (a: StudyArea | undefined) => !!a?.tags.some((t) => /control site/i.test(t));
+
+/** Detected change of the PUBLISHED (stored READY) forest analyses of the featured areas — their own figures, read-only.
+ *  Control sites (stable forest) measure the false-alarm rate: reported separately, never added to the total. */
+function useForestTotals() {
+  const items = useStudyAreas().data?.items ?? [];
   const summary = useFeaturedSummary();
-  const { data: health } = useHealth();
-  const items = areas.data?.items ?? [];
-  // Control sites (stable forest, tagged in the featured data) measure the false-alarm rate: their detections are
-  // reported separately and never added to the detected-change total.
-  const isControl = (id: string) => !!items.find((a) => a.id === id)?.tags.some((t) => /control site/i.test(t));
-  // STORED READY results of the featured investigations (pre-computed by the backend for each default window) — the
-  // results' own figures, read-only. INVALID / UNAVAILABLE sites contribute nothing.
   const ready = (summary.data?.items ?? []).filter((i) => i.status === 'READY' && i.kpis);
+  const isControl = (id: string) => isControlArea(items.find((a) => a.id === id));
   const counted = ready.filter((r) => !isControl(r.id));
   const controls = ready.filter((r) => isControl(r.id));
-  // "Detected change" = area of the detected change events (the polygons drawn on the map) of published analyses —
-  // not gross loss, which sums year-to-year forest-mask transitions (including reversals).
+  // "Detected change" = area of the detected change events (the polygons drawn on the map) — not gross loss, which
+  // sums year-to-year forest-mask transitions (including reversals).
   const areaOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_area_ha ?? 0), 0);
   const countOf = (rs: typeof ready) => rs.reduce((a, r) => a + (r.kpis?.event_count ?? 0), 0);
+  return { items, ready, counted, controls, areaOf, countOf, loading: summary.isLoading };
+}
+
+/** Exactly the cards shown under "Featured investigations": the featured areas + the case studies. */
+function useFeaturedCounts() {
+  const items = useStudyAreas().data?.items ?? [];
+  const land = items.filter((a) => a.focus === 'land').length;
+  return { total: items.length + CASE_STUDIES.length, forest: items.length - land, urban: land + CASE_STUDIES.length };
+}
+
+/** Open a featured area as its card does: a forest site opens its stored analysis; an urban one its land & heat tab. */
+function openFeatured(area: StudyArea) {
+  const land = area.focus === 'land';
+  useUi.getState().openAnalysis(area.id, { name: area.name, geometry: area.geometry, window: area.default_window ? { start: area.default_window[0], end: area.default_window[1] } : undefined, run: !land });
+  if (land) useUi.getState().setTab('land');
+}
+
+/** Quick-start chips under the search: only featured areas with a PUBLISHED result (a stored READY forest analysis,
+ *  or an urban area whose stored scans the overview lists). Control sites are left out. */
+function QuickStart() {
+  const items = useStudyAreas().data?.items ?? [];
+  const ready = new Set((useFeaturedSummary().data?.items ?? []).filter((i) => i.status === 'READY').map((i) => i.id));
+  const urban = new Set(useUrbanRows().rows.map((r) => r.id));
+  const chips = items.filter((a) => (a.focus === 'land' ? urban.has(a.id) : ready.has(a.id) && !isControlArea(a))).slice(0, 5);
+  if (!chips.length) return null;
+  return (
+    <div className="mt-3 flex max-w-[560px] flex-wrap items-center gap-1.5" data-testid="quick-start" data-map-occluder>
+      <span className="mr-0.5 text-[11.5px] text-ink-3">Try</span>
+      {chips.map((a) => (
+        <button key={a.id} type="button" onClick={() => openFeatured(a)} data-testid="quick-start-chip"
+          className="tt-press pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full bg-white/[0.04] px-2.5 text-[11.5px] font-medium text-ink-2 shadow-[0_0_0_1px_rgba(255,255,255,0.1)] hover:bg-accent/12 hover:text-accent hover:shadow-[0_0_0_1px_rgba(69,208,196,0.45)]">
+          {a.focus === 'land' ? <Building2 size={11} className="text-[#f0a35e]" /> : <Trees size={11} className="text-forest" />}
+          {a.short_name}{/Delhi NCR/.test(a.region) ? ' · Delhi NCR' : ''}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 768–1279 px and phones: the Global Land Overview as a row of stat cards (same figures as the panel). */
+function OverviewStrip() {
+  const f = useForestTotals();
+  const { rows } = useUrbanRows();
+  const c = useFeaturedCounts();
+  const card = (label: string, value: ReactNode, sub: string, icon: ReactNode, testId: string) => (
+    <div className="tt-panel min-w-0 px-4 py-3" data-testid={testId}>
+      <div className="flex items-center gap-1.5 text-[11.5px] text-ink-2">{icon}{label}</div>
+      <div className="t-data mt-1 truncate text-[20px] font-medium leading-tight">{value}</div>
+      <div className="mt-0.5 truncate text-[11.5px] text-ink-3" title={sub}>{sub}</div>
+    </div>
+  );
+  const u = rows[0];
+  return (
+    <section className="pointer-events-auto grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Global land overview" data-testid="overview-strip" data-map-occluder>
+      {card('World forest area', <>40.6 <span className="text-[13px] text-ink-2">M km²</span></>, '31 % of land · FAO FRA 2020', <Trees size={13} className="text-forest" />, 'strip-forest')}
+      {card('Detected forest change', f.counted.length ? <span className="text-[#ff8a6b]">{fmtHa(f.areaOf(f.counted))} <span className="text-[13px] text-ink-2">ha</span></span> : '—',
+        f.counted.length ? `${f.countOf(f.counted)} events · ${f.counted.length} published` : 'No published analyses yet', <Trees size={13} className="text-[#ff8a6b]" />, 'strip-change')}
+      {card('Urban growth', u ? <span className="text-[#f0a35e]">{(u.built ?? u.heat ?? '').split(' (')[0]}</span> : '—',
+        u ? `${u.name}${u.built?.includes('(') ? ` ${u.built.slice(u.built.indexOf('('))}` : ''} · ${u.period}${rows.length > 1 ? ` · +${rows.length - 1} more` : ''}` : 'No published urban analyses yet', <Building2 size={13} className="text-[#f0a35e]" />, 'strip-urban')}
+      {card('Featured investigations', String(c.total).padStart(2, '0'), `published · ${c.forest} forest · ${c.urban} urban`, <TerratraceMark size={13} />, 'strip-featured')}
+    </section>
+  );
+}
+
+function ForestOverview() {
+  const { data: health } = useHealth();
+  const { items, counted, controls, areaOf, countOf } = useForestTotals();
   const events = countOf(counted);
   const eeReady = health?.analysis.status === 'ready';
   return (
@@ -210,11 +276,7 @@ function ForestOverview() {
 
 function OverviewPanel() {
   const [tab, setTab] = useState<'forests' | 'urban'>('forests');
-  const items = useStudyAreas().data?.items ?? [];
-  // Exactly the cards shown under "Featured investigations": the featured areas + the case studies.
-  const urban = items.filter((a) => a.focus === 'land').length + CASE_STUDIES.length;
-  const forest = items.length - items.filter((a) => a.focus === 'land').length;
-  const total = items.length + CASE_STUDIES.length;
+  const { total, forest, urban } = useFeaturedCounts();
   return (
     <section className="tt-panel pointer-events-auto px-5 py-4" aria-labelledby="gfo" data-map-occluder>
       <div className="flex items-center justify-between gap-2.5">
@@ -423,24 +485,26 @@ export function Landing() {
           // Column layout: [header] [top region] [featured row]. Everything is in normal flow, so the top region is
           // always at least as tall as the hero and the featured row always starts below it. When the viewport is too
           // short for both, the overlay scrolls instead of overlapping.
-          // Top region (lg+): grid [hero | globe slot over search bar | panels (≥1320 px)]. The globe is framed inside
-          // the measured `data-globe-slot` (lib/useLayout.landingInset), so the search bar never covers it.
+          // Top region (lg+): grid [hero | globe slot | panels (≥1280 px)]. The globe is framed inside the measured
+          // `data-globe-slot` (lib/useLayout.landingInset), clipped to the viewport.
           <motion.div key="intro" className="no-scrollbar absolute inset-0 flex flex-col overflow-y-auto pt-16" exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
             <div className="tt-hero-scrim absolute inset-y-0 left-0 w-[46%]" />
             <div className="tt-featured-scrim absolute inset-x-0 bottom-0 h-[42%]" />
-            <div className="relative flex-1 px-6 pt-4 lg:grid min-[1024px]:grid-cols-[minmax(0,540px)_minmax(0,1fr)] lg:gap-x-8 lg:pl-10 xl:pl-14 min-[1320px]:grid-cols-[minmax(0,540px)_minmax(0,1fr)_292px]">
-              <div className="pt-[clamp(0px,calc(4.5vh-24px),24px)]">
-                <Hero />
-              </div>
-              <div className="hidden min-h-[300px] flex-col lg:flex">
+            {/* Hero row: sized to its content (48–64 px padding), hero centred against the globe, overview panel on the
+                right from 1280 px. The globe column has its own height so the globe is never squeezed. */}
+            <div className="relative shrink-0 px-6 py-8 md:py-10 lg:grid lg:grid-cols-[minmax(0,540px)_minmax(0,1fr)] lg:items-center lg:gap-x-8 lg:py-12 lg:pl-10 xl:grid-cols-[minmax(0,540px)_minmax(0,1fr)_292px] xl:py-16 xl:pl-14">
+              <Hero />
+              <div className="hidden h-[clamp(360px,calc(100vh-340px),580px)] flex-col lg:flex" data-testid="globe-column">
                 <GlobeSlot />
               </div>
               <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25, duration: 0.6, ease: EASE }}
-                className="hidden space-y-3 self-start min-[1320px]:block">
+                className="hidden space-y-3 self-center xl:block" data-testid="overview-column">
                 <OverviewPanel />
                 <DataSourcesPanel />
               </motion.div>
             </div>
+            {/* 768–1279 px: the overview as a row of stat cards under the hero. */}
+            <div className="relative hidden shrink-0 px-6 pb-2 md:block lg:pl-10 xl:hidden"><OverviewStrip /></div>
             <div className="relative shrink-0 px-6 pb-4 pt-4 xl:px-10">
               <Featured />
             </div>
@@ -549,7 +613,7 @@ function MobileLanding() {
       <div className="scroll-thin pointer-events-auto absolute inset-x-0 bottom-0 max-h-[56vh] overflow-y-auto rounded-t-xl bg-[#07090c]/96 px-4 pb-6 pt-5 shadow-[0_-20px_40px_-10px_rgba(0,0,0,.8),0_0_0_1px_rgba(255,255,255,.06)]">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/15" />
         {selection && !drawTool ? <SelectionPanel /> : phase === 'intro' ? (
-          <div className="space-y-6"><Hero search={false} /><Featured /><OverviewPanel /><DataSourcesPanel /></div>
+          <div className="space-y-6"><Hero search={false} /><OverviewStrip /><Featured /><DataSourcesPanel /></div>
         ) : (
           <div className="space-y-6"><Featured /></div>
         )}
