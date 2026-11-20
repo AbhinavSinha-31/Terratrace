@@ -138,18 +138,28 @@ export const newRid = () => globalThis.crypto?.randomUUID?.() ?? `r${Date.now().
 let featuredCache: StudyAreaIndex | null = null;
 const offlineFeatured = async () => (featuredCache ??= await request<StudyAreaIndex>(`${BASE}data/featured.json`));
 
-type ChatBody = { messages: ChatTurn[]; aoi_id?: string; baseline?: number; comparison?: number };
+/** /api/health: 3 tries of up to 35 s each (≈ 1 min 50 s worst case) — enough for a free-tier cold start. */
+const HEALTH_TIMEOUT_MS = 35000;
+const HEALTH_RETRY_DELAYS_MS = [2000, 5000];
+
+type ChatBody ={ messages: ChatTurn[]; aoi_id?: string; baseline?: number; comparison?: number };
 const CHAT_UNAVAILABLE = 'The AI chat is not available right now. Try again later.';
 
 export const client = {
   isBackendUp: () => backend,
 
   async health(): Promise<SystemHealth> {
-    // Generous timeout + one retry: during first load the main thread is busy
-    // (globe/WebGL start-up) and a short timer can fire before a healthy response is read.
-    const probe = () => request<Omit<SystemHealth, 'backend'>>(`${API}/health`, { timeoutMs: 8000 });
+    // Several tries, each with a long timeout: a sleeping Render free instance takes about a minute to wake, and its
+    // proxy either holds the request or answers 502/503 meanwhile. The result is "offline" only after every try failed.
+    const probe = () => request<Omit<SystemHealth, 'backend'>>(`${API}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
     try {
-      const h = await probe().catch((e) => (isOffline(e) && e.status === undefined ? Promise.reject(e) : sleep(600).then(probe)));
+      let h: Omit<SystemHealth, 'backend'>;
+      for (let i = 0; ; i++) {
+        try { h = await probe(); break; } catch (e) {
+          if (i >= HEALTH_RETRY_DELAYS_MS.length) throw e;
+          await sleep(HEALTH_RETRY_DELAYS_MS[i]);
+        }
+      }
       backend = true;
       return { ...h, backend: true };
     } catch (e) {

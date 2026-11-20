@@ -7,11 +7,12 @@ import { DEFAULT_ANALYSIS_WINDOW } from '../lib/time';
 import { pollDelay } from '../lib/poll';
 import { fmtKm2 } from '../lib/format';
 
-// While the backend is unreachable, re-check every 5 s — also in a background tab — so the UI notices it is back.
+/** Backend health: on page load, every 60 s, and when the tab regains focus. Not polled in a hidden tab: every check
+ *  keeps the free-tier backend awake, so a forgotten tab would keep it running around the clock. */
+export const HEALTH_INTERVAL_MS = 60000;
 export const useHealth = () => useQuery({
-  queryKey: ['health'], queryFn: () => client.health(), staleTime: 20000,
-  refetchInterval: (q) => (q.state.data?.backend === false ? 5000 : 30000),
-  refetchIntervalInBackground: true,
+  queryKey: ['health'], queryFn: () => client.health(), staleTime: HEALTH_INTERVAL_MS - 5000,
+  refetchInterval: HEALTH_INTERVAL_MS,
 });
 
 /**

@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Bookmark, ChevronDown, RotateCcw, Info, LogIn, LogOut, Menu as MenuIcon, Search, Settings, UserRound, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useHealth } from '../../data/queries';
 import { useUi, type View } from '../../state/store';
-import { useImageryState } from '../../data/viewState';
 import { Avatar, IconButton, Popover, Switch, TerratraceLogo, TerratraceMark } from '../../design';
 import type { SystemHealth } from '../../data/contracts';
+import { ago, BADGE, useServiceStatus, type ServiceRow, type Tone } from './serviceStatus';
 import { useBreakpoint } from '../../lib/useLayout';
 import { useChat } from '../../state/chat';
 import { openSignIn, signOut, useAuth } from '../../state/auth';
@@ -39,78 +39,74 @@ export function navigate(key: NavKey) {
   ui.setView(key as View);
 }
 
-/** Public data status (product language only — no infrastructure or setup details). */
-export function dataStatus(h?: SystemHealth): { short: string; long: string; detail: string; ready: boolean } {
-  // The data is archival (Landsat, Sentinel-2, Dynamic World), not a live feed: the badge credits the processing platform.
-  if (!h) return { short: 'Earth Engine', long: 'Powered by Google Earth Engine', detail: 'Checking availability…', ready: false };
-  if (h.backend && h.analysis.status === 'ready') {
-    return { short: 'Earth Engine', long: 'Powered by Google Earth Engine', detail: 'Analyses run on Google Earth Engine over archived Landsat, Sentinel-2 and Dynamic World imagery. Figures come from published analyses only.', ready: true };
-  }
-  return {
-    short: 'Unavailable', long: 'Analysis unavailable', ready: false,
-    detail: 'Earth Engine analysis is temporarily unavailable. You can keep exploring real imagery; TERRATRACE does not display estimated, simulated, or placeholder measurements.',
-  };
+const TONE_DOT: Record<Tone, string> = { ok: 'bg-live', pending: 'bg-warn', down: 'bg-ink-4', off: 'bg-ink-4' };
+
+/** Re-renders every `ms` while mounted (the popover body mounts only while open). */
+function useNow(ms: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), ms); return () => window.clearInterval(t); }, [ms]);
+  return now;
 }
-/** Imagery is independent of analysis: live imagery may be READY while the analysis is unavailable. */
-function ImageryStatusRow() {
-  const status = useUi((s) => (s.investigation.study ? s.investigation.imageryStatus : null));
-  // What the map actually renders (imageryState) — the same object every other imagery label uses.
-  const im = useImageryState();
-  const dot = im.state === 'AVAILABLE' ? 'bg-live' : im.state === 'LOADING' || im.state === 'NONE' || im.state === 'OFF' ? 'bg-ink-4' : 'bg-warn';
-  const title = im.state === 'OFF' ? 'Satellite imagery off'
-    : im.source === 'esri-current' ? 'Current basemap imagery'
-    : im.source === 'ee-analysis-composite' ? 'Analysis composite imagery'
-    : im.source === 'ee-live' ? (status === 'insufficient' ? 'Live imagery · limited coverage' : 'Live satellite imagery')
-    : im.state === 'NONE' ? 'Open a study to load live imagery'
-    : im.state === 'LOADING' ? 'Loading imagery…'
-    : 'Imagery unavailable';
+
+function ServiceList({ rows, checking }: { rows: ServiceRow[]; checking: boolean }) {
+  const now = useNow(5000);
   return (
-    <div data-testid="imagery-status-row" data-status={status ?? 'none'}>
-      <div className="t-label mt-2 !text-[9px] text-ink-4">Imagery</div>
-      <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink"><span className={`h-2 w-2 rounded-full ${dot}`} />{title}</div>
-      {im.state !== 'NONE' && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3" data-testid="header-imagery-line">{im.label} · {im.state === 'AVAILABLE' ? 'imagery only' : im.message ?? ''}</p>}
-    </div>
+    <>
+      <ul className="mt-3 space-y-2.5" data-testid="service-status-list">
+        {rows.map((r) => (
+          <li key={r.key} className="flex items-start gap-2.5" data-testid={`service-${r.key}`} data-tone={r.tone}>
+            <span className={`mt-[5px] h-2 w-2 shrink-0 rounded-full ${TONE_DOT[r.tone]}`} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-[12.5px] font-medium text-ink">{r.name}</span>
+                <span className="shrink-0 text-[12px] text-ink-2">{r.state}</span>
+              </div>
+              <div className="text-[11px] text-ink-4" title={r.checkedAt ? new Date(r.checkedAt).toLocaleString() : undefined}>{ago(r.checkedAt, now)}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {checking && <p className="mt-3 text-[11px] text-ink-3">Checking now… a sleeping server can take about a minute to wake.</p>}
+    </>
   );
 }
-function StatusPill({ health }: { health?: SystemHealth }) {
+
+function StatusPill() {
   const queryClient = useQueryClient();
-  const s = dataStatus(health);
-  const imageryStatus = useUi((st) => st.investigation.imageryStatus);
-  const dot = s.ready ? 'bg-live' : 'bg-warn';
+  const { badge, rows, checking } = useServiceStatus();
+  const b = BADGE[badge];
   return (
     <Popover
-      label="Data status"
+      label="Service status"
       width={330}
       trigger={(p) => (
         <button
           {...p}
           data-testid="data-status"
+          data-state={badge}
+          aria-label={`Service status: ${b.label}`}
           className="tt-press flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md bg-white/[0.03] px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.1)] hover:bg-hover"
         >
           <span className="relative flex h-2 w-2">
-            <span className={`absolute inset-0 rounded-full ${dot} ${s.ready ? 'animate-blink' : ''}`} />
-            <span className={`relative h-2 w-2 rounded-full ${dot}`} />
+            {badge !== 'offline' && <span className={`absolute inset-0 rounded-full ${b.dot} ${badge === 'online' ? 'animate-blink' : 'animate-pulse'}`} />}
+            <span className={`relative h-2 w-2 rounded-full ${b.dot}`} />
           </span>
-          <span className="hidden min-[1440px]:inline">{s.long}</span>
-          <span className="hidden min-[1024px]:inline min-[1440px]:hidden">{s.short}</span>
+          <span className="hidden min-[1440px]:inline">{b.label}</span>
+          <span className="hidden min-[1024px]:inline min-[1440px]:hidden">{b.short}</span>
           <ChevronDown size={13} className="text-ink-3" />
         </button>
       )}
     >
-      {(close) => (
+      {() => (
         <div className="p-4">
-          <div className="t-label text-ink-3">Data status</div>
-          <ImageryStatusRow />
-          <div className="t-label mt-3 !text-[9px] text-ink-4">Analysis</div>
-          <div className="mt-1 flex items-center gap-2 text-[13px] font-medium text-ink" data-testid="analysis-status-row"><span className={`h-2 w-2 rounded-full ${dot}`} />{s.long}</div>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">{s.detail}</p>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-4">TERRATRACE never shows simulated results: measurements appear only for completed, validated (published) analyses.</p>
-          {(!s.ready || imageryStatus === 'unknown' || imageryStatus === 'unavailable') && (
-            <button className="tt-press mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent/12 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20"
-              onClick={() => { close(); for (const k of ['health', 'imagery', 'imagery-availability', 'basemaps']) void queryClient.invalidateQueries({ queryKey: [k] }); }}>
-              <RotateCcw size={14} /> Retry
-            </button>
-          )}
+          <div className="t-label text-ink-3">Service status</div>
+          <ServiceList rows={rows} checking={checking} />
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-4">TERRATRACE never shows simulated results: measurements appear only for completed, validated (published) analyses.</p>
+          <button className="tt-press mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent/12 text-[12.5px] font-medium text-accent shadow-[0_0_0_1px_rgba(69,208,196,0.4)] hover:bg-accent/20 disabled:opacity-50"
+            disabled={checking}
+            onClick={() => { for (const k of ['health', 'service-status', 'imagery', 'imagery-availability', 'basemaps']) void queryClient.invalidateQueries({ queryKey: [k] }); }}>
+            <RotateCcw size={14} /> Check now
+          </button>
         </div>
       )}
     </Popover>
@@ -330,7 +326,7 @@ export function Header() {
       </nav>
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-        <StatusPill health={health} />
+        <StatusPill />
         <IconButton label="Search Earth" onClick={() => { if (useUi.getState().view !== 'explore') useUi.getState().goExplore('explore'); window.setTimeout(() => window.dispatchEvent(new CustomEvent('tt:focus-search')), 80); }}>
           <Search size={17} />
         </IconButton>

@@ -129,7 +129,7 @@ async function run(label, { offline }) {
 
   // ---- landing
   const status = (await page.locator('[data-testid="data-status"]').innerText()).trim();
-  check(live ? /powered by google earth engine/i.test(status) : /analysis unavailable/i.test(status), `${label}: header data status`, status.replace(/\s+/g, ' '));
+  check(live ? /live analysis online/i.test(status) : /analysis offline/i.test(status), `${label}: header data status`, status.replace(/\s+/g, ' '));
   await page.locator('[data-testid="data-status"]').click();
   await page.waitForTimeout(300);
   const pop = await page.locator('body').innerText();
