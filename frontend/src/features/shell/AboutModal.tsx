@@ -16,6 +16,37 @@ const URBAN_STEPS = [
   'Surface urban heat island: built-up minus all other land, and minus vegetated land',
 ];
 
+/** Only what this repository actually uses (frontend/package.json, backend/requirements.txt, the Earth Engine dataset
+ *  ids in backend/app/providers/earth_engine, render.yaml, frontend/vercel.json). Keep in step when a tool is added or dropped. */
+const BUILT_WITH: { group: string; items: string[] }[] = [
+  { group: 'Frontend', items: ['React', 'TypeScript', 'Vite', 'Tailwind CSS', 'MapLibre GL JS', 'Apache ECharts', 'TanStack Query', 'Zustand', 'Framer Motion', 'Lucide icons', 'React Markdown'] },
+  { group: 'Backend', items: ['Python', 'FastAPI', 'Uvicorn', 'Pydantic', 'HTTPX', 'PyJWT', 'OpenStreetMap Nominatim'] },
+  { group: 'Satellite data', items: ['Google Earth Engine', 'Landsat 5 · 7 · 8 · 9', 'Sentinel-2', 'Cloud Score+', 'Dynamic World', 'ESA WorldCover', 'ESA CCI Biomass', 'Hansen Global Forest Change', 'Copernicus DEM GLO-30', 'Sentinel-2 cloudless (EOX)', 'Esri World Imagery'] },
+  { group: 'AI', items: ['Google Gemini'] },
+  { group: 'Database & auth', items: ['Supabase', 'PostgreSQL', 'Supabase Auth', 'Supabase Storage'] },
+  { group: 'Hosting', items: ['Vercel', 'Render'] },
+];
+
+function BuiltWith() {
+  return (
+    <section data-testid="about-built-with">
+      <h3 className="t-label mb-3 text-ink-3">Built with</h3>
+      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        {BUILT_WITH.map(({ group, items }) => (
+          <div key={group}>
+            <div className="mb-2 text-[11.5px] font-medium text-ink-2">{group}</div>
+            <ul className="flex flex-wrap gap-1.5">
+              {items.map((name) => (
+                <li key={name} className="rounded-full px-2.5 py-1 text-[11.5px] leading-none text-ink shadow-[0_0_0_1px_rgba(255,255,255,0.12)]">{name}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function AboutModal() {
   const open = useUi((s) => s.aboutOpen);
   const { data: h } = useHealth();
@@ -74,6 +105,8 @@ export function AboutModal() {
             ))}
           </div>
         </section>
+
+        <BuiltWith />
 
         <section data-testid="about-privacy">
           <h3 className="t-label mb-3 text-ink-3">Privacy</h3>
