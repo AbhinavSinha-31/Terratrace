@@ -5,25 +5,25 @@ services:
     name: terratrace-api
     runtime: python
     rootDir: backend
-    # Starter or above: the free plan sleeps after inactivity (in-memory analysis jobs are lost) and has no disk.
-    plan: starter
+    # Free plan: no persistent disk, and the service sleeps after ~15 min without requests (about a minute to wake).
+    # The cache is EPHEMERAL: it starts empty on every start, deploy and wake, and in-memory analysis jobs are lost on
+    # sleep. Stored results are recomputed on Earth Engine when needed. To keep them: DEPLOY.md → "Starter + disk".
+    plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
     # One worker: analysis jobs, quick scans and rate limits live in this process's memory. $PORT is set by Render.
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips="*"
     healthCheckPath: /api/health/live
     autoDeploy: true
-    # Persistent cache (stored analyses, quick scans, map tiles). Without a disk the cache starts empty after every
-    # deploy and results are recomputed on Earth Engine.
-    disk:
-      name: terratrace-cache
-      mountPath: /var/data
-      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: "3.14.0"
+      # Ephemeral; created at start. With a Starter disk this becomes /var/data/cache.
       - key: TT_CACHE_DIR
-        value: /var/data/cache
+        value: /tmp/terratrace-cache
+      # Map-tile cache budget on the instance's small ephemeral disk (default 1024 MB).
+      - key: TT_TILE_CACHE_MB
+        value: "256"
       - key: EE_PROJECT
         value: terratrace-509821
       # Upload the service-account JSON as a Secret File named ee-service-account.json (Render → Environment → Secret Files).

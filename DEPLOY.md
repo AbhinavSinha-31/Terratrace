@@ -12,7 +12,8 @@ Before going public, also read [docs/PRE_DEPLOYMENT.md](docs/PRE_DEPLOYMENT.md) 
 
 An analysis is a background job polled by the browser and kept in the process's memory; a quick scan can take up to
 15 minutes in Earth Engine restricted mode; results and map tiles are a file cache; rate limits are per process. So the
-backend runs as **one always-on instance with one worker**, ideally with a persistent disk for the cache.
+backend runs as **one instance with one worker**. It is set up for Render's **free plan** (no disk, sleeps when idle);
+see [Switching to Starter + disk](#switching-to-starter--disk-later) to keep results across restarts.
 
 ## 0. Once
 
@@ -27,7 +28,7 @@ backend runs as **one always-on instance with one worker**, ideally with a persi
 ## 1. Backend on Render
 
 1. Render → **New → Blueprint** → select the repository. Render reads `render.yaml` and creates `terratrace-api`
-   (Python, root directory `backend`, Starter plan, 5 GB disk at `/var/data`, health check `/api/health/live`).
+   (Python, root directory `backend`, **Free** plan, no disk, health check `/api/health/live`).
 2. **Environment → Secret Files → Add**: filename `ee-service-account.json`, contents = the JSON key. Render mounts it
    at `/etc/secrets/ee-service-account.json`, which `EE_SERVICE_ACCOUNT_KEY` points to.
 3. Fill in the variables Render asks for (`sync: false`), deploy, then open `https://<service>.onrender.com/api/health`
@@ -45,7 +46,8 @@ backend runs as **one always-on instance with one worker**, ideally with a persi
 | `EE_PROJECT` | Google Cloud project registered for Earth Engine (`terratrace-509821`). |
 | `EE_SERVICE_ACCOUNT_KEY` | Path of the service-account JSON key — the Secret File `/etc/secrets/ee-service-account.json`. |
 | `ALLOWED_ORIGINS` | Exact frontend origins allowed by CORS, comma-separated (the Vercel URL, a custom domain); no wildcards. |
-| `TT_CACHE_DIR` | Where stored results, quick scans and tiles are kept — the disk, `/var/data/cache`; created if missing. |
+| `TT_CACHE_DIR` | Where stored results, quick scans and tiles are kept. Free plan: `/tmp/terratrace-cache` (ephemeral, created at start). |
+| `TT_TILE_CACHE_MB` | Map-tile cache budget in MB — `256` on the free plan's small ephemeral disk. |
 | `SUPABASE_URL` | Supabase project URL; the backend verifies users' sign-in tokens with the project's public keys. |
 | `GEMINI_API_KEY` | Google Gemini API key for Ask TerraTrace (secret; backend only). |
 | `TT_CHAT_ENABLED` | `true` to switch Ask TerraTrace on. |
@@ -54,8 +56,36 @@ backend runs as **one always-on instance with one worker**, ideally with a persi
 | `TT_LLM_MODEL` | Optional: Gemini model override (e.g. when the default model is overloaded). |
 | `ANTHROPIC_API_KEY` | Optional: AI-written analysis briefings (otherwise a deterministic briefing is used). |
 
-`PORT` is set by Render itself. Free plan: no disk and the service sleeps when idle — it works for a demo, but running
-analyses are lost on sleep and the cache starts empty after every deploy.
+`PORT` is set by Render itself.
+
+### What the free plan means
+
+- **Sleeps** after about 15 minutes without requests and takes about a minute to wake. The site's nav badge shows
+  "Waking up…" meanwhile, and turns grey ("Analysis offline") only if the backend still has not answered after its retries.
+  An open tab checks every 60 s (paused while the tab is hidden), which keeps the backend awake while someone is using it.
+- **The cache is empty on every start** (deploy, restart or wake): `TT_CACHE_DIR` is created then. Nothing breaks:
+  stored-result endpoints answer "not run yet", and the featured investigations are re-computed on Earth Engine in the
+  background, one at a time, after each start (`TT_PRECOMPUTE_FEATURED`, on by default). Until each finishes its card
+  shows that it has not been run. Set `TT_PRECOMPUTE_FEATURED=false` to save Earth Engine quota; featured results then
+  appear only when a visitor runs them.
+- **Running analyses are lost** if the service sleeps or restarts mid-run; the browser shows the analysis as failed and
+  it can be run again.
+
+### Switching to Starter + disk later
+
+To keep stored results, quick scans and tiles across restarts and stop the sleeping:
+
+1. In `render.yaml`, change `plan: free` to `plan: starter` and add under the service (same indent as `envVars`):
+   ```yaml
+       disk:
+         name: terratrace-cache
+         mountPath: /var/data
+         sizeGB: 5
+   ```
+2. Set `TT_CACHE_DIR` to `/var/data/cache` and remove `TT_TILE_CACHE_MB` (the default, 1024 MB, fits the disk).
+3. Commit and push; Render applies the Blueprint change (or do the same in the dashboard: Settings → Instance Type,
+   Disks → Add Disk, Environment). A disk needs a paid instance and allows only one instance, which TERRATRACE needs anyway.
+   The first start after the switch begins with an empty disk; results are computed and kept from then on.
 
 ## 2. Frontend on Vercel
 
@@ -95,7 +125,7 @@ Authentication → Providers → Google: paste the client ID and secret. Then `V
 ## 5. After deploying — check
 
 - `https://<backend>/api/health` → 200 with `analysis.status = ready`; `/api/me` without a token → 401.
-- The Vercel site loads with "Powered by Google Earth Engine", Community lists the seed posts, Ask TerraTrace answers.
+- The Vercel site's nav badge turns green ("Live analysis online"; "Waking up…" for up to a minute while a sleeping backend starts), Community lists the seed posts, Ask TerraTrace answers.
 - Browser dev tools → Network: no request carries a Gemini or Earth Engine key; Supabase requests carry only the anon
   key and the user's own token.
 
