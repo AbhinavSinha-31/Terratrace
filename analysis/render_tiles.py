@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import shutil
 import sys
 from datetime import datetime, timezone
 from itertools import combinations
@@ -138,6 +137,18 @@ def save_png(idx: np.ndarray, palette: list[tuple[int, int, int]], path: Path) -
     return path.stat().st_size
 
 
+def remove_tree(path: Path) -> None:
+    """Delete every old tile file, then the folders that can be removed. On OneDrive a just-emptied folder can stay locked for
+    a while; an empty folder left behind is harmless (no stale tile can survive, and git does not track folders)."""
+    for f in path.rglob("*"):
+        if f.is_file():
+            f.unlink()
+    for d in sorted((d for d in path.rglob("*") if d.is_dir()), key=lambda d: len(d.parts), reverse=True) + [path]:
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--max-zoom", type=int, default=12, choices=range(MIN_ZOOM, NATIVE_ZOOM + 1))
@@ -174,7 +185,7 @@ def main() -> None:
 
     out = DEST / "tiles"
     if out.exists():
-        shutil.rmtree(out)
+        remove_tree(out)
     sampler = Sampler(grid, aoi)
     sizes = {k: 0 for k in layers}
     files = 0

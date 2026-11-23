@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,25 @@ class Config:
     def seasons(self) -> dict[str, dict[str, Any]]:
         return self.raw["seasons"]
 
+    def season_span(self, season: str, year: int) -> tuple[date, date]:
+        """First and last day of a season's composite for a study year (the configured end date is exclusive)."""
+        s = self.seasons[season]
+        start = date(year + int(s.get("start_year_offset", 0)), *map(int, s["start"].split("-")))
+        end = date(year + int(s.get("end_year_offset", 0)), *map(int, s["end"].split("-")))
+        return start, end - timedelta(days=1)
+
+    def season_label(self, season: str, year: int, short: bool = False) -> str:
+        """How a composite is named in every table, caption and sentence, from the season's dates in this file:
+        'April–June 2015' (short 'Apr–Jun 2015') for a season inside one calendar year; 'winter 2014–15' for one that
+        spans two (November of the previous year to February); '2015' for the whole calendar year."""
+        first, last = self.season_span(season, year)
+        if first.year != last.year:
+            return f"{season} {first.year}–{last.year % 100:02d}"
+        if (first.month, first.day, last.month, last.day) == (1, 1, 12, 31):
+            return str(year)
+        fmt = "%b" if short else "%B"
+        return f"{first.strftime(fmt)}–{last.strftime(fmt)} {year}"
+
     @property
     def max_cloud_cover(self) -> float:
         return float(self.raw["scenes"]["max_cloud_cover"])
@@ -119,6 +139,11 @@ class Config:
     @property
     def checks(self) -> dict[str, Any]:
         return self.raw["checks"]
+
+    @property
+    def context(self) -> dict[str, dict[str, str]]:
+        """Cited context from outside the pipeline (not results of this study)."""
+        return self.raw.get("context", {})
 
 
 def class_mapping(table: dict[str, list[int]]) -> dict[int, list[int]]:

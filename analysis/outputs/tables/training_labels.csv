@@ -1,9 +1,9 @@
 year,class,reference_label_pixels,train_points,test_points
-2015,Built-up (incl. bare land),498614,420,180
+2015,Built-up and bare land,498614,420,180
 2015,Vegetation/Trees,1652,420,180
 2015,Agriculture/Cropland,1221748,420,180
 2015,Water,1434,420,180
-2025,Built-up (incl. bare land),439937,420,180
+2025,Built-up and bare land,439937,420,180
 2025,Vegetation/Trees,1625,420,180
 2025,Agriculture/Cropland,1229927,420,180
 2025,Water,2786,420,180

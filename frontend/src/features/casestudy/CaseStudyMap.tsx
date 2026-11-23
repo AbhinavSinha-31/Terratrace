@@ -4,11 +4,10 @@ import { ArrowRightLeft, Flame, Layers, RotateCcw } from 'lucide-react';
 import { LayerToggle, Segmented, Skeleton, StateView, Switch } from '../../design';
 import { useBasemaps } from '../../data/queries';
 import type { BaseLayer } from '../../data/contracts';
-import { caseStudyAsset, useCaseStudyTiles, type CaseStudyDoc, type TilesManifest } from './data';
+import { caseStudyAsset, compositeLabel, useCaseStudyTiles, type CaseStudyDoc, type TilesManifest } from './data';
 
 type Kind = 'lulc' | 'change' | 'lst';
 type Season = 'summer' | 'winter';
-const SEASON_LABEL: Record<Season, string> = { summer: 'Apr–Jun (primary)', winter: 'Nov–Feb (secondary)' };
 const OVERLAY = 'TerraTrace LULC + UHI pipeline · Landsat Collection 2 (USGS), 30 m';
 
 /** Absolute tile URL with its {z}/{x}/{y} placeholders intact (URL() would percent-encode the braces). */
@@ -86,7 +85,7 @@ function Legend({ d, t, kind, year, season }: { d: CaseStudyDoc; t: TilesManifes
       <div className="h-2.5 rounded-[2px]" style={{ background: `linear-gradient(to right, ${l.stops.join(', ')})` }} />
       <div className="t-data mt-1 flex justify-between text-[11px] text-ink-2"><span>≤ {l.vmin.toFixed(1)} °C</span><span>≥ {l.vmax.toFixed(1)} °C</span></div>
       <p className="mt-1.5 text-[11px] leading-snug text-ink-3">
-        Land surface temperature, {SEASON_LABEL[season]} {year}{mean !== undefined ? ` · study-area land mean ${mean.toFixed(1)} °C` : ''}.
+        Land surface temperature, {compositeLabel(d, season, year, true)}{season === 'winter' ? ' (Nov–Feb, secondary)' : ' (primary)'}{mean !== undefined ? ` · study-area land mean ${mean.toFixed(1)} °C` : ''}.
         One colour range for both years of this season; transparent = no valid temperature.
       </p>
     </div>
@@ -173,14 +172,14 @@ export function CaseStudyMap({ d }: { d: CaseStudyDoc }) {
           )}
           <LayerToggle icon={<Flame size={14} />} label="Surface temperature" hint="Landsat land surface temperature at the ~10:30 overpass" on={kind === 'lst'} onChange={toggle('lst')}>
             <Segmented<Season> label="Season" value={season} onChange={setSeason}
-              options={[{ value: 'summer', label: 'Apr–Jun' }, { value: 'winter', label: 'Nov–Feb' }]} />
+              options={[{ value: 'summer', label: 'Apr–Jun' }, { value: 'winter', label: 'Winter' }]} />
           </LayerToggle>
         </div>
         <div className="space-y-1.5 px-2">
           <div className="t-label text-ink-3">Year</div>
           {kind === 'change' && change?.kind === 'change'
             ? <p className="text-[11.5px] text-ink-3">The change layer compares {change.from_year} and {change.to_year}.</p>
-            : <Segmented<string> label="Year" size="md" value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map((y) => ({ value: String(y), label: String(y) }))} />}
+            : <Segmented<string> label="Year" size="md" value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map((y) => ({ value: String(y), label: kind === 'lst' && season === 'winter' ? compositeLabel(d, 'winter', y, true).replace(/^Winter /, '') : String(y) }))} />}
         </div>
         <label className="block space-y-1 px-2">
           <span className="flex justify-between"><span className="t-label text-ink-3">Opacity</span><span className="t-data text-[11px] text-ink-2">{Math.round(opacity * 100)} %</span></span>

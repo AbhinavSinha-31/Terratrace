@@ -1,6 +1,6 @@
 {
  "id": "noida-ghaziabad",
- "generated_utc": "2026-10-20T12:25:37+00:00",
+ "generated_utc": "2026-11-20T20:12:58+00:00",
  "source": "analysis/outputs/cache rasters (the pipeline's 30 m UTM 43N grid); rendered by analysis/render_tiles.py, no Earth Engine",
  "tile_size": 256,
  "minzoom": 8,
@@ -70,7 +70,7 @@
    },
    {
     "code": 1,
-    "name": "Built-up (incl. bare land)",
+    "name": "Built-up and bare land",
     "color": "#d6336c"
    },
    {

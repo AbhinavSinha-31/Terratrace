@@ -31,11 +31,25 @@ export interface CaseStudyDoc {
   /** Card image URL, from the case study's data (config.toml [website]), like the live cards' backend metadata —
    *  imagery URLs are never built in frontend source. */
   thumbnail_url: string;
+  earth_engine_downloaded_utc: string;
   study: {
-    name: string; short_name: string; districts: string[]; boundary_source: string; area_km2: number; area_km2_grid: number;
-    years: number[]; sensors: Record<string, string>; scenes: { year: number; season: Season | 'annual'; scenes: number }[];
+    name: string; short_name: string; districts: string[]; boundary_source: string;
+    /** The sum of the classified 30 m pixels (class_areas.csv) — the study area as reported everywhere. */
+    area_km2: number; area_km2_definition: string; area_km2_boundary_polygon: number;
+    years: number[]; sensors: Record<string, string>;
+    scenes: { year: number; season: Season | 'annual'; scenes: number; composite: string; median_date: string }[];
+    /** Composite names from the pipeline config: 'April–June 2015' / 'Apr–Jun 2015'; 'winter 2014–15' (both forms). */
+    composites: Record<Season, Record<string, { label: string; short: string }>>;
+    /** Scenes per calendar month and median acquisition date of each seasonal composite. */
+    scene_timing: { composite: string; year: number; season: Season; months: string; per_month: { month: string; label: string; scenes: number }[]; total: number; median: string }[];
+    /** Exactly which reference products and years made each map's training and test labels. */
+    reference_labels: { year: number; text: string }[];
+    reference_label_mismatches: string[];
     classes: { code: number; name: string; color: string }[]; method_summary: string;
   };
+  /** Cited context from outside the pipeline (never a result of the study). */
+  context: Record<string, { text: string; source: string; reference: string }>;
+  changelog: { version: string; text: string }[];
   /** Plain-language headline cards (one number, one sentence), generated from the tables by export_case_study.py. */
   headlines: { id: string; value: string; period: string; title: string; text: string }[];
   /** How to read the results: the technical caveats, stated plainly. */
@@ -142,4 +156,11 @@ export function useCaseStudyDownloads(id: string | null) {
   });
 }
 
-export const yearSpan = (years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');
+/** A composite's name, sentence-initial capital: 'April–June 2015', 'Winter 2014–15' (short: 'Apr–Jun 2015'). */
+export const compositeLabel = (d: CaseStudyDoc, season: Season, year: number, short = false) => {
+  const c = d.study.composites[season]?.[String(year)];
+  const t = c ? (short ? c.short : c.label) : `${year}`;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+export const yearSpan =(years: number[]) => (years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '');

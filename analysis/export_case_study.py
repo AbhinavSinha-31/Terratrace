@@ -29,7 +29,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from terratrace_analysis import __version__, checks, config as config_mod, report  # noqa: E402
+from terratrace_analysis import CHANGELOG, __version__, checks, config as config_mod, labels, report  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "outputs"
@@ -90,8 +90,6 @@ def headlines(T) -> list[dict]:
     tm = T.tm[(a, b)]
     net = float(tm.loc[ag, bu] - tm.loc[bu, ag])
     dc = T.area(b, 3) - T.area(a, 3)
-    va, vb = T.area(a, 2), T.area(b, 2)
-    vpa, vpb = T.area(a, 2, "percent_of_classified"), T.area(b, 2, "percent_of_classified")
     sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
     wa, wb = float(T.u(a, "winter", CORE).uhi_intensity_c), float(T.u(b, "winter", CORE).uhi_intensity_c)
     nd = T.cor[T.cor["index"] == "NDVI"].r.astype(float)
@@ -105,40 +103,35 @@ def headlines(T) -> list[dict]:
                    f"(GHSL{'; ' + str(b) + ' is a projection' if bool(p.projection_not_estimate[b]) else ''})")
     cards = [{
         "id": "built", "value": f"{_sg(bb - ba, 0)} km²", "period": f"{a}→{b}", "title": "More built-up land",
-        "text": f"Built-up land (including bare land) grew from {ba:,.0f} km² ({pa:.1f} % of the study area) in {a} "
+        "text": f"{bu} grew from {ba:,.0f} km² ({pa:.1f} % of the study area) in {a} "
                 f"to {bb:,.0f} km² ({pb:.1f} %) in {b}{pop}.",
     }, {
-        "id": "farmland", "value": f"{net:,.0f} km²", "period": f"{a}→{b}", "title": "The city grew mostly into farmland",
+        "id": "farmland", "value": f"{net:,.0f} km²", "period": f"{a}→{b}", "title": f"{bu} grew mostly into farmland",
         "text": f"Most new built-up land replaced cropland: a net {net:,.0f} km² of farmland became built-up, and cropland "
                 f"overall {'shrank' if dc < 0 else 'grew'} by {abs(dc):,.0f} km².",
     }]
-    slight = abs(vpb - vpa) < 2
-    cards.append({
-        "id": "vegetation", "value": f"{_sg(vb - va, 0)} km²", "period": f"{a}→{b}",
-        "title": f"Tree and vegetation cover {'rose' if vb >= va else 'fell'}{' slightly' if slight else ''}",
-        "text": f"Tree/vegetation cover went from {vpa:.1f} % to {vpb:.1f} % of the study area ({va:,.0f} → {vb:,.0f} km²)"
-                f"{', possibly due to parks and plantations' if vb >= va else ''}.",
-    })
+    # Third card: greener areas are cooler (replaces the 1.0.0 vegetation-cover card: the net vegetation change is uncertain
+    # because of its gross churn, see report.s8_findings and checks.churn).
+    if (nd < 0).all():
+        cards.append({
+            "id": "greener", "value": f"r ≈ {_sg(nd.mean(), 1)}", "period": "NDVI–LST", "title": "Greener areas are cooler",
+            "text": f"Surface temperature falls as vegetation (NDVI) rises in all four composites (r {_sg(nd.max(), 3)} to "
+                    f"{_sg(nd.min(), 3)}) and rises with built-up surfaces (NDBI, r {_sg(nb.min(), 3)} to {_sg(nb.max(), 3)}).",
+        })
     both_warm = wa >= report.NEAR_ZERO_C and wb >= report.NEAR_ZERO_C
     cards.append({
         "id": "winter", "value": (f"≈ {_sg(wa, 1)} °C" if round(wa, 1) == round(wb, 1) else f"{_sg(wa, 1)} / {_sg(wb, 1)} °C"),
         "period": "Nov–Feb", "title": "Winter heat island in both years" if both_warm else "Winter: city vs countryside",
-        "text": f"In November–February the urban core was {_sg(wa, 2)} °C ({a}) and {_sg(wb, 2)} °C ({b}) "
-                f"{'warmer than' if both_warm else 'relative to'} the countryside around it.",
+        "text": f"In {T.lab('winter', a)} and {T.lab('winter', b)} (November–February) the urban core was {_sg(wa, 2)} °C and "
+                f"{_sg(wb, 2)} °C {'warmer than' if both_warm else 'relative to'} the countryside around it.",
     })
     small = max(abs(sa), abs(sb)) < 1
     cards.append({
         "id": "summer", "value": "< 1 °C" if small else f"{_sg(sa, 1)} / {_sg(sb, 1)} °C", "period": "Apr–Jun",
         "title": "Summer days: no clear city heat effect" if small else "Summer days: city vs countryside",
         "text": f"In April–June, around 10:30 local time, the urban core was {'within 1 °C of' if small else 'compared with'} the "
-                f"countryside around it in both years ({_sg(sa, 2)} °C in {a}, {_sg(sb, 2)} °C in {b}).",
+                f"countryside around it in both years ({_sg(sa, 2)} °C in {T.lab('summer', a)}, {_sg(sb, 2)} °C in {T.lab('summer', b)}).",
     })
-    if (nd < 0).all():
-        cards.append({
-            "id": "greener", "value": f"r ≈ {_sg(nd.mean(), 1)}", "period": "NDVI–LST", "title": "Greener areas are cooler",
-            "text": f"Surface temperature falls as vegetation (NDVI) rises in both seasons and years (r {_sg(nd.max(), 3)} to "
-                    f"{_sg(nd.min(), 3)}) and rises with built-up surfaces (NDBI, r {_sg(nb.min(), 3)} to {_sg(nb.max(), 3)}).",
-        })
     return cards
 
 
@@ -167,10 +160,19 @@ def caveats(T) -> list[dict]:
     if (sa < 0) != (sb < 0):
         out.append({
             "title": "The summer daytime result changes sign",
-            "text": f"In April–June the urban core was {_sg(sa, 2)} °C relative to its rural ring in {a} (a cool island) and "
-                    f"{_sg(sb, 2)} °C in {b} (a heat island). Both values are below 1 °C, and with one composite per season and year a "
+            "text": f"The urban core was {_sg(sa, 2)} °C relative to its rural ring in {T.lab('summer', a)} (a cool island) and "
+                    f"{_sg(sb, 2)} °C in {T.lab('summer', b)} (a heat island). Both values are below 1 °C, and with one composite per season and year a "
                     "change this small cannot be separated from year-to-year weather, so it is not read as a warming trend. A daytime "
                     "cool island over dry, harvested farmland is known in pre-monsoon India (Shastri et al., 2017).",
+        })
+    vn, ch = T.cfg.class_name(2), T.churn(a, b, 2)
+    if ch["stable_km2"] < T.cfg.checks["min_stable_share"] * ch["first_km2"]:
+        out.append({
+            "title": "The vegetation change is uncertain",
+            "text": f"{vn} changed by a net {_sg(ch['net_km2'], 1)} km², but only {ch['stable_km2']:.1f} km² "
+                    f"({ch['stable_km2'] / ch['first_km2'] * 100:.0f} % of its {a} area) was mapped as {vn} in both years; "
+                    f"{ch['lost_km2']:.1f} km² was lost to other classes and {ch['gained_km2']:.1f} km² gained from them. The net figure "
+                    "is a small difference between large gross flows that include class confusion, so it is not reported as a finding.",
         })
     out.append({
         "title": "Association, not cause",
@@ -266,17 +268,30 @@ def main() -> None:
     sensors = {str(y): " + ".join(names[s] for s in T.meta[y]["sensors"]) for y in T.years}
     doc = {
         "id": CASE_ID, "kind": "static-case-study", "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "pipeline_version": __version__, "thumbnail_url": cfg.raw["website"]["thumbnail_url"], "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
+        "pipeline_version": __version__,
+        # Last Earth Engine download of the rasters behind every table (the LULC and LST of this run; later steps are local).
+        "earth_engine_downloaded_utc": max(T.meta[y].get("lst_mask", {}).get("refetched_utc", "") for y in T.years),
+        "thumbnail_url": cfg.raw["website"]["thumbnail_url"], "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
         "study": {
             "name": cfg.study["name"], "short_name": cfg.study["short_name"], "districts": cfg.study.get("district_labels", cfg.study["gaul_districts"]),
-            "boundary_source": "FAO GAUL 2025, level 2", "area_km2": T.aoi_area["area_km2_geodesic"], "area_km2_grid": T.aoi_area["area_km2_grid"],
+            "boundary_source": "FAO GAUL 2025, level 2",
+            # Study area as reported everywhere: the sum of the classified 30 m pixels (class_areas.csv). The boundary polygon's own
+            # geodesic area is kept for reference only.
+            "area_km2": T.study_km2, "area_km2_definition": "sum of the classified 30 m pixels (class_areas.csv)",
+            "area_km2_boundary_polygon": T.aoi_area["area_km2_geodesic"],
             "years": T.years, "sensors": sensors,
-            "scenes": [{"year": int(r.year), "season": r.season, "scenes": int(r.scenes)} for _, r in T.scenes.iterrows()],
+            "scenes": [{"year": int(r.year), "season": r.season, "scenes": int(r.scenes), "composite": r.composite,
+                        "median_date": r.median_date} for _, r in T.scenes.iterrows()],
+            # Composite names ('April–June 2015', 'winter 2014–15'), from config.toml's season dates — the page uses these.
+            "composites": {s: {str(y): {"label": T.lab(s, y), "short": T.lab(s, y, True)} for y in T.years} for s in ("summer", "winter")},
+            "scene_timing": report.scene_timing(T),
+            "reference_labels": [{"year": y, "text": report.label_years(T, y), "sources": labels.sources(cfg, y)} for y in T.years],
+            "reference_label_mismatches": report.label_mismatches(T),
             "classes": [{"code": c.code, "name": c.name, "color": c.color} for c in cfg.classes],
-            "method_summary": (f"Landsat Collection 2 Level-2 composites; {len(cfg.classes)}-class Random Forest ({cfg.rf['trees']} trees) in "
-                               "Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface temperature from the "
-                               "Landsat thermal band (April–June primary, November–February secondary); UHI as urban core minus an "
-                               "equal-area rural ring."),
+            "method_summary": (f"Landsat Collection 2 Level-2 composites; {len(cfg.classes)}-class Random Forest (Breiman, 2001; "
+                               f"{cfg.rf['trees']} trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface "
+                               "temperature from the Landsat thermal band (April–June primary, November–February winter secondary); UHI as "
+                               "urban core minus an equal-area rural ring (Peng et al., 2012; Chakraborty & Lee, 2019)."),
         },
         "headlines": headlines(T), "caveats": caveats(T),
         "findings": F, "limitations": [{"title": l["title"], "text": l["text"]} for l in LIM], "flags": flags,
@@ -289,6 +304,9 @@ def main() -> None:
                              "spots) that the cloud mask cannot see; reflectance and the land-cover maps are unaffected."),
                     "impact": mask},
         "images": images, "cross_checks": cross,
+        # Cited context from outside the pipeline (config.toml [context]); never a result of this study.
+        "context": {k: dict(v) for k, v in cfg.context.items()},
+        "changelog": [{"version": v, "text": t} for v, t in CHANGELOG.items()],
     }
     (DEST / "case-study.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
     sizes = sorted(((p.stat().st_size, p.name) for p in DEST.iterdir()), reverse=True)

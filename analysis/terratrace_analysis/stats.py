@@ -192,6 +192,26 @@ def conversion(cfg: Config, la: np.ndarray, lb: np.ndarray, ta: np.ndarray, tb: 
     return rows
 
 
+# ----------------------------------------------------------------------------- scene timing
+def median_date(dates: list[str]) -> str:
+    """Median acquisition date of a composite's scenes (midpoint of the two middle dates for an even count, rounded down)."""
+    if not dates:
+        return ""
+    return pd.to_datetime(pd.Series(sorted(dates))).median().strftime("%Y-%m-%d")
+
+
+def scene_months(cfg: Config, year: int, season: str, dates: list[str]) -> list[dict[str, Any]]:
+    """Scenes per calendar month of one composite, every month of the season listed (0 where none). A scene is one
+    Landsat path/row acquisition that passed the scene cloud filter; neighbouring path/rows on one date count separately."""
+    first, last = cfg.season_span(season, year)
+    months = pd.period_range(first, last, freq="M")
+    got = pd.Series(pd.to_datetime(pd.Series(dates)).dt.to_period("M")).value_counts() if dates else pd.Series(dtype=int)
+    n = len(dates)
+    return [{"year": year, "season": season, "composite": cfg.season_label(season, year), "month": str(m),
+             "month_of_season": i, "month_name": m.strftime("%b"), "scenes": int(got.get(m, 0)),
+             "share_of_composite": int(got.get(m, 0)) / n if n else np.nan} for i, m in enumerate(months, 1)]
+
+
 # ----------------------------------------------------------------------------- driver
 def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     out.mkdir(parents=True, exist_ok=True)
@@ -244,15 +264,19 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     pd.DataFrame(imp_rows).to_csv(out / "feature_importance.csv", index=False)
     pd.DataFrame(lab_rows).to_csv(out / "training_labels.csv", index=False)
 
-    # 4. Scenes
-    scene_rows = []
+    # 4. Scenes — from the scene lists saved with each year's Earth Engine run (meta.json), not re-queried
+    scene_rows, month_rows = [], []
     for y in years:
         for s in ("summer", "winter", "annual"):
             sc = meta[y]["scenes"][s]
-            scene_rows.append({"year": y, "season": s, "sensors": "+".join(meta[y]["sensors"]), "scenes": sc["count"],
-                               "first_date": min(sc["dates"]) if sc["dates"] else "", "last_date": max(sc["dates"]) if sc["dates"] else "",
+            scene_rows.append({"year": y, "season": s, "composite": cfg.season_label(s, y), "sensors": "+".join(meta[y]["sensors"]),
+                               "scenes": sc["count"], "first_date": min(sc["dates"]) if sc["dates"] else "",
+                               "last_date": max(sc["dates"]) if sc["dates"] else "", "median_date": median_date(sc["dates"]),
                                "date_ranges": "; ".join(f"{a}…{b}" for a, b in meta[y]["season_ranges"][s])})
+            if s != "annual":
+                month_rows += scene_months(cfg, y, s, sc["dates"])
     pd.DataFrame(scene_rows).to_csv(out / "scenes.csv", index=False)
+    pd.DataFrame(month_rows).to_csv(out / "scene_months.csv", index=False)
 
     # 5. LST summaries, per class, UHI, correlations
     lst_rows, cls_rows, uhi_rows, cor_rows = [], [], [], []

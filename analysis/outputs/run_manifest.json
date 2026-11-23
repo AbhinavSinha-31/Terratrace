@@ -1,12 +1,12 @@
 {
-  "pipeline_version": "1.0.0",
-  "run_utc": "2026-10-20T18:14:19+00:00",
+  "pipeline_version": "1.0.1",
+  "run_utc": "2026-11-23T20:28:19+00:00",
   "years": [
     2015,
     2025
   ],
   "steps": [
-    "report"
+    "validation"
   ],
   "config_file": "config.toml",
   "config": {
@@ -83,7 +83,7 @@
     "classes": [
       {
         "code": 1,
-        "name": "Built-up (incl. bare land)",
+        "name": "Built-up and bare land",
         "color": "#d6336c"
       },
       {
@@ -191,7 +191,8 @@
         ],
         "2025": [
           {
-            "product": "worldcover"
+            "product": "worldcover",
+            "year": 2021
           },
           {
             "product": "dynamic_world",
@@ -250,7 +251,12 @@
       "lst_pixel_range": [
         -5.0,
         75.0
-      ]
+      ],
+      "max_month_share_diff_pp": 15,
+      "min_stable_share": 0.5
+    },
+    "website": {
+      "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg"
     },
     "report": {
       "author": "Abhinav Sinha, Bennett University",
@@ -258,6 +264,13 @@
       "status": "Preliminary results \u2014 not peer reviewed",
       "pdf_file": "terratrace-noida-ghaziabad-case-study.pdf",
       "data_file": "terratrace-noida-ghaziabad-data.zip"
+    },
+    "context": {
+      "weather_2025": {
+        "text": "April\u2013June 2025 was unusually wet in Delhi: May 2025 was the wettest May on record since 1901 (India Meteorological Department). Wet soils and greener crops lower daytime land surface temperature, so the lower absolute LST in 2025 reflects weather rather than land change. Compare classes within a year, or use UHI intensity and normalised LST across years.",
+        "source": "India Meteorological Department (IMD): Delhi (Safdarjung) rainfall in May 2025 was the highest for May since records began in 1901 (IMD Safdarjung observations, as reported by IMD in late May 2025); all-India context in IMD's Monthly Climate Summary, May 2025 (press release, 7 June 2025), https://mausam.imd.gov.in",
+        "reference": "India Meteorological Department (2025). <i>Monthly Climate Summary, May 2025</i> [Press release, 7 June 2025]. New Delhi: IMD. https://mausam.imd.gov.in"
+      }
     }
   },
   "software": {

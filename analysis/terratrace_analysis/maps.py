@@ -109,7 +109,8 @@ def lst_map(cfg: Config, cache: Path, grid: Grid, aoi: np.ndarray, year: int, se
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02, extend="both")
     cb.set_label("Land surface temperature (°C)")
     cb.outline.set_linewidth(0.4)
-    ax.set_title(f"Land surface temperature, {figstyle.SEASON_LABEL[season].split(' (')[0]} {year}")
+    label = cfg.season_label(season, year)
+    ax.set_title(f"Land surface temperature, {label}" + (" (November–February)" if season == "winter" else ""))
     rng = meta["season_ranges"][season]
     figstyle.source_note(fig, y=MAP_NOTE_Y, text=f"{_sensor(meta)} surface temperature (ST band, ×0.00341802 + 149 K − 273.15), per-pixel median "
                               f"of clear observations {rng[0][0]} … {rng[-1][1]} (end exclusive); "

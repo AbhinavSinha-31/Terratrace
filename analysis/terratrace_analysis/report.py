@@ -1,6 +1,8 @@
 """results_summary.md — nine fixed sections, written so an abstract can be drafted directly from it.
 
-Every number is read from the regenerated CSV tables in outputs/tables (or the run metadata); nothing is typed in by hand.
+Every result is read from the regenerated CSV tables in outputs/tables (or the run metadata); nothing is typed in by hand.
+Context from outside the pipeline (config.toml [context], e.g. the IMD weather note) is quoted with its source and never
+presented as a result.
 Before the file is written, `cross_check` recomputes the key numbers independently from the tables/rasters and stops
 with an error if any disagree, so a wrong number cannot reach the summary silently.
 Sentences state the direction the data show (heat island OR cool island, warming OR cooling) — never the expected one.
@@ -16,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import __version__, checks
+from . import __version__, checks, labels
 from .config import Config
 from .stats import load_meta
 
@@ -67,6 +69,7 @@ class Tables:
         self.uhi = pd.read_csv(t / "uhi_intensity.csv")
         self.cor = pd.read_csv(t / "lst_correlations.csv")
         self.scenes = pd.read_csv(t / "scenes.csv")
+        self.scene_months = pd.read_csv(t / "scene_months.csv")
         self.conv = pd.read_csv(t / "conversion_lst_change.csv") if (t / "conversion_lst_change.csv").exists() else None
         self.pop = pd.read_csv(t / "population_vs_builtup.csv") if (t / "population_vs_builtup.csv").exists() else None
         self.mask = pd.read_csv(t / "lst_mask_impact.csv") if (t / "lst_mask_impact.csv").exists() else None
@@ -74,6 +77,15 @@ class Tables:
         self.tm = {(a, b): pd.read_csv(t / f"transition_{a}_{b}_km2.csv", index_col=0) for a, b in combinations(self.years, 2)}
         self.aoi_area = json.loads((cache / "aoi_area.json").read_text(encoding="utf-8"))
         self.built = cfg.class_name(1)
+        # Study area = the sum of the classified 30 m pixels (class_areas.csv, first year; cross_check shows every year agrees).
+        self.study_km2 = float(self.areas[(self.areas.year == self.years[0])].area_km2.sum())
+
+    def lab(self, season: str, y: int, short: bool = False) -> str:
+        """Composite name: 'April–June 2015', 'winter 2014–15' (config.season_label)."""
+        return self.cfg.season_label(season, int(y), short)
+
+    def churn(self, a: int, b: int, code: int) -> dict[str, float]:
+        return checks.churn(self.tm[(a, b)], self.cfg.class_name(code))
 
     def area(self, y: int, code: int, col: str = "area_km2") -> float:
         return float(self.areas[(self.areas.year == y) & (self.areas.class_code == code)][col].iloc[0])
@@ -97,6 +109,18 @@ def cross_check(T: Tables) -> list[str]:
             assert abs(px * T.cfg.scale**2 / 1e6 - T.area(y, c.code)) < 1e-6, f"area {y} {c.name}"
         tot = T.areas[(T.areas.year == y)].area_km2.sum()
         assert abs(tot - T.aoi_area["area_km2_grid"]) < 0.01, f"class areas {y} do not add up to the study area"
+        assert abs(tot - T.study_km2) < 1e-6, f"study area {y} differs from the first year's"
+        for s in ("summer", "winter", "annual"):
+            dates = T.meta[y]["scenes"][s]["dates"]
+            sc = T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].iloc[0]
+            assert int(sc.scenes) == len(dates) == len(T.meta[y]["scenes"][s]["ids"]), f"scene count {y} {s}"
+            srt = sorted(dates)
+            lo, hi = pd.Timestamp(srt[(len(srt) - 1) // 2]), pd.Timestamp(srt[len(srt) // 2])
+            assert sc.median_date == (lo + (hi - lo) / 2).strftime("%Y-%m-%d"), f"median date {y} {s}"
+            if s != "annual":
+                sm = T.scene_months[(T.scene_months.year == y) & (T.scene_months.season == s)]
+                assert int(sm.scenes.sum()) == len(dates), f"scenes per month {y} {s}"
+                assert all(sum(d[:7] == m for d in dates) == n for m, n in zip(sm.month, sm.scenes)), f"month counts {y} {s}"
         pc = T.areas[(T.areas.year == y) & (T.areas.class_code > 0)].percent_of_classified.sum()
         assert abs(pc - 100) < 1e-6, f"percentages {y} sum to {pc}"
         cm = T.cm[y].to_numpy(float)
@@ -107,8 +131,9 @@ def cross_check(T: Tables) -> list[str]:
             for m in (CORE, BUILTM):
                 r = T.u(y, s, m)
                 assert abs(r.urban_mean_c - r.rural_mean_c - r.uhi_intensity_c) < 1e-9, f"UHI {y} {s} {m}"
-        done.append(f"{y}: class areas re-counted from the raster, sum to the study area, percentages sum to 100; "
-                    "overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases)")
+        done.append(f"{y}: class areas re-counted from the raster, sum to the study area ({T.study_km2:,.1f} km²), percentages sum "
+                    "to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases); scene counts, "
+                    "scenes per month and median dates re-counted from the saved scene lists")
     for (a, b), tm in T.tm.items():
         la, lb = np.load(T.cache / str(a) / "lulc.npy"), np.load(T.cache / str(b) / "lulc.npy")
         both = aoi & (la > 0) & (lb > 0)
@@ -116,7 +141,12 @@ def cross_check(T: Tables) -> list[str]:
         for c in T.cfg.classes:
             assert abs(tm.loc[c.name].sum() - ((la == c.code) & both).sum() * T.cfg.scale**2 / 1e6) <= tol, f"transition rows {a}-{b}"
             assert abs(tm[c.name].sum() - ((lb == c.code) & both).sum() * T.cfg.scale**2 / 1e6) <= tol, f"transition cols {a}-{b}"
-        done.append(f"{a}→{b}: transition-matrix row sums = {a} class areas and column sums = {b} class areas (re-counted)")
+        for c in T.cfg.classes:
+            ch = T.churn(a, b, c.code)
+            assert abs(ch["first_km2"] - T.area(a, c.code)) <= tol and abs(ch["second_km2"] - T.area(b, c.code)) <= tol, f"churn {a}-{b} {c.name}"
+            assert abs(ch["net_km2"] - (T.area(b, c.code) - T.area(a, c.code))) <= 2 * tol, f"net = gained − lost {a}-{b} {c.name}"
+        done.append(f"{a}→{b}: transition-matrix row sums = {a} class areas and column sums = {b} class areas (re-counted); "
+                    "per class, stable + lost = first-year area and gained − lost = net change")
     if T.pop is not None:
         p = T.pop.set_index("epoch")
         raw = pd.read_csv(T.cache / "population.csv").set_index("epoch")
@@ -133,17 +163,60 @@ def s1_setup(T: Tables, L: list[str]) -> None:
     sens = "; ".join(f"{y}: {' + '.join(names[s] for s in T.meta[y]['sensors'])}"
                      + (f" ({T.meta[y]['pooled_years'][0]}–{T.meta[y]['pooled_years'][-1]} pooled)" if len(T.meta[y]['pooled_years']) > 1 else "")
                      for y in T.years)
-    sc = "; ".join(f"{y}: {int(T.scenes[(T.scenes.year == y) & (T.scenes.season == 'summer')].scenes.iloc[0])} April–June, "
-                   f"{int(T.scenes[(T.scenes.year == y) & (T.scenes.season == 'winter')].scenes.iloc[0])} Nov–Feb, "
-                   f"{int(T.scenes[(T.scenes.year == y) & (T.scenes.season == 'annual')].scenes.iloc[0])} whole-year" for y in T.years)
+    n = lambda y, s: int(T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].scenes.iloc[0])  # noqa: E731
+    sc = "; ".join(f"{T.lab('summer', y)}: {n(y, 'summer')}, {T.lab('winter', y)}: {n(y, 'winter')}, whole year {y}: {n(y, 'annual')}"
+                   for y in T.years)
     pts = "; ".join(f"{y}: {int(T.labels[T.labels.year == y].train_points.sum())} training / {int(T.labels[T.labels.year == y].test_points.sum())} test"
                     for y in T.years)
     L += [f"- **Study area:** {cfg.study['name']} — FAO GAUL 2025 districts {' + '.join(cfg.study.get('district_labels', cfg.study['gaul_districts']))}, "
-          f"{_f(T.aoi_area['area_km2_geodesic'], 0)} km² (30 m grid: {_f(T.aoi_area['area_km2_grid'], 0)} km²).",
+          f"{_f(T.study_km2, 0)} km² (the sum of the classified 30 m pixels).",
           f"- **Years and sensors:** {sens} — Landsat Collection 2 Level-2, Tier 1, 30 m.",
           f"- **Scenes used:** {sc}.",
           f"- **Classes ({len(cfg.classes)}):** {', '.join(c.name for c in cfg.classes)} (Barren/Open land merged into Built-up in every year). "
-          f"Random Forest, {cfg.rf['trees']} trees; points ({cfg.rf['points_per_class']} per class, 70/30 per class): {pts}.", ""]
+          f"Random Forest (Breiman, 2001), {cfg.rf['trees']} trees; points ({cfg.rf['points_per_class']} per class, 70/30 per class): {pts}.",
+          "- **Reference labels (training and test):** " + "; ".join(f"{y} map — {label_years(T, y)}" for y in T.years) + ".",
+          "", f"**Scenes per calendar month and median acquisition date** (scenes that passed the {cfg.max_cloud_cover:g} % scene "
+          "cloud filter; clouds inside them are masked per pixel; neighbouring path/rows on one date count as separate scenes):", "",
+          "| Composite | Scenes per month | Total | Median acquisition date |", "|---|---|---:|---|"]
+    L += [f"| {r['composite']} | {r['months']} | {r['total']} | {r['median']} |" for r in scene_timing(T)] + [""]
+
+
+def label_years(T: Tables, y: int) -> str:
+    """Which reference products and years made a map's training and test labels (from config.toml, via labels.sources)."""
+    out = []
+    for p in labels.sources(T.cfg, y):
+        ys = p["years"]
+        if p["product"] == "GLC-FCS30D":
+            out.append(f"GLC-FCS30D {p['label_year']} class, unchanged in every year {ys[0]}–{ys[-1]}")
+        else:
+            out.append(f"agreeing with {p['product']} {p['label_year']}")
+    return ", ".join(out)
+
+
+def label_mismatches(T: Tables) -> list[str]:
+    """Plain statements of every reference product whose year is not the map's year."""
+    out = []
+    for y in T.years:
+        for p in labels.sources(T.cfg, y):
+            if not p["matches"]:
+                gap = p["label_year"] - y
+                out.append(f"the {y} map used {p['product']} {p['label_year']} ({abs(gap)} year{'s' if abs(gap) != 1 else ''} "
+                           f"{'before' if gap < 0 else 'after'} the map year)")
+    return out
+
+
+def scene_timing(T: Tables) -> list[dict]:
+    """One row per seasonal composite: scenes per month, total and median date (scene_months.csv, scenes.csv)."""
+    rows = []
+    for s in ("summer", "winter"):
+        for y in T.years:
+            sm = T.scene_months[(T.scene_months.year == y) & (T.scene_months.season == s)].sort_values("month_of_season")
+            sc = T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].iloc[0]
+            rows.append({"composite": T.lab(s, y), "year": int(y), "season": s,
+                         "months": " · ".join(f"{r.month_name} {int(r.scenes)}" for r in sm.itertuples()),
+                         "per_month": [{"month": r.month, "label": r.month_name, "scenes": int(r.scenes)} for r in sm.itertuples()],
+                         "total": int(sc.scenes), "median": pd.Timestamp(sc.median_date).strftime("%d %b %Y").lstrip("0")})
+    return rows
 
 
 def s2_quality(T: Tables, L: list[str]) -> None:
@@ -187,6 +260,9 @@ def s3_change(T: Tables, L: list[str]) -> None:
         moved = sum(v for v, _, _ in off)
         L.append(f"- Top 3 transitions ({_f(moved)} km² changed class in total): " + "; ".join(
             f"**{_f(v)} km² of {f} became {t}** ({v / moved:.0%} of all change)" for v, f, t in off[:3]) + ".")
+        L.append("- Gross flows per class (km² the same class in both years / lost to other classes / gained from them): " + "; ".join(
+            f"{c.name} {_f(ch['stable_km2'])} / {_f(ch['lost_km2'])} / {_f(ch['gained_km2'])}"
+            for c in cfg.classes for ch in [T.churn(a, b, c.code)]) + ".")
         new_built = tm[T.built].drop(T.built)
         L.append(f"- Land that became {T.built}: {_f(new_built.sum())} km² in total — " + ", ".join(
             f"{_f(v)} km² from {k} ({v / new_built.sum():.0%})" for k, v in new_built.sort_values(ascending=False).items()) + ".")
@@ -222,7 +298,7 @@ def s4_population(T: Tables, L: list[str]) -> None:
 def s5_lst(T: Tables, L: list[str]) -> None:
     cfg = T.cfg
     L += ["## 5. Temperature / UHI", "", "**Mean land surface temperature (land = all classes except Water):**", "",
-          "| | " + " | ".join(f"{y} Apr–Jun" for y in T.years) + " | " + " | ".join(f"{y} Nov–Feb" for y in T.years) + " |",
+          "| | " + " | ".join(T.lab("summer", y, True) for y in T.years) + " | " + " | ".join(T.lab("winter", y).capitalize() for y in T.years) + " |",
           "|---|" + "---:|" * (2 * len(T.years))]
     row = lambda s, y: T.lsts[(T.lsts.year == y) & (T.lsts.season == s)].iloc[0]  # noqa: E731
     L.append("| Study area (land) | " + " | ".join(f"{row('summer', y).mean_land_c:.1f} °C" for y in T.years) + " | "
@@ -232,27 +308,30 @@ def s5_lst(T: Tables, L: list[str]) -> None:
         L.append(f"| {c.name} | " + " | ".join(f"{g('summer', y):.1f} °C" for y in T.years) + " | "
                  + " | ".join(f"{g('winter', y):.1f} °C" for y in T.years) + " |")
     L += ["", "Absolute LST differs between years partly because of that season's weather; compare classes within a year, "
-          "or use the relative measures below across years.", "", "**UHI intensity (urban − rural):**", "",
-          "| Year | Season | Urban core − rural ring (primary) | Built-up − non-built-up (secondary) | Result |", "|---|---|---:|---:|---|"]
+          "or use the relative measures below across years."]
+    if "weather_2025" in cfg.context:
+        L += ["", f"**Weather context (cited, not a result of this study):** {cfg.context['weather_2025']['text']}"]
+    L += ["", "**UHI intensity (urban − rural):**", "",
+          "| Composite | Urban core − rural ring (primary) | Built-up − non-built-up (secondary) | Result |", "|---|---:|---:|---|"]
     for s in ("summer", "winter"):
         for y in T.years:
             a, b = T.u(y, s, CORE), T.u(y, s, BUILTM)
-            L.append(f"| {y} | {'April–June (primary)' if s == 'summer' else 'Nov–Feb (secondary)'} | {_signed(a.uhi_intensity_c)} "
+            L.append(f"| {T.lab(s, y)} ({'primary' if s == 'summer' else 'secondary'}) | {_signed(a.uhi_intensity_c)} "
                      f"({a.urban_mean_c:.1f} vs {a.rural_mean_c:.1f}; ring to {a.ring_outer_km:.1f} km) | {_signed(b.uhi_intensity_c)} | "
                      f"{_island(a.uhi_intensity_c).split(' (')[0]} |")
     L.append("")
     for y in T.years:
         a = T.u(y, "summer", CORE)
-        L.append(f"- **{y}, April–June (primary): {_island(a.uhi_intensity_c)}** — urban core {_signed(a.uhi_intensity_c)} relative to the rural ring.")
+        L.append(f"- **{T.lab('summer', y)} (primary): {_island(a.uhi_intensity_c)}** — urban core {_signed(a.uhi_intensity_c)} relative to the rural ring.")
     for y in T.years:
         a = T.u(y, "winter", CORE)
-        L.append(f"- {y}, November–February (secondary): {_island(a.uhi_intensity_c)} — {_signed(a.uhi_intensity_c)}.")
+        L.append(f"- {T.lab('winter', y).capitalize()} (November–February, secondary): {_island(a.uhi_intensity_c)} — {_signed(a.uhi_intensity_c)}.")
     L.append("")
     if T.conv is not None:
         L += ["**Key test of the story — LST change of pixels that became Built-up vs pixels that kept their class:**", "",
-              "| Period | Season | Group | Area km² | Mean ΔLST (°C) | Mean Δ normalised LST (SD) |", "|---|---|---|---:|---:|---:|"]
+              "| Composites compared | Group | Area km² | Mean ΔLST (°C) | Mean Δ normalised LST (SD) |", "|---|---|---:|---:|---:|"]
         for _, r in T.conv[T.conv.n_pixels > 0].iterrows():
-            L.append(f"| {r.period.replace('-', '→')} | {r.season} | {r.group} | {_f(r.area_km2)} | {_signed(r.mean_delta_lst_c)} | {_signed(r.mean_delta_z, 2, '')} |")
+            L.append(f"| {conv_period(T, r.period, r.season)} | {r.group} | {_f(r.area_km2)} | {_signed(r.mean_delta_lst_c)} | {_signed(r.mean_delta_z, 2, '')} |")
         L.append("")
         for (period, s), d in T.conv.groupby(["period", "season"], sort=False):
             d = d.set_index("group")
@@ -261,18 +340,24 @@ def s5_lst(T: Tables, L: list[str]) -> None:
                     continue
                 g, st = d.loc[src], d.loc[stable]
                 dd, dr = g.mean_delta_z - st.mean_delta_z, g.mean_delta_lst_c - st.mean_delta_lst_c
-                L.append(f"- {period.replace('-', '→')}, {s}: {src.split(' →')[0].lower()} that became built-up ({_f(g.area_km2)} km²) vs "
+                L.append(f"- {conv_period(T, period, s)}: {src.split(' →')[0].lower()} that became built-up ({_f(g.area_km2)} km²) vs "
                          f"{stable.replace('Stable ', 'unchanged ').lower()}: difference {_signed(dd, 2, ' SD')} normalised, {_signed(dr)} raw "
                          f"({_signed(g.mean_delta_lst_c)} vs {_signed(st.mean_delta_lst_c)}) — **{_verdict(dd, dr)}**.")
         L.append("")
 
 
+def conv_period(T: Tables, period: str, season: str) -> str:
+    """'2015-2025' + 'winter' → 'winter 2014–15 → winter 2024–25'."""
+    a, b = (int(v) for v in period.split("-"))
+    return f"{T.lab(season, a)} → {T.lab(season, b)}"
+
+
 def s6_cor(T: Tables, L: list[str]) -> None:
-    L += ["## 6. Correlations", "", "| Year | Season | LST vs NDVI r | LST vs NDBI r | p (300 m thinned grid) | n pixels (thinned) |", "|---|---|---:|---:|---|---:|"]
+    L += ["## 6. Correlations", "", "| Composite | LST vs NDVI r | LST vs NDBI r | p (300 m thinned grid) | n pixels (thinned) |", "|---|---:|---:|---|---:|"]
     for s in ("summer", "winter"):
         for y in T.years:
             c = T.cor[(T.cor.year == y) & (T.cor.season == s)].set_index("index")
-            L.append(f"| {y} | {'April–June' if s == 'summer' else 'Nov–Feb'} | {c.loc['NDVI', 'r']:+.3f} | {c.loc['NDBI', 'r']:+.3f} | "
+            L.append(f"| {T.lab(s, y)} | {c.loc['NDVI', 'r']:+.3f} | {c.loc['NDBI', 'r']:+.3f} | "
                      f"NDVI {_p(c.loc['NDVI', 'p_thinned'])}; NDBI {_p(c.loc['NDBI', 'p_thinned'])} | {_f(c.loc['NDVI', 'n_pixels'], 0)} ({_f(c.loc['NDVI', 'n_thinned'], 0)}) |")
     L += ["", "- r uses every land pixel (water excluded). The p-value uses every 10th row and column (300 m apart) because "
           "neighbouring 30 m pixels are not independent (thermal bands are 100 m natively); even so, p-values from tens of "
@@ -290,7 +375,7 @@ def s7_qc(T: Tables, L: list[str], flags: list, checks_done: list[str]) -> None:
           "Reflectance and the LULC maps are unaffected."]
     if T.mask is not None:
         for _, r in T.mask.iterrows():
-            L.append(f"- {int(r.year)} {r.season}: {int(r.pixels_removed_entirely):,} pixels lost their LST entirely "
+            L.append(f"- {T.lab(r.season, int(r.year))}: {int(r.pixels_removed_entirely):,} pixels lost their LST entirely "
                      f"({r.pixels_removed_entirely / r.pixels_with_lst_before:.3%} of {int(r.pixels_with_lst_before):,}); "
                      f"{int(r.pixels_changed_over_1c):,} more changed by > 1 °C; pixels > 55 °C {int(r.pixels_over_55c_before)} → "
                      f"{int(r.pixels_over_55c_after)}; max land LST {r.max_land_lst_before_c:.1f} → {r.max_land_lst_after_c:.1f} °C. "
@@ -319,29 +404,33 @@ def s8_findings(T: Tables, L: list[str]) -> None:
         p = T.pop.set_index("epoch")
         pop = (f", while GHSL population rose {_signed((p.loc[b, 'population'] / p.loc[a, 'population'] - 1) * 100, 0, ' %')} "
                f"({p.loc[a, 'population'] / 1e6:.2f} → {p.loc[b, 'population'] / 1e6:.2f} million; the {b} figure is a GHSL projection)")
-    F.append(f"Built-up land (including bare land) in {T.cfg.study['short_name']} grew from {_f(ba, 0)} km² ({T.area(a, 1, 'percent_of_classified'):.1f} %) "
+    F.append(f"{bu} in {T.cfg.study['short_name']} grew from {_f(ba, 0)} km² ({T.area(a, 1, 'percent_of_classified'):.1f} %) "
              f"in {a} to {_f(bb, 0)} km² ({T.area(b, 1, 'percent_of_classified'):.1f} %) in {b}, a net {_signed(bb - ba, 0, ' km²')} "
              f"({_signed((bb / ba - 1) * 100, 0, ' %')}){pop}.")
     fwd, rev = tm.loc[ag, bu], tm.loc[bu, ag]
     F.append(f"Cropland was the main source of new built-up land: {_f(fwd, 0)} km² changed from cropland to built-up, but "
              f"{_f(rev, 0)} km² was mapped the other way (mostly class confusion), leaving a net conversion of {_f(fwd - rev, 0)} km² and a net "
              f"cropland change of {_signed(T.area(b, 3) - T.area(a, 3), 0, ' km²')}.")
-    dv = T.area(b, 2) - T.area(a, 2)
-    F.append(f"Vegetation/tree cover {'increased' if dv >= 0 else 'decreased'}: it changed by {_signed(dv, 0, ' km²')} "
-             f"({_f(T.area(a, 2), 0)} → {_f(T.area(b, 2), 0)} km²)"
-             f"{', so urban growth in this period replaced cropland rather than vegetation' if dv >= 0 else ''}.")
+    vn, ch = T.cfg.class_name(2), T.churn(a, b, 2)
+    F.append(f"{vn} changed by a net {_signed(ch['net_km2'], 0, ' km²')} ({_f(T.area(a, 2), 0)} → {_f(T.area(b, 2), 0)} km²), but the gross "
+             f"flows are much larger: only {_f(ch['stable_km2'])} km² ({ch['stable_km2'] / ch['first_km2']:.0%} of the {a} area) was "
+             f"{vn} in both years, {_f(ch['lost_km2'])} km² was lost to other classes and {_f(ch['gained_km2'])} km² gained from them; "
+             f"the net {_signed(ch['net_km2'], 0, ' km²')} is a small difference between these flows, which include class confusion, "
+             "so it is uncertain.")
     u_b, u_a = T.u(b, "summer", CORE), T.u(a, "summer", CORE)
     w_a, w_b = T.u(a, "winter", CORE), T.u(b, "winter", CORE)
-    F.append(f"In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was {_signed(u_a.uhi_intensity_c)} relative to its rural ring "
-             f"in {a} ({'cool' if u_a.uhi_intensity_c < 0 else 'heat'} island) and {_signed(u_b.uhi_intensity_c)} in {b} "
+    F.append(f"In the pre-monsoon season (~10:30 overpass) the urban core was {_signed(u_a.uhi_intensity_c)} relative to its rural ring "
+             f"in {T.lab('summer', a)} ({'cool' if u_a.uhi_intensity_c < 0 else 'heat'} island) and {_signed(u_b.uhi_intensity_c)} in "
+             f"{T.lab('summer', b)} "
              f"({'cool' if u_b.uhi_intensity_c < 0 else 'heat'} island), small values whose change of sign cannot be separated from weather "
-             f"with one composite per year, whereas November–February showed a consistent heat island "
-             f"({_signed(w_a.uhi_intensity_c)} and {_signed(w_b.uhi_intensity_c)}).")
+             f"with one composite per year, whereas {T.lab('winter', a)} and {T.lab('winter', b)} (November–February) showed a "
+             f"consistent heat island ({_signed(w_a.uhi_intensity_c)} and {_signed(w_b.uhi_intensity_c)}).")
     if T.conv is not None:
         d = T.conv[(T.conv.period == f"{a}-{b}") & (T.conv.season == "summer")].set_index("group")
         g, st = d.loc[f"{ag} → Built-up"], d.loc[f"Stable {ag}"]
         dd, dr = g.mean_delta_z - st.mean_delta_z, g.mean_delta_lst_c - st.mean_delta_lst_c
-        F.append(f"Cropland that became built-up between {a} and {b} changed by {_signed(g.mean_delta_z, 2, ' SD')} in normalised April–June LST, "
+        F.append(f"Cropland that became built-up between {a} and {b} changed by {_signed(g.mean_delta_z, 2, ' SD')} in normalised LST "
+                 f"({T.lab('summer', a)} → {T.lab('summer', b)}), "
                  f"against {_signed(st.mean_delta_z, 2, ' SD')} for cropland that stayed cropland, a difference of {_signed(dd, 2, ' SD')} "
                  f"({_signed(dr)} raw), i.e. {_verdict(dd, dr)}; "
                  + ("conversion to built-up was associated with clear summer warming." if dd >= 0.2 and dr > 0
@@ -355,20 +444,33 @@ def s9_limits(T: Tables, L: list[str]) -> None:
           "- **Accuracy is agreement with reference labels, not true accuracy.** Training and test points come from the same "
           "GLC-FCS30D-derived labels, restricted to temporally stable pixels (easier than changing ones) and spatially "
           "clustered; the figures are optimistic. Independent, stratified validation points (outputs/validation, "
-          f"{T.cfg.validation['points_per_class']} per class per year) still have to be interpreted on high-resolution imagery.",
-          "- **Built-up includes bare land.** Barren/Open land could not be trained (86 and 14 label pixels) and was merged into "
-          "Built-up in every year; construction sites and cleared plots therefore count as built-up.",
+          f"{T.cfg.validation['points_per_class']} per class per year) still have to be interpreted on high-resolution imagery. "
+          "Areas are pixel counts of the maps; error-adjusted area estimates with confidence intervals, the recommended practice "
+          "(Olofsson et al., 2014), have not yet been made, because they need those validation points.",
+          f"- **Built-up and bare land are one class.** Barren/Open land could not be trained (86 and 14 label pixels), so in every year it "
+          f"was merged with built-up land into one class, {T.built}; construction sites and cleared plots therefore count as built-up.",
           "- **Few labels for Vegetation/Trees and Water** (" + "; ".join(
               f"{y}: {int(T.labels[(T.labels.year == y) & (T.labels['class'] == 'Vegetation/Trees')].reference_label_pixels.iloc[0]):,} and "
               f"{int(T.labels[(T.labels.year == y) & (T.labels['class'] == 'Water')].reference_label_pixels.iloc[0]):,} label pixels" for y in T.years)
           + "), from a limited number of patches; their mapped areas are the least certain.",
-          "- **Change maps add the errors of two maps**; small transitions (a few km²) are within classification noise.",
+          "- **Change maps add the errors of two maps**; small transitions (a few km²) are within classification noise, and a class "
+          "whose gross gains and losses are large next to its net change has an uncertain net change (" + "; ".join(
+              f"{c.name}: {_f(ch['stable_km2'])} km² stable, {_f(ch['lost_km2'])} lost, {_f(ch['gained_km2'])} gained, net {_signed(ch['net_km2'], 1, ' km²')}"
+              for c in T.cfg.classes for ch in [T.churn(T.years[0], T.years[-1], c.code)]
+              if ch["stable_km2"] < T.cfg.checks["min_stable_share"] * ch["first_km2"]) + ").",
           "- **One overpass time.** Landsat sees ~10:30 local time only; night-time UHI (usually the strongest) is not measured.",
           "- **One composite per season per year.** Year-to-year weather differences affect absolute LST; UHI intensity and "
           "normalised LST reduce but do not remove this.",
+          *([f"- **Weather, April–June {T.years[-1]}.** {T.cfg.context['weather_2025']['text']}"] if "weather_2025" in T.cfg.context else []),
           "- **Thermal resolution.** LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed.",
           "- **Rural ring inside the study area.** East Delhi (urban) borders the study area to the west, so the ring is "
           "restricted to the districts; its location differs between years with the urban core.",
+          *([f"- **Reference-label years differ from the map years.** The labels used to train and test each map are not all from "
+             f"the map's own year: {'; '.join(label_mismatches(T))}. GLC-FCS30D ends in {T.cfg.labels['glc_last_year']}, so "
+             + "; ".join(f"the {y} map was trained and tested only on pixels whose class was stable in {g['years'][0]}–{g['years'][-1]}"
+                         for y in T.years for g in labels.sources(T.cfg, y)[:1] if g["years"][-1] < y)
+             + "; land that changed after that can carry an out-of-date label, which also makes that map's agreement figure less "
+             "meaningful."] if label_mismatches(T) else []),
           "- **GHSL 2025 is a projection**, and GHSL population is itself modelled from census and built-up data (not a count).",
           "- **2005 (once added): Landsat 7 SLC-off** — about 22 % of each scene is missing in stripes; three pooled years fill most "
           "gaps, the remainder is reported. No independent label product exists for 2005 (stability filter only), and the "
@@ -381,7 +483,8 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     flags = checks.run(cfg, cache, out / "tables", T.years)
     L = [f"# Results summary — {cfg.study['name']}", "",
          f"Generated {date.today().isoformat()} by the TerraTrace analysis pipeline v{__version__} from `outputs/tables/*.csv` "
-         f"(years {', '.join(map(str, T.years))}). Every number is read from those tables; none is typed by hand.", ""]
+         f"(years {', '.join(map(str, T.years))}). Every result is read from those tables; none is typed by hand. Contextual figures "
+         "from other sources are cited.", ""]
     s1_setup(T, L)
     s2_quality(T, L)
     s3_change(T, L)

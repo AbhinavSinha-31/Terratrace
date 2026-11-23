@@ -1,8 +1,9 @@
 {
  "id": "noida-ghaziabad",
  "kind": "static-case-study",
- "generated_utc": "2026-10-20T20:26:44+00:00",
- "pipeline_version": "1.0.0",
+ "generated_utc": "2026-11-20T20:20:16+00:00",
+ "pipeline_version": "1.0.1",
+ "earth_engine_downloaded_utc": "2026-10-18T20:03:47+00:00",
  "thumbnail_url": "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/10/427/732.jpg",
  "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
  "study": {
@@ -13,8 +14,9 @@
    "Ghaziabad"
   ],
   "boundary_source": "FAO GAUL 2025, level 2",
-  "area_km2": 2329.975976275734,
-  "area_km2_grid": 2335.3749,
+  "area_km2": 2335.3749,
+  "area_km2_definition": "sum of the classified 30 m pixels (class_areas.csv)",
+  "area_km2_boundary_polygon": 2329.975976275734,
   "years": [
    2015,
    2025
@@ -27,38 +29,254 @@
    {
     "year": 2015,
     "season": "summer",
-    "scenes": 17
+    "scenes": 17,
+    "composite": "April–June 2015",
+    "median_date": "2015-05-10"
    },
    {
     "year": 2015,
     "season": "winter",
-    "scenes": 18
+    "scenes": 18,
+    "composite": "winter 2014–15",
+    "median_date": "2015-01-06"
    },
    {
     "year": 2015,
     "season": "annual",
-    "scenes": 56
+    "scenes": 56,
+    "composite": "2015",
+    "median_date": "2015-06-15"
    },
    {
     "year": 2025,
     "season": "summer",
-    "scenes": 29
+    "scenes": 29,
+    "composite": "April–June 2025",
+    "median_date": "2025-05-06"
    },
    {
     "year": 2025,
     "season": "winter",
-    "scenes": 36
+    "scenes": 36,
+    "composite": "winter 2024–25",
+    "median_date": "2024-12-21"
    },
    {
     "year": 2025,
     "season": "annual",
-    "scenes": 101
+    "scenes": 101,
+    "composite": "2025",
+    "median_date": "2025-05-30"
    }
+  ],
+  "composites": {
+   "summer": {
+    "2015": {
+     "label": "April–June 2015",
+     "short": "Apr–Jun 2015"
+    },
+    "2025": {
+     "label": "April–June 2025",
+     "short": "Apr–Jun 2025"
+    }
+   },
+   "winter": {
+    "2015": {
+     "label": "winter 2014–15",
+     "short": "winter 2014–15"
+    },
+    "2025": {
+     "label": "winter 2024–25",
+     "short": "winter 2024–25"
+    }
+   }
+  },
+  "scene_timing": [
+   {
+    "composite": "April–June 2015",
+    "year": 2015,
+    "season": "summer",
+    "months": "Apr 6 · May 6 · Jun 5",
+    "per_month": [
+     {
+      "month": "2015-04",
+      "label": "Apr",
+      "scenes": 6
+     },
+     {
+      "month": "2015-05",
+      "label": "May",
+      "scenes": 6
+     },
+     {
+      "month": "2015-06",
+      "label": "Jun",
+      "scenes": 5
+     }
+    ],
+    "total": 17,
+    "median": "10 May 2015"
+   },
+   {
+    "composite": "April–June 2025",
+    "year": 2025,
+    "season": "summer",
+    "months": "Apr 12 · May 11 · Jun 6",
+    "per_month": [
+     {
+      "month": "2025-04",
+      "label": "Apr",
+      "scenes": 12
+     },
+     {
+      "month": "2025-05",
+      "label": "May",
+      "scenes": 11
+     },
+     {
+      "month": "2025-06",
+      "label": "Jun",
+      "scenes": 6
+     }
+    ],
+    "total": 29,
+    "median": "6 May 2025"
+   },
+   {
+    "composite": "winter 2014–15",
+    "year": 2015,
+    "season": "winter",
+    "months": "Nov 5 · Dec 4 · Jan 3 · Feb 6",
+    "per_month": [
+     {
+      "month": "2014-11",
+      "label": "Nov",
+      "scenes": 5
+     },
+     {
+      "month": "2014-12",
+      "label": "Dec",
+      "scenes": 4
+     },
+     {
+      "month": "2015-01",
+      "label": "Jan",
+      "scenes": 3
+     },
+     {
+      "month": "2015-02",
+      "label": "Feb",
+      "scenes": 6
+     }
+    ],
+    "total": 18,
+    "median": "6 Jan 2015"
+   },
+   {
+    "composite": "winter 2024–25",
+    "year": 2025,
+    "season": "winter",
+    "months": "Nov 10 · Dec 10 · Jan 8 · Feb 8",
+    "per_month": [
+     {
+      "month": "2024-11",
+      "label": "Nov",
+      "scenes": 10
+     },
+     {
+      "month": "2024-12",
+      "label": "Dec",
+      "scenes": 10
+     },
+     {
+      "month": "2025-01",
+      "label": "Jan",
+      "scenes": 8
+     },
+     {
+      "month": "2025-02",
+      "label": "Feb",
+      "scenes": 8
+     }
+    ],
+    "total": 36,
+    "median": "21 Dec 2024"
+   }
+  ],
+  "reference_labels": [
+   {
+    "year": 2015,
+    "text": "GLC-FCS30D 2015 class, unchanged in every year 2013–2017, agreeing with Dynamic World 2016",
+    "sources": [
+     {
+      "product": "GLC-FCS30D",
+      "years": [
+       2013,
+       2014,
+       2015,
+       2016,
+       2017
+      ],
+      "label_year": 2015,
+      "role": "labels (stable in every listed year)",
+      "matches": true
+     },
+     {
+      "product": "Dynamic World",
+      "years": [
+       2016
+      ],
+      "label_year": 2016,
+      "role": "agreement filter",
+      "matches": false
+     }
+    ]
+   },
+   {
+    "year": 2025,
+    "text": "GLC-FCS30D 2022 class, unchanged in every year 2020–2022, agreeing with ESA WorldCover 2021, agreeing with Dynamic World 2025",
+    "sources": [
+     {
+      "product": "GLC-FCS30D",
+      "years": [
+       2020,
+       2021,
+       2022
+      ],
+      "label_year": 2022,
+      "role": "labels (stable in every listed year)",
+      "matches": false
+     },
+     {
+      "product": "ESA WorldCover",
+      "years": [
+       2021
+      ],
+      "label_year": 2021,
+      "role": "agreement filter",
+      "matches": false
+     },
+     {
+      "product": "Dynamic World",
+      "years": [
+       2025
+      ],
+      "label_year": 2025,
+      "role": "agreement filter",
+      "matches": true
+     }
+    ]
+   }
+  ],
+  "reference_label_mismatches": [
+   "the 2015 map used Dynamic World 2016 (1 year after the map year)",
+   "the 2025 map used GLC-FCS30D 2022 (3 years before the map year)",
+   "the 2025 map used ESA WorldCover 2021 (4 years before the map year)"
   ],
   "classes": [
    {
     "code": 1,
-    "name": "Built-up (incl. bare land)",
+    "name": "Built-up and bare land",
     "color": "#d6336c"
    },
    {
@@ -77,7 +295,7 @@
     "color": "#1f5fbf"
    }
   ],
-  "method_summary": "Landsat Collection 2 Level-2 composites; 4-class Random Forest (200 trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface temperature from the Landsat thermal band (April–June primary, November–February secondary); UHI as urban core minus an equal-area rural ring."
+  "method_summary": "Landsat Collection 2 Level-2 composites; 4-class Random Forest (Breiman, 2001; 200 trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface temperature from the Landsat thermal band (April–June primary, November–February winter secondary); UHI as urban core minus an equal-area rural ring (Peng et al., 2012; Chakraborty & Lee, 2019)."
  },
  "headlines": [
   {
@@ -85,42 +303,35 @@
    "value": "+53 km²",
    "period": "2015→2025",
    "title": "More built-up land",
-   "text": "Built-up land (including bare land) grew from 616 km² (26.4 % of the study area) in 2015 to 669 km² (28.7 %) in 2025, while population rose 20 % (GHSL; 2025 is a projection)."
+   "text": "Built-up and bare land grew from 616 km² (26.4 % of the study area) in 2015 to 669 km² (28.7 %) in 2025, while population rose 20 % (GHSL; 2025 is a projection)."
   },
   {
    "id": "farmland",
    "value": "59 km²",
    "period": "2015→2025",
-   "title": "The city grew mostly into farmland",
+   "title": "Built-up and bare land grew mostly into farmland",
    "text": "Most new built-up land replaced cropland: a net 59 km² of farmland became built-up, and cropland overall shrank by 73 km²."
-  },
-  {
-   "id": "vegetation",
-   "value": "+27 km²",
-   "period": "2015→2025",
-   "title": "Tree and vegetation cover rose slightly",
-   "text": "Tree/vegetation cover went from 6.0 % to 7.1 % of the study area (139 → 167 km²), possibly due to parks and plantations."
-  },
-  {
-   "id": "winter",
-   "value": "≈ +1.1 °C",
-   "period": "Nov–Feb",
-   "title": "Winter heat island in both years",
-   "text": "In November–February the urban core was +1.06 °C (2015) and +1.09 °C (2025) warmer than the countryside around it."
-  },
-  {
-   "id": "summer",
-   "value": "< 1 °C",
-   "period": "Apr–Jun",
-   "title": "Summer days: no clear city heat effect",
-   "text": "In April–June, around 10:30 local time, the urban core was within 1 °C of the countryside around it in both years (−0.55 °C in 2015, +0.50 °C in 2025)."
   },
   {
    "id": "greener",
    "value": "r ≈ −0.5",
    "period": "NDVI–LST",
    "title": "Greener areas are cooler",
-   "text": "Surface temperature falls as vegetation (NDVI) rises in both seasons and years (r −0.481 to −0.604) and rises with built-up surfaces (NDBI, r +0.441 to +0.627)."
+   "text": "Surface temperature falls as vegetation (NDVI) rises in all four composites (r −0.481 to −0.604) and rises with built-up surfaces (NDBI, r +0.441 to +0.627)."
+  },
+  {
+   "id": "winter",
+   "value": "≈ +1.1 °C",
+   "period": "Nov–Feb",
+   "title": "Winter heat island in both years",
+   "text": "In winter 2014–15 and winter 2024–25 (November–February) the urban core was +1.06 °C and +1.09 °C warmer than the countryside around it."
+  },
+  {
+   "id": "summer",
+   "value": "< 1 °C",
+   "period": "Apr–Jun",
+   "title": "Summer days: no clear city heat effect",
+   "text": "In April–June, around 10:30 local time, the urban core was within 1 °C of the countryside around it in both years (−0.55 °C in April–June 2015, +0.50 °C in April–June 2025)."
   }
  ],
  "caveats": [
@@ -134,7 +345,11 @@
   },
   {
    "title": "The summer daytime result changes sign",
-   "text": "In April–June the urban core was −0.55 °C relative to its rural ring in 2015 (a cool island) and +0.50 °C in 2025 (a heat island). Both values are below 1 °C, and with one composite per season and year a change this small cannot be separated from year-to-year weather, so it is not read as a warming trend. A daytime cool island over dry, harvested farmland is known in pre-monsoon India (Shastri et al., 2017)."
+   "text": "The urban core was −0.55 °C relative to its rural ring in April–June 2015 (a cool island) and +0.50 °C in April–June 2025 (a heat island). Both values are below 1 °C, and with one composite per season and year a change this small cannot be separated from year-to-year weather, so it is not read as a warming trend. A daytime cool island over dry, harvested farmland is known in pre-monsoon India (Shastri et al., 2017)."
+  },
+  {
+   "title": "The vegetation change is uncertain",
+   "text": "Vegetation/Trees changed by a net +27.5 km², but only 52.7 km² (38 % of its 2015 area) was mapped as Vegetation/Trees in both years; 86.7 km² was lost to other classes and 114.1 km² gained from them. The net figure is a small difference between large gross flows that include class confusion, so it is not reported as a finding."
   },
   {
    "title": "Association, not cause",
@@ -142,20 +357,20 @@
   }
  ],
  "findings": [
-  "Built-up land (including bare land) in Noida–Ghaziabad grew from 616 km² (26.4 %) in 2015 to 669 km² (28.7 %) in 2025, a net +53 km² (+9 %), while GHSL population rose +20 % (6.07 → 7.26 million; the 2025 figure is a GHSL projection).",
+  "Built-up and bare land in Noida–Ghaziabad grew from 616 km² (26.4 %) in 2015 to 669 km² (28.7 %) in 2025, a net +53 km² (+9 %), while GHSL population rose +20 % (6.07 → 7.26 million; the 2025 figure is a GHSL projection).",
   "Cropland was the main source of new built-up land: 155 km² changed from cropland to built-up, but 95 km² was mapped the other way (mostly class confusion), leaving a net conversion of 59 km² and a net cropland change of -73 km².",
-  "Vegetation/tree cover increased: it changed by +27 km² (139 → 167 km²), so urban growth in this period replaced cropland rather than vegetation.",
-  "In the pre-monsoon season (April–June, ~10:30 overpass) the urban core was -0.55 °C relative to its rural ring in 2015 (cool island) and +0.50 °C in 2025 (heat island), small values whose change of sign cannot be separated from weather with one composite per year, whereas November–February showed a consistent heat island (+1.06 °C and +1.09 °C).",
-  "Cropland that became built-up between 2015 and 2025 changed by -0.01 SD in normalised April–June LST, against -0.11 SD for cropland that stayed cropland, a difference of +0.10 SD (+0.06 °C raw), i.e. slightly warmer than the unchanged class; conversion to built-up did not produce a clear summer temperature change."
+  "Vegetation/Trees changed by a net +27 km² (139 → 167 km²), but the gross flows are much larger: only 52.7 km² (38% of the 2015 area) was Vegetation/Trees in both years, 86.7 km² was lost to other classes and 114.1 km² gained from them; the net +27 km² is a small difference between these flows, which include class confusion, so it is uncertain.",
+  "In the pre-monsoon season (~10:30 overpass) the urban core was -0.55 °C relative to its rural ring in April–June 2015 (cool island) and +0.50 °C in April–June 2025 (heat island), small values whose change of sign cannot be separated from weather with one composite per year, whereas winter 2014–15 and winter 2024–25 (November–February) showed a consistent heat island (+1.06 °C and +1.09 °C).",
+  "Cropland that became built-up between 2015 and 2025 changed by -0.01 SD in normalised LST (April–June 2015 → April–June 2025), against -0.11 SD for cropland that stayed cropland, a difference of +0.10 SD (+0.06 °C raw), i.e. slightly warmer than the unchanged class; conversion to built-up did not produce a clear summer temperature change."
  ],
  "limitations": [
   {
    "title": "Accuracy is agreement with reference labels, not true accuracy.",
-   "text": "Training and test points come from the same GLC-FCS30D-derived labels, restricted to temporally stable pixels (easier than changing ones) and spatially clustered; the figures are optimistic. Independent, stratified validation points (outputs/validation, 50 per class per year) still have to be interpreted on high-resolution imagery."
+   "text": "Training and test points come from the same GLC-FCS30D-derived labels, restricted to temporally stable pixels (easier than changing ones) and spatially clustered; the figures are optimistic. Independent, stratified validation points (outputs/validation, 50 per class per year) still have to be interpreted on high-resolution imagery. Areas are pixel counts of the maps; error-adjusted area estimates with confidence intervals, the recommended practice (Olofsson et al., 2014), have not yet been made, because they need those validation points."
   },
   {
-   "title": "Built-up includes bare land.",
-   "text": "Barren/Open land could not be trained (86 and 14 label pixels) and was merged into Built-up in every year; construction sites and cleared plots therefore count as built-up."
+   "title": "Built-up and bare land are one class.",
+   "text": "Barren/Open land could not be trained (86 and 14 label pixels), so in every year it was merged with built-up land into one class, Built-up and bare land; construction sites and cleared plots therefore count as built-up."
   },
   {
    "title": "Few labels for Vegetation/Trees and Water",
@@ -163,7 +378,7 @@
   },
   {
    "title": "Change maps add the errors of two maps",
-   "text": "; small transitions (a few km²) are within classification noise."
+   "text": "; small transitions (a few km²) are within classification noise, and a class whose gross gains and losses are large next to its net change has an uncertain net change (Vegetation/Trees: 52.7 km² stable, 86.7 lost, 114.1 gained, net +27.5 km²; Water: 14.5 km² stable, 20.3 lost, 12.7 gained, net -7.6 km²)."
   },
   {
    "title": "One overpass time.",
@@ -174,12 +389,20 @@
    "text": "Year-to-year weather differences affect absolute LST; UHI intensity and normalised LST reduce but do not remove this."
   },
   {
+   "title": "Weather, April–June 2025.",
+   "text": "April–June 2025 was unusually wet in Delhi: May 2025 was the wettest May on record since 1901 (India Meteorological Department). Wet soils and greener crops lower daytime land surface temperature, so the lower absolute LST in 2025 reflects weather rather than land change. Compare classes within a year, or use UHI intensity and normalised LST across years."
+  },
+  {
    "title": "Thermal resolution.",
    "text": "LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed."
   },
   {
    "title": "Rural ring inside the study area.",
    "text": "East Delhi (urban) borders the study area to the west, so the ring is restricted to the districts; its location differs between years with the urban core."
+  },
+  {
+   "title": "Reference-label years differ from the map years.",
+   "text": "The labels used to train and test each map are not all from the map's own year: the 2015 map used Dynamic World 2016 (1 year after the map year); the 2025 map used GLC-FCS30D 2022 (3 years before the map year); the 2025 map used ESA WorldCover 2021 (4 years before the map year). GLC-FCS30D ends in 2022, so the 2025 map was trained and tested only on pixels whose class was stable in 2020–2022; land that changed after that can carry an out-of-date label, which also makes that map's agreement figure less meaningful."
   },
   {
    "title": "GHSL 2025 is a projection",
@@ -209,27 +432,42 @@
   {
    "level": "INFO",
    "topic": "UHI",
-   "message": "2015 summer (built-up vs non-built-up land): UHI intensity is negative (-0.80 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
+   "message": "April–June 2015 (built-up vs non-built-up land): UHI intensity is negative (-0.80 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
   },
   {
    "level": "INFO",
    "topic": "UHI",
-   "message": "2015 summer (urban core vs rural ring): UHI intensity is negative (-0.55 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
+   "message": "April–June 2015 (urban core vs rural ring): UHI intensity is negative (-0.55 °C) — the urban area is cooler than its surroundings at the ~10:30 overpass (a known daytime 'urban cool island' over dry, bare farmland in pre-monsoon India; Shastri et al., 2017)."
   },
   {
    "level": "CAUTION",
    "topic": "LULC change",
-   "message": "2015→2025: 154.8 km² of Agriculture/Cropland became Built-up (incl. bare land), but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion, because bare harvested fields are counted in Built-up (incl. bare land); use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline."
+   "message": "2015→2025: 154.8 km² of Agriculture/Cropland became Built-up and bare land, but 95.5 km² went the other way (62% of the forward flow). Built-up → cropland reversals at this scale are mostly class confusion, because bare harvested fields are counted in Built-up and bare land; use the NET conversion (59.4 km²) and net class changes, not the gross transition, as the headline."
   },
   {
-   "level": "INFO",
-   "topic": "vegetation",
-   "message": "2015→2025: Vegetation/Trees area increased (139.3 → 166.8 km², +27.5 km²); built-up growth in this period came mainly from cropland, not vegetation."
+   "level": "CAUTION",
+   "topic": "LULC change",
+   "message": "2015→2025: only 52.7 km² (38%) of the 139.3 km² mapped as Vegetation/Trees in 2015 is Vegetation/Trees again in 2025 (threshold 50%); 86.7 km² was lost to other classes and 114.1 km² gained from them. The net change (+27.5 km²) is a small difference between these large gross flows, which include class confusion, so it is uncertain."
+  },
+  {
+   "level": "CAUTION",
+   "topic": "LULC change",
+   "message": "2015→2025: only 14.5 km² (42%) of the 34.8 km² mapped as Water in 2015 is Water again in 2025 (threshold 50%); 20.3 km² was lost to other classes and 12.7 km² gained from them. The net change (-7.6 km²) is a small difference between these large gross flows, which include class confusion, so it is uncertain."
   },
   {
    "level": "CAUTION",
    "topic": "UHI",
-   "message": "summer: the core-vs-ring UHI changes sign between years (2015: -0.55 °C, 2025: +0.50 °C). Both values are small (< 1 °C); one composite per year cannot separate a trend from weather."
+   "message": "the core-vs-ring UHI changes sign between years (April–June 2015: -0.55 °C, April–June 2025: +0.50 °C). Both values are small (< 1 °C); one composite per year cannot separate a trend from weather."
+  },
+  {
+   "level": "INFO",
+   "topic": "scenes",
+   "message": "April–June 2015 vs April–June 2025: scene timing checked — the largest difference in a month's share of the scenes is 9 percentage points (Jun: 29% vs 21%), within the 15-point limit."
+  },
+  {
+   "level": "INFO",
+   "topic": "scenes",
+   "message": "winter 2014–15 vs winter 2024–25: scene timing checked — the largest difference in a month's share of the scenes is 11 percentage points (Feb: 33% vs 22%), within the 15-point limit."
   },
   {
    "level": "INFO",
@@ -241,7 +479,7 @@
   {
    "year": 2015,
    "class_code": 1,
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "area_km2": 616.3272,
    "percent": 26.39093192275039
   },
@@ -269,7 +507,7 @@
   {
    "year": 2025,
    "class_code": 1,
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "area_km2": 669.267,
    "percent": 28.65779708431396
   },
@@ -299,7 +537,7 @@
   {
    "from_year": 2015,
    "to_year": 2025,
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "class_code": 1,
    "from_km2": 616.3272,
    "to_km2": 669.267,
@@ -349,12 +587,12 @@
    "top": [
     {
      "from": "Agriculture/Cropland",
-     "to": "Built-up (incl. bare land)",
+     "to": "Built-up and bare land",
      "km2": 154.829,
      "share": 0.32603953015300774
     },
     {
-     "from": "Built-up (incl. bare land)",
+     "from": "Built-up and bare land",
      "to": "Agriculture/Cropland",
      "km2": 95.453,
      "share": 0.20100531083773096
@@ -386,7 +624,7 @@
     "net_km2": 59.376000000000005
    },
    "classes": [
-    "Built-up (incl. bare land)",
+    "Built-up and bare land",
     "Vegetation/Trees",
     "Agriculture/Cropland",
     "Water"
@@ -493,7 +731,7 @@
   {
    "year": 2015,
    "season": "summer",
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "class_code": 1,
    "mean_c": 43.1171875,
    "n_pixels": 684786
@@ -525,7 +763,7 @@
   {
    "year": 2015,
    "season": "winter",
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "class_code": 1,
    "mean_c": 24.7718448638916,
    "n_pixels": 684786
@@ -557,7 +795,7 @@
   {
    "year": 2025,
    "season": "summer",
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "class_code": 1,
    "mean_c": 40.71337890625,
    "n_pixels": 743555
@@ -589,7 +827,7 @@
   {
    "year": 2025,
    "season": "winter",
-   "class": "Built-up (incl. bare land)",
+   "class": "Built-up and bare land",
    "class_code": 1,
    "mean_c": 23.1953125,
    "n_pixels": 743555
@@ -996,13 +1234,13 @@
     "file": "lulc_2015.webp",
     "width": 900,
     "height": 1316,
-    "bytes": 141930
+    "bytes": 141666
    },
    "2025": {
     "file": "lulc_2025.webp",
     "width": 900,
-    "height": 1364,
-    "bytes": 156502
+    "height": 1375,
+    "bytes": 158058
    }
   },
   "lst_summer": {
@@ -1023,14 +1261,14 @@
    "2015": {
     "file": "lst_winter_2015.webp",
     "width": 900,
-    "height": 1351,
-    "bytes": 167702
+    "height": 1322,
+    "bytes": 163510
    },
    "2025": {
     "file": "lst_winter_2025.webp",
     "width": 900,
-    "height": 1329,
-    "bytes": 146056
+    "height": 1322,
+    "bytes": 145706
    }
   },
   "change": {
@@ -1066,19 +1304,19 @@
     "file": "lulc_composition.webp",
     "width": 1200,
     "height": 778,
-    "bytes": 24390
+    "bytes": 24276
    },
    "uhi_intensity_by_year": {
     "file": "uhi_intensity_by_year.webp",
     "width": 1200,
-    "height": 574,
-    "bytes": 32948
+    "height": 591,
+    "bytes": 33110
    },
    "lst_by_class_and_year": {
     "file": "lst_by_class_and_year.webp",
     "width": 1200,
-    "height": 553,
-    "bytes": 46734
+    "height": 598,
+    "bytes": 47912
    },
    "population_vs_builtup": {
     "file": "population_vs_builtup.webp",
@@ -1090,26 +1328,43 @@
     "file": "scatter_lst_indices_summer.webp",
     "width": 1200,
     "height": 1210,
-    "bytes": 114562
+    "bytes": 116882
    },
    "scatter_lst_indices_winter": {
     "file": "scatter_lst_indices_winter.webp",
     "width": 1200,
     "height": 1210,
-    "bytes": 123906
+    "bytes": 127546
    },
    "conversion_lst_change_2015-2025": {
     "file": "conversion_lst_change_2015-2025.webp",
     "width": 1200,
     "height": 487,
-    "bytes": 34434
+    "bytes": 35142
    }
   }
  },
  "cross_checks": [
-  "2015: class areas re-counted from the raster, sum to the study area, percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases)",
-  "2025: class areas re-counted from the raster, sum to the study area, percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases)",
-  "2015→2025: transition-matrix row sums = 2015 class areas and column sums = 2025 class areas (re-counted)",
+  "2015: class areas re-counted from the raster, sum to the study area (2,335.4 km²), percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases); scene counts, scenes per month and median dates re-counted from the saved scene lists",
+  "2025: class areas re-counted from the raster, sum to the study area (2,335.4 km²), percentages sum to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases); scene counts, scenes per month and median dates re-counted from the saved scene lists",
+  "2015→2025: transition-matrix row sums = 2015 class areas and column sums = 2025 class areas (re-counted); per class, stable + lost = first-year area and gained − lost = net change",
   "population table identical to the Earth Engine sums"
+ ],
+ "context": {
+  "weather_2025": {
+   "text": "April–June 2025 was unusually wet in Delhi: May 2025 was the wettest May on record since 1901 (India Meteorological Department). Wet soils and greener crops lower daytime land surface temperature, so the lower absolute LST in 2025 reflects weather rather than land change. Compare classes within a year, or use UHI intensity and normalised LST across years.",
+   "source": "India Meteorological Department (IMD): Delhi (Safdarjung) rainfall in May 2025 was the highest for May since records began in 1901 (IMD Safdarjung observations, as reported by IMD in late May 2025); all-India context in IMD's Monthly Climate Summary, May 2025 (press release, 7 June 2025), https://mausam.imd.gov.in",
+   "reference": "India Meteorological Department (2025). <i>Monthly Climate Summary, May 2025</i> [Press release, 7 June 2025]. New Delhi: IMD. https://mausam.imd.gov.in"
+  }
+ },
+ "changelog": [
+  {
+   "version": "1.0.1",
+   "text": "2026-11-21 — reporting fixes only, no result changed (classification, temperatures and tables are the same Earth Engine run): study area given as the sum of classified pixels; winter composites labelled by both years; scene-date table and scene-timing check; IMD weather context for 2025; vegetation gross churn and a stable-area check; reference-label years stated; class renamed \"Built-up and bare land\"; all references cited in the text."
+  },
+  {
+   "version": "1.0.0",
+   "text": "2026-10-20 — first release: 2015 and 2025 maps, temperatures and report."
+  }
  ]
 }

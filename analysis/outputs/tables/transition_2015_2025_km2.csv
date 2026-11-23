@@ -1,5 +1,5 @@
-from \ to,Built-up (incl. bare land),Vegetation/Trees,Agriculture/Cropland,Water
-Built-up (incl. bare land),483.515,31.044,95.453,6.315
+from \ to,Built-up and bare land,Vegetation/Trees,Agriculture/Cropland,Water
+Built-up and bare land,483.515,31.044,95.453,6.315
 Vegetation/Trees,21.655,52.684,62.942,2.054
 Agriculture/Cropland,154.829,75.919,1309.754,4.370
 Water,9.268,7.159,3.870,14.545

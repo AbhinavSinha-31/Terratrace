@@ -277,6 +277,8 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
     cor = lambda y, s, i: next(c for c in doc["correlations"] if c["year"] == y and c["season"] == s and c["index"] == i)  # noqa: E731
     pop = {p["epoch"]: p for p in doc["population"]}
     scenes = lambda y, s: next(r["scenes"] for r in st["scenes"] if r["year"] == y and r["season"] == s)  # noqa: E731
+    comp = lambda s, y, short=False: st["composites"][s][str(y)]["short" if short else "label"]  # noqa: E731
+    cap = lambda t: t[:1].upper() + t[1:]  # noqa: E731
     maps, charts = OUT / "maps", OUT / "charts"
 
     NumberedCanvas.furniture = {"header_left": f"TerraTrace case study · {st['short_name']} · {span}", "status": rep["status"],
@@ -294,10 +296,13 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
     sensors = "; ".join(f"{y}: {st['sensors'][str(y)]}" for y in years)
     facts = [
         ["Author", x(rep["author"])],
-        ["Study area", f"{st['area_km2']:,.0f} km² · {x(' + '.join(st['districts']))} districts ({x(st['boundary_source'])})"],
+        ["Study area", f"{st['area_km2']:,.0f} km² (sum of the classified 30 m pixels) · {x(' + '.join(st['districts']))} districts "
+                       f"({x(st['boundary_source'])})"],
         ["Years and sensors", x(sensors) + " — Landsat Collection 2 Level-2, Tier 1, 30 m"],
-        ["Scenes used", "; ".join(f"{y}: {scenes(y, 'summer')} Apr–Jun, {scenes(y, 'winter')} Nov–Feb, {scenes(y, 'annual')} whole year" for y in years)],
-        ["Report date", today.strftime("%d %B %Y") + f" (results computed {computed})"],
+        ["Scenes used", "; ".join(f"{x(comp('summer', y, True))}: {scenes(y, 'summer')}, {x(comp('winter', y))}: {scenes(y, 'winter')}, "
+                                  f"whole year {y}: {scenes(y, 'annual')}" for y in years)],
+        ["Report date", today.strftime("%d %B %Y").lstrip("0") + f" (Earth Engine results downloaded {doc['earth_engine_downloaded_utc'][:10]}; "
+                        f"tables and summary regenerated {computed})"],
         ["Versions", f"TerraTrace {x(tt_version)} · analysis pipeline {x(doc['pipeline_version'])}"],
     ]
     t = Table([[P(k, "head"), P(v, "cell")] for k, v in facts], colWidths=[34 * mm, TEXT_W - 34 * mm])
@@ -307,10 +312,12 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
             f"TerraTrace {x(tt_version)}, analysis pipeline {x(doc['pipeline_version'])}. File: {x(rep['pdf_file'])}.")
     story += [t, Spacer(1, 8 * mm), P("About this report", "h2"),
               P(f"Computed from Landsat satellite data with TerraTrace's analysis pipeline. Results are fixed for "
-                f"{' and '.join(str(y) for y in years)}; live re-analysis is coming later. {x(st['method_summary'])}"),
+                f"{' and '.join(str(y) for y in years)}. These figures are a fixed {a} vs {b} analysis; the live analysis tool on "
+                f"the site works separately. {x(st['method_summary'])}"),
               Spacer(1, 3 * mm),
-              P("Every number in this report is read from the pipeline's output tables (the same files behind the "
-                "TerraTrace case-study web page and <i>results_summary.md</i>); none is typed by hand. The CSV tables are "
+              P("Every result in this report is read from the pipeline's output tables; contextual figures from other sources "
+                "are cited. The tables are the same files behind the TerraTrace case-study web page and <i>results_summary.md</i>; "
+                "no result is typed by hand. The CSV tables are "
                 f"available as a separate download ({x(rep['data_file'])}).", "small"),
               Spacer(1, 6 * mm), box([P("How to cite", "kicker"), Spacer(1, 1.5 * mm), P(cite, "small")], bg=PANEL),
               PageBreak()]
@@ -340,8 +347,9 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
     # --- 3. land cover
     mapw = (TEXT_W - 6 * mm) / 2
     story += [P("Land cover", "h1"),
-              P(f"Random Forest classification at 30 m into {len(classes)} classes. Barren/open land is merged into Built-up in every "
-                "year (too few reference pixels to train it as a class), so construction sites and cleared plots count as built-up.", "small"),
+              P(f"Random Forest classification at 30 m into {len(classes)} classes. Barren/open land is merged with built-up land into "
+                f"one class, {x(built)}, in every year (too few reference pixels to train it as a class), so construction sites and "
+                "cleared plots count as built-up.", "small"),
               Spacer(1, 3 * mm),
               side_by_side([(figure(maps / f"lulc_{y}.png", mapw, max_height=118 * mm), f"Land use / land cover, {y}.") for y in years], S),
               Spacer(1, 4 * mm), P(f"Class areas and net change, {a} → {b}", "h2")]
@@ -374,55 +382,65 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
     lst_cls = lambda y, s, c: next(r["mean_c"] for r in doc["lst_per_class"] if r["year"] == y and r["season"] == s and r["class_code"] == c)  # noqa: E731
     story += [P("Surface heat", "h1"),
               P("Landsat land surface temperature (LST) at the ~10:30 local overpass; per-pixel median of clear observations. "
-                "April–June is the primary season; November–February is secondary. One colour range per season, shared by both years.", "small"),
+                f"April–June is the primary season; November–February ({x(comp('winter', a))} and {x(comp('winter', b))}) is secondary. "
+                "One colour range per season, shared by both years.", "small"),
               Spacer(1, 3 * mm),
               side_by_side([(figure(maps / f"lst_summer_{y}.png", mapw, max_height=112 * mm),
-                             f"LST, April–June {y} · study-area land mean {degc(lst_mean(y, 'summer'))}.") for y in years], S),
+                             f"LST, {x(comp('summer', y))} · study-area land mean {degc(lst_mean(y, 'summer'))}.") for y in years], S),
               Spacer(1, 3 * mm), P("Mean LST per class", "h2")]
-    head = ["Class"] + [f"{y} {SEASON_SHORT[s]}" for s in ("summer", "winter") for y in years]
+    head = ["Class"] + [x(cap(comp(s, y, True))) for s in ("summer", "winter") for y in years]
     rows = [["Study area (land)"] + [degc(lst_mean(y, s)) for s in ("summer", "winter") for y in years]]
     rows += [[x(c["name"])] + [degc(lst_cls(y, s, c["code"])) for s in ("summer", "winter") for y in years] for c in classes]
     story += [data_table(head, rows, [62 * mm] + [28.5 * mm] * 4, S, right={1, 2, 3, 4}),
               P("Absolute LST differs between years partly because of each season's weather: compare classes within a year, "
-                "or use the UHI intensity across years.", "caption"), PageBreak()]
+                "or use the UHI intensity across years.", "caption")]
+    if "weather_2025" in doc["context"]:
+        story += [Spacer(1, 3 * mm), box([P("Weather context (cited — not a result of this study)", "kicker"), Spacer(1, 1 * mm),
+                                          P(x(doc["context"]["weather_2025"]["text"]), "small")], bg=WARN_BG)]
+    story += [PageBreak()]
 
     story += [P("Surface heat — winter, and urban heat island intensity", "h1"),
               side_by_side([(figure(maps / f"lst_winter_{y}.png", mapw, max_height=112 * mm),
-                             f"LST, November–February {y} · study-area land mean {degc(lst_mean(y, 'winter'))}.") for y in years], S),
+                             f"LST, {x(comp('winter', y))} (November–February) · study-area land mean {degc(lst_mean(y, 'winter'))}.") for y in years], S),
               Spacer(1, 3 * mm), P("Urban heat island (UHI) intensity, urban − rural", "h2")]
-    head = ["Year", "Season", "Urban core − rural ring (primary)", "Built-up − non-built-up", "Result"]
+    head = ["Composite", "Urban core − rural ring (primary)", "Built-up − non-built-up", "Result"]
     rows = []
     for s in ("summer", "winter"):
         for y in years:
             p_, q_ = uhi(y, s), uhi(y, s, False)
-            rows.append([str(y), SEASON_ROLE[s], f"{signed(p_['uhi_c'], 2)}\u00a0°C ({p_['urban_mean_c']:.1f} vs {p_['rural_mean_c']:.1f}; ring to {p_['ring_outer_km']:.1f}\u00a0km)",
+            rows.append([f"{x(cap(comp(s, y)))} ({'primary' if s == 'summer' else 'secondary'})", f"{signed(p_['uhi_c'], 2)}\u00a0°C ({p_['urban_mean_c']:.1f} vs {p_['rural_mean_c']:.1f}; ring to {p_['ring_outer_km']:.1f}\u00a0km)",
                          f"{signed(q_['uhi_c'], 2)}\u00a0°C", f"<b>{x(p_['result'])}</b>"])
     u = cfg.uhi
-    story += [data_table(head, rows, [12 * mm, 34 * mm, 68 * mm, 32 * mm, TEXT_W - 146 * mm], S, right={2, 3}),
+    story += [data_table(head, rows, [46 * mm, 68 * mm, 32 * mm, TEXT_W - 146 * mm], S, right={1, 2}),
               P("Urban core minus the countryside around it. How the core and ring are drawn, and why the summer value changes "
                 "sign: see <i>Method and limitations</i>.", "caption"),
               PageBreak()]
 
     # --- 7. key test + correlations
-    head = ["Season", "Group", "Area km²", "Mean ΔLST", "Mean Δ normalised LST"]
-    rows = [[SEASON_SHORT[c["season"]], x(c["group"]), km2(c["area_km2"]), f"{signed(c['delta_lst_c'], 2)} °C", f"{signed(c['delta_z'], 2)} SD"]
+    def pair(c: dict) -> str:
+        pa, pb = (int(v) for v in c["period"].split("-"))
+        la, lb = comp(c["season"], pa, True), comp(c["season"], pb, True)
+        return x(cap(la) + " → " + (lb.split(" ")[-1] if c["season"] == "summer" else lb.replace("winter ", "")))
+    head = ["Composites", "Group", "Area km²", "Mean ΔLST", "Mean Δ normalised LST"]
+    rows = [[pair(c), x(c["group"]), km2(c["area_km2"]), f"{signed(c['delta_lst_c'], 2)} °C", f"{signed(c['delta_z'], 2)} SD"]
             for c in doc["conversion"]]
     story += [P("Did land that became built-up warm?", "h1"),
               P(f"LST change {a} → {b} of pixels that became built-up, against pixels that kept their class. Normalised LST = "
                 "(LST − study-area mean) ÷ SD for that season and year, so a hotter year as a whole does not count as warming.", "small"),
-              Spacer(1, 2 * mm), data_table(head, rows, [18 * mm, 66 * mm, 24 * mm, 30 * mm, 36 * mm], S, right={2, 3, 4}),
+              Spacer(1, 2 * mm), data_table(head, rows, [42 * mm, 56 * mm, 20 * mm, 24 * mm, 32 * mm], S, right={2, 3, 4}),
               Spacer(1, 6 * mm), P("Temperature against vegetation and built-up indices", "h2")]
-    head = ["Year", "Season", "LST vs NDVI r", "LST vs NDBI r", "Land pixels", "Thinned grid (for p)"]
-    rows = [[str(y), SEASON_ROLE[s], f"{cor(y, s, 'NDVI')['r']:+.3f}", f"{cor(y, s, 'NDBI')['r']:+.3f}", f"{cor(y, s, 'NDVI')['n_pixels']:,}",
+    head = ["Composite", "LST vs NDVI r", "LST vs NDBI r", "Land pixels", "Thinned grid (for p)"]
+    rows = [[f"{x(cap(comp(s, y)))} ({'primary' if s == 'summer' else 'secondary'})", f"{cor(y, s, 'NDVI')['r']:+.3f}", f"{cor(y, s, 'NDBI')['r']:+.3f}", f"{cor(y, s, 'NDVI')['n_pixels']:,}",
              f"{cor(y, s, 'NDVI')['n_thinned']:,} px, p &lt; 0.001" if max(cor(y, s, i)["p_thinned"] for i in ("NDVI", "NDBI")) < 0.001
              else f"{cor(y, s, 'NDVI')['n_thinned']:,} px"] for s in ("summer", "winter") for y in years]
     spacing = doc["correlations"][0]["thin_spacing_m"]
-    story += [data_table(head, rows, [12 * mm, 34 * mm, 26 * mm, 26 * mm, 28 * mm, TEXT_W - 126 * mm], S, right={2, 3, 4}),
+    story += [data_table(head, rows, [48 * mm, 24 * mm, 24 * mm, 28 * mm, TEXT_W - 124 * mm], S, right={1, 2, 3}),
               P(f"Pearson r over every land pixel (water excluded). The p-value uses a {spacing} m thinned grid, because neighbouring "
                 "30 m pixels are not independent; with this many pixels the size of r is what matters.", "caption"),
               Spacer(1, 3 * mm),
               side_by_side([(figure(charts / "scatter_lst_indices_summer.png", (TEXT_W - 6 * mm) / 2), "April–June (primary)."),
-                            (figure(charts / "scatter_lst_indices_winter.png", (TEXT_W - 6 * mm) / 2), "November–February (secondary).")], S),
+                            (figure(charts / "scatter_lst_indices_winter.png", (TEXT_W - 6 * mm) / 2),
+                             f"{x(cap(comp('winter', a)))} and {x(comp('winter', b))} (November–February, secondary).")], S),
               PageBreak()]
 
     # --- 8. method and quality control
@@ -433,27 +451,38 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
         f"<b>Imagery.</b> Landsat Collection 2 Level-2 (Tier 1) surface reflectance and surface temperature at 30 m, cloud, shadow "
         "and snow masked with QA_PIXEL. Per-pixel medians for April–June (also the spectral features for classification), "
         "November–February, and the whole year (NDVI percentiles separate cropland from bare land).",
-        f"<b>Classification.</b> {len(classes)}-class Random Forest ({rf['trees']} trees) in Google Earth Engine, trained on up to "
-        f"{rf['points_per_class']} points per class ({rf['train_fraction'] * 100:.0f}/{(1 - rf['train_fraction']) * 100:.0f} train/test split) "
-        "sampled from GLC-FCS30D pixels whose class is stable for ±2 years and agrees with independent products (ESA WorldCover, "
-        "Dynamic World).",
+        f"<b>Classification.</b> {len(classes)}-class Random Forest (Breiman, 2001; {rf['trees']} trees) in Google Earth Engine, trained "
+        f"on up to {rf['points_per_class']} points per class ({rf['train_fraction'] * 100:.0f}/{(1 - rf['train_fraction']) * 100:.0f} "
+        "train/test split) sampled from GLC-FCS30D pixels (Zhang et al., 2024) whose class is stable over several years and agrees "
+        "with independent products (ESA WorldCover, Zanaga et al., 2022; Dynamic World, Brown et al., 2022).",
+        "<b>Reference labels, exactly.</b> " + "; ".join(f"<b>{r['year']} map:</b> {x(r['text'])}" for r in st["reference_labels"]) + "."
+        + (" Not every year matches the map year: see <i>Limitations</i>." if st["reference_label_mismatches"] else ""),
         "<b>Land surface temperature and UHI.</b> LST from the Landsat thermal band; UHI intensity as urban core minus an equal-area "
-        "rural ring (primary) and as built-up minus non-built-up land (secondary); water is excluded from all land statistics.",
+        "rural ring (primary; after Peng et al., 2012, and Chakraborty &amp; Lee, 2019) and as built-up minus non-built-up land "
+        "(secondary); water is excluded from all land statistics.",
     ]
     method.append(f"<b>Urban core and rural ring.</b> Core: pixels whose built-up fraction within {u['core_radius_m']} m is ≥ "
                   f"{u['core_threshold'] * 100:.0f} %, in patches of at least {u['core_min_km2']:g} km². Ring: the nearest non-built-up, "
                   "non-water land of equal area inside the study area (East Delhi, west of the study area, is itself urban). A negative "
                   "value means the city is cooler than its surroundings by day.")
+    timing_rows = [[x(cap(r["composite"])), x(r["months"]), str(r["total"]), x(r["median"])] for r in st["scene_timing"]]
+    timing = [P("Scenes per month and median acquisition date", "h2"),
+              data_table(["Composite", "Scenes per calendar month", "Total", "Median date"], timing_rows,
+                         [40 * mm, 76 * mm, 18 * mm, TEXT_W - 134 * mm], S, right={2}),
+              P("Landsat scenes that passed the scene cloud filter (clouds inside them are masked per pixel); neighbouring path/rows on "
+                "one date count as separate scenes. Counted from the scene lists saved with the Earth Engine run. A CAUTION flag is "
+                "raised automatically when a month's share of a season's scenes differs between years by more than "
+                f"{cfg.checks['max_month_share_diff_pp']} percentage points.", "caption")]
     story += [P("Method and limitations", "h1"), P("How to read these results", "h2"),
               bullets([f"<b>{x(c['title'])}.</b> {x(c['text'])}" for c in doc["caveats"]], S, "small"), Spacer(1, 2 * mm),
-              P("Method", "h2"), bullets(method, S, "small"), Spacer(1, 3 * mm),
+              P("Method", "h2"), bullets(method, S, "small"), Spacer(1, 3 * mm), KeepTogether(timing), Spacer(1, 3 * mm),
               P("Classification — agreement with reference labels", "h2"),
               data_table(["Year", "Agreement with reference labels", "Kappa", "Held-out points", "Most confused pairs (test points)"],
                          acc_rows, [12 * mm, 36 * mm, 15 * mm, 22 * mm, TEXT_W - 85 * mm], S, right={1, 2, 3}),
               P("Agreement with GLC-FCS30D-derived reference labels on held-out points, not accuracy against ground truth. "
                 "Stable pixels are easier than changing ones, so these figures are optimistic.", "caption"),
               Spacer(1, 3 * mm), P("Temperature masking", "h2"), P(x(doc["masking"]["rule"]), "small")]
-    mrows = [[f"{r['year']} {SEASON_SHORT[r['season']]}", f"{r['pixels_removed_entirely']:,} ({r['pixels_removed_entirely'] / r['pixels_with_lst_before'] * 100:.3f} %)",
+    mrows = [[x(cap(comp(r["season"], r["year"], True))), f"{r['pixels_removed_entirely']:,} ({r['pixels_removed_entirely'] / r['pixels_with_lst_before'] * 100:.3f} %)",
               f"{r['max_land_lst_before_c']:.1f} → {r['max_land_lst_after_c']:.1f} °C",
               f"{signed(r['uhi_core_ring_before_c'], 2)} → {signed(r['uhi_core_ring_after_c'], 2)} °C"] for r in doc["masking"]["impact"]]
     story += [Spacer(1, 2 * mm), data_table(["Composite", "Pixels that lost their LST", "Max land LST", "UHI core vs ring, before → after"],
@@ -478,6 +507,8 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
         f"{x(cfg.raw['population']['built_collection'])}.",
         f"FAO Global Administrative Unit Layers (GAUL) 2025, level 2 (study-area boundary) — {x(cfg.study['gaul_collection'])}.",
         "JRC Global Surface Water (Pekel et al., 2016) — used only to check seasonal ponds during quality control.",
+        *([f"Weather context (cited, not used in any computation): {x(doc['context']['weather_2025']['source'])}."]
+          if "weather_2025" in doc["context"] else []),
         "Processing: Google Earth Engine (Gorelick et al., 2017) for compositing, sampling and classification; statistics, maps and "
         f"this report computed locally by the TerraTrace analysis pipeline v{x(doc['pipeline_version'])}.",
     ]
@@ -488,6 +519,7 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
         "Chakraborty, T., &amp; Lee, X. (2019). A simplified urban-extent algorithm to characterize surface urban heat islands on a "
         "global scale and examine vegetation control on their spatiotemporal variability. <i>International Journal of Applied "
         "Earth Observation and Geoinformation</i>, 74, 269–280. https://doi.org/10.1016/j.jag.2018.09.015",
+        *([doc["context"]["weather_2025"]["reference"]] if "weather_2025" in doc["context"] else []),
         "Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., &amp; Moore, R. (2017). Google Earth Engine: "
         "Planetary-scale geospatial analysis for everyone. <i>Remote Sensing of Environment</i>, 202, 18–27. "
         "https://doi.org/10.1016/j.rse.2017.06.031",
@@ -510,6 +542,7 @@ def build_pdf(cfg, doc: dict, summary_md: str, dest: Path) -> int:
     story += [CondPageBreak(70 * mm), P("Limitations", "h2"), bullets(lims, S, "small"), Spacer(1, 2 * mm),
               P("Data sources", "h2"), bullets(sources, S, "small"), Spacer(1, 2 * mm),
               P("References", "h2")] + [P(r, "ref") for r in refs]
+    story += [Spacer(1, 3 * mm), P("Changelog", "h2")] + [P(f"<b>v{x(c['version'])}</b> {x(c['text'])}", "ref") for c in doc["changelog"]]
 
     pdf = SimpleDocTemplate(str(dest), pagesize=A4, leftMargin=MARGIN_X, rightMargin=MARGIN_X, topMargin=MARGIN_TOP,
                             bottomMargin=MARGIN_BOTTOM, title=title, author=rep["author"],
@@ -527,9 +560,10 @@ Units and conventions used in every table:
 - Areas are km² on the study's 30 m UTM zone 43N grid (pixel count × 900 m² ÷ 10⁶).
 - Temperatures are land surface temperature (LST) in °C from the Landsat thermal band (surface temperature × 0.00341802 + 149 K − 273.15),
   per-pixel median of clear observations at the ~10:30 local overpass.
-- `season`: `summer` = April–June of the study year (primary); `winter` = November of the previous year to February (secondary);
-  `annual` = the whole calendar year.
-- Class codes: 1 Built-up (incl. bare land), 2 Vegetation/Trees, 3 Agriculture/Cropland, 4 Water (0 = not classified).
+- `season`: `summer` = April–June of the study year (primary; e.g. "April–June 2015"); `winter` = November of the previous year to
+  February of the study year (secondary), named by both years it spans (study year 2015 = "winter 2014–15"); `annual` = the whole
+  calendar year. Tables keep the study year in `year`; the `composite` column, where present, gives the name.
+- Class codes: 1 Built-up and bare land, 2 Vegetation/Trees, 3 Agriculture/Cropland, 4 Water (0 = not classified).
 - Shares (`overall_agreement`, `producers_*`, `users_*`, `f1_*`, `*_fraction_*`) are 0–1; `percent_*` columns are 0–100.
 - Accuracy columns are AGREEMENT WITH REFERENCE LABELS (held-out GLC-FCS30D-derived points), not accuracy against ground truth.
 """
@@ -557,9 +591,14 @@ DOCS: dict[str, tuple[str, dict[str, str]]] = {
         "year": "study year", "class": "class name", "reference_label_pixels": "stable GLC-FCS30D reference pixels in the study area",
         "train_points": "training points", "test_points": "held-out test points"}),
     "scenes.csv": ("Landsat scenes in each composite.", {
-        "year": "study year", "season": "summer / winter / annual", "sensors": "LC08 = Landsat 8, LC09 = Landsat 9",
-        "scenes": "number of scenes", "first_date": "first scene date", "last_date": "last scene date",
+        "year": "study year", "season": "summer / winter / annual", "composite": "name of the composite (e.g. winter 2014–15)",
+        "sensors": "LC08 = Landsat 8, LC09 = Landsat 9", "scenes": "number of scenes", "first_date": "first scene date",
+        "last_date": "last scene date", "median_date": "median scene date (midpoint of the two middle dates for an even count)",
         "date_ranges": "composite date range(s), end exclusive"}),
+    "scene_months.csv": ("Landsat scenes per calendar month in each seasonal composite (from the scene lists of the Earth Engine run).", {
+        "year": "study year", "season": "summer / winter", "composite": "name of the composite", "month": "calendar month, YYYY-MM",
+        "month_of_season": "1 = first month of the season", "month_name": "month abbreviation", "scenes": "scenes acquired in that month",
+        "share_of_composite": "share of the composite's scenes, 0–1"}),
     "lst_summary.csv": ("Study-area land surface temperature (water excluded), per year and season.", {
         "year": "study year", "season": "summer / winter", "mean_land_c": "mean LST of land pixels, °C", "sd_land_c": "standard deviation, °C",
         "p1_c": "1st percentile, °C", "p99_c": "99th percentile, °C", "valid_fraction_of_study_area": "share of the study area with a valid LST, 0–1",
@@ -623,7 +662,8 @@ def build_zip(cfg, doc: dict, dest: Path) -> int:
     lines = [f"# {st['name']} — data tables", "",
              f"{rep['status']}. TerraTrace LULC + urban heat island case study, {st['years'][0]}–{st['years'][-1]}; "
              f"{rep['author']}. Analysis pipeline v{doc['pipeline_version']}; tables generated {doc['generated_utc'][:10]}.", "",
-             "Every number in the PDF report and on the case-study web page comes from these tables. `results_summary.md` is the "
+             "Every result in the PDF report and on the case-study web page comes from these tables; contextual figures from other "
+             "sources are cited there. `results_summary.md` is the "
              "pipeline's own summary of them (written by the pipeline, not by hand).", "", COMMON, "## Files", ""]
     for p in tables:
         desc, cols = DOCS[p.name]

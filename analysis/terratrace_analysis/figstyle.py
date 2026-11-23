@@ -14,7 +14,7 @@ GRID = "#e4e3df"         # recessive grid
 SURFACE = "#ffffff"
 # Seasons: validated categorical pair (blue / orange) — CVD ΔE 24.7, normal-vision ΔE 33.6.
 SEASON_COLOR = {"summer": "#eb6834", "winter": "#2a78d6"}
-SEASON_LABEL = {"summer": "April–June (primary)", "winter": "November–February (secondary)"}
+SEASON_LABEL = {"summer": "April–June (primary)", "winter": "Winter, November–February (secondary)"}
 # Methods / series beyond seasons: first three validated slots (blue, orange, aqua).
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]
 

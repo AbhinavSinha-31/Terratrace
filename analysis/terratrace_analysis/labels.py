@@ -79,11 +79,24 @@ def reference_label(cfg: Config, geom, year: int):
     return label.toByte()
 
 
+def sources(cfg: Config, year: int) -> list[dict[str, Any]]:
+    """Which reference products, and which of their years, make the training and test labels of a study year's map
+    (read from config.toml; no Earth Engine). `matches` is False when a product's year is not the map's year."""
+    target, years = glc_years(cfg, year)
+    out = [{"product": "GLC-FCS30D", "years": years, "label_year": target, "role": "labels (stable in every listed year)",
+            "matches": target == year}]
+    for p in agreement_products(cfg, year):
+        name = "ESA WorldCover" if p["product"] == "worldcover" else "Dynamic World"
+        y = int(p["year"])
+        out.append({"product": name, "years": [y], "label_year": y, "role": "agreement filter", "matches": y == year})
+    return out
+
+
 def describe(cfg: Config, year: int) -> str:
     target, years = glc_years(cfg, year)
     parts = [f"GLC-FCS30D {target} class, unchanged in every year {years[0]}–{years[-1]}"]
     for p in agreement_products(cfg, year):
-        parts.append("agreeing with ESA WorldCover 2021" if p["product"] == "worldcover"
+        parts.append(f"agreeing with ESA WorldCover {p['year']}" if p["product"] == "worldcover"
                      else f"agreeing with the Dynamic World {p['year']} annual mode")
     if not agreement_products(cfg, year):
         parts.append("(no independent product exists for this year, so stability is the only filter)")

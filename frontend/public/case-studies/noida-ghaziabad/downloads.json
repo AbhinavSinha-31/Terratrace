@@ -1,15 +1,15 @@
 {
- "generated_utc": "2026-10-20T20:26:49+00:00",
- "pipeline_version": "1.0.0",
+ "generated_utc": "2026-11-20T20:20:20+00:00",
+ "pipeline_version": "1.0.1",
  "pdf": {
   "file": "terratrace-noida-ghaziabad-case-study.pdf",
-  "bytes": 2155618,
-  "pages": 10,
+  "bytes": 2169040,
+  "pages": 11,
   "title": "Urban growth and surface heat in Noida–Ghaziabad (Delhi NCR), 2015–2025"
  },
  "data": {
   "file": "terratrace-noida-ghaziabad-data.zip",
-  "bytes": 17855,
-  "files": 18
+  "bytes": 19973,
+  "files": 19
  }
 }

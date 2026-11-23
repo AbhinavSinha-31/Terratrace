@@ -99,7 +99,7 @@ The native thermal resolution is 60 m (ETM+) and 100 m (TIRS); USGS delivers bot
 
 ### 2. LULC classification
 
-- **Classes (4):** Built-up (incl. bare land), Vegetation/Trees, Agriculture/Cropland, Water. The planned fifth class,
+- **Classes (4):** Built-up and bare land, Vegetation/Trees, Agriculture/Cropland, Water. The planned fifth class,
   Barren/Open land, is **merged into Built-up in every year**:
   - **Too few labels.** The reference-label rule left only 86 Barren pixels in 2015 and 14 in 2025, giving at most
     26 and 4 test points. Accuracy figures from so few points mean nothing, and points from 27 and 8 tiny patches don't

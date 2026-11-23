@@ -172,3 +172,37 @@ def test_change_codes():
     a = np.array([[3, 2, 4, 1, 3, 3, 0]], np.uint8)
     b = np.array([[1, 1, 1, 1, 2, 3, 1]], np.uint8)
     assert change_codes(a, b).tolist() == [[1, 2, 3, 4, 5, 6, 0]]
+
+
+# ----------------------------------------------------------------------------- reporting (v1.0.1)
+def test_composite_labels_name_both_winter_years():
+    assert CFG.season_label("summer", 2015) == "April–June 2015"
+    assert CFG.season_label("summer", 2025, short=True) == "Apr–Jun 2025"
+    assert CFG.season_label("winter", 2015) == "winter 2014–15"
+    assert CFG.season_label("winter", 2025) == "winter 2024–25"
+    assert CFG.season_label("annual", 2015) == "2015"
+
+
+def test_scene_months_and_median_date():
+    dates = ["2014-11-08", "2014-11-24", "2014-12-10", "2015-02-12"]
+    rows = stats.scene_months(CFG, 2015, "winter", dates)
+    assert [r["month"] for r in rows] == ["2014-11", "2014-12", "2015-01", "2015-02"]
+    assert [r["scenes"] for r in rows] == [2, 1, 0, 1]
+    assert sum(r["share_of_composite"] for r in rows) == pytest.approx(1)
+    assert stats.median_date(dates) == "2014-12-02"            # midpoint of 24 Nov and 10 Dec
+    assert stats.median_date(["2015-04-01", "2015-05-03", "2015-06-04"]) == "2015-05-03"
+
+
+def test_churn_from_transition_matrix():
+    from terratrace_analysis import checks
+    names = ["A", "B"]
+    tm = pd.DataFrame([[50.0, 30.0], [40.0, 100.0]], index=names, columns=names)   # rows = first year
+    ch = checks.churn(tm, "A")
+    assert ch == {"first_km2": 80.0, "second_km2": 90.0, "stable_km2": 50.0, "lost_km2": 30.0, "gained_km2": 40.0, "net_km2": 10.0}
+
+
+def test_reference_label_years_are_read_from_config_and_mismatches_flagged():
+    s15, s25 = labels.sources(CFG, 2015), labels.sources(CFG, 2025)
+    assert [(p["product"], p["label_year"], p["matches"]) for p in s15] == [("GLC-FCS30D", 2015, True), ("Dynamic World", 2016, False)]
+    assert [(p["product"], p["label_year"], p["matches"]) for p in s25] == [
+        ("GLC-FCS30D", 2022, False), ("ESA WorldCover", 2021, False), ("Dynamic World", 2025, True)]

@@ -76,19 +76,25 @@ def lst_by_class(cfg: Config, tables: Path, out: Path) -> None:
             if len(last):
                 ax.annotate(f"{last.mean_c.iloc[0]:.1f}", (last.year.iloc[0], last.mean_c.iloc[0]), textcoords="offset points",
                             xytext=(6, 0), va="center", fontsize=7, color=figstyle.INK)
-        ax.set_xticks(years)
+        ax.set_xticks(years, [composite_tick(cfg, s, y) for y in years])
         ax.set_xlim(min(years) - 1, max(years) + 3)
         ax.set_title(figstyle.SEASON_LABEL[s], fontsize=9.5)
         ax.set_ylabel("Mean land surface temperature (°C)")
     axes[0].legend(loc="upper center", bbox_to_anchor=(1.1, -0.15), ncol=5, fontsize=7)
     fig.suptitle("Land surface temperature by land-cover class", fontweight="bold", fontsize=11)
     figstyle.source_note(fig, "Absolute temperatures differ between years partly because of the weather of that season; "
-                              "compare classes within a year, or use the UHI intensity and the conversion analysis across years.")
+                              "compare classes within a year, or use the UHI intensity and the conversion analysis across years.", y=-0.1)
     fig.savefig(out / "lst_by_class_and_year.png")
     plt.close(fig)
 
 
-def uhi_trend(tables: Path, out: Path) -> None:
+def composite_tick(cfg: Config, season: str, year: int) -> str:
+    """Axis label of one composite: '2015' for April–June, '2014–15' for the winter that ends in 2015."""
+    label = cfg.season_label(season, int(year))
+    return label.replace("winter ", "") if label.startswith("winter") else str(year)
+
+
+def uhi_trend(cfg: Config, tables: Path, out: Path) -> None:
     u = pd.read_csv(tables / "uhi_intensity.csv")
     fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.2), sharey=True)
     for ax, s in zip(axes, ("summer", "winter")):
@@ -100,12 +106,12 @@ def uhi_trend(tables: Path, out: Path) -> None:
                 ax.annotate(f"{r.uhi_intensity_c:+.2f}", (r.year, r.uhi_intensity_c), textcoords="offset points",
                             xytext=(0, 7 if i == 0 else -12), ha="center", fontsize=7, color=figstyle.INK)
         ax.axhline(0, color=figstyle.INK_2, lw=0.8)
-        ax.set_xticks(sorted(d.year.unique()))
+        ax.set_xticks(sorted(d.year.unique()), [composite_tick(cfg, s, y) for y in sorted(d.year.unique())])
         ax.set_title(figstyle.SEASON_LABEL[s], fontsize=9.5)
     axes[0].set_ylabel("UHI intensity (°C, urban − rural)")
     axes[0].legend(loc="upper center", bbox_to_anchor=(1.05, -0.15), ncol=2, fontsize=7.5)
     fig.suptitle("Surface urban heat island intensity", fontweight="bold", fontsize=11)
-    figstyle.source_note(fig, "Below zero = the urban area is cooler than its surroundings at the Landsat overpass (~10:30 local time).")
+    figstyle.source_note(fig, "Below zero = the urban area is cooler than its surroundings at the Landsat overpass (~10:30 local time).", y=-0.1)
     fig.savefig(out / "uhi_intensity_by_year.png")
     plt.close(fig)
 
@@ -157,7 +163,7 @@ def scatter(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int],
             if j == 0:
                 ax.set_ylabel("LST (°C)")
             if i == 0:
-                ax.set_title(str(y), fontsize=10)
+                ax.set_title(cfg.season_label(season, y).capitalize() if season == "winter" else cfg.season_label(season, y), fontsize=10)
     fig.suptitle(f"LST vs NDVI and NDBI — {figstyle.SEASON_LABEL[season]}", fontweight="bold", fontsize=11)
     figstyle.source_note(fig, "Density of 30 m land pixels (water excluded; darker = more pixels, log scale). Line: least squares. "
                               "r over all pixels; see lst_correlations.csv for p-values on a thinned grid.")
@@ -166,7 +172,7 @@ def scatter(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int],
     plt.close(fig)
 
 
-def conversion_chart(tables: Path, out: Path) -> None:
+def conversion_chart(cfg: Config, tables: Path, out: Path) -> None:
     p = tables / "conversion_lst_change.csv"
     if not p.exists():
         return
@@ -180,7 +186,9 @@ def conversion_chart(tables: Path, out: Path) -> None:
             for k, r in enumerate(d.itertuples()):
                 ax.text(r.mean_delta_z, k, f" {r.mean_delta_z:+.2f} ({r.area_km2:.0f} km²) ", va="center",
                         ha="left" if r.mean_delta_z >= 0 else "right", fontsize=6.8, color=figstyle.INK)
-            ax.set_title(figstyle.SEASON_LABEL[s], fontsize=9.5)
+            pa, pb = (int(v) for v in period.split("-"))
+            title = f"{cfg.season_label(s, pa)} → {cfg.season_label(s, pb)}"
+            ax.set_title(title[0].upper() + title[1:], fontsize=9.5)
             ax.set_xlabel("Change in normalised LST (z-score)")
             ax.grid(axis="y", visible=False)
             lim = max(0.3, float(np.nanmax(np.abs(d.mean_delta_z))) * 1.6)
@@ -199,9 +207,9 @@ def run(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int]) -> 
     builtup_trend(cfg, tables, out)
     class_composition(cfg, tables, out)
     lst_by_class(cfg, tables, out)
-    uhi_trend(tables, out)
+    uhi_trend(cfg, tables, out)
     population_vs_builtup(cfg, tables, out)
     for s in ("summer", "winter"):
         scatter(cfg, cache, tables, out, years, s)
-    conversion_chart(tables, out)
+    conversion_chart(cfg, tables, out)
     log.info("charts: written to %s", out)
