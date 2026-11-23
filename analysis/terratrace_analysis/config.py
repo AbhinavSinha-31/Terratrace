@@ -93,6 +93,11 @@ class Config:
         return float(self.raw["scenes"]["max_cloud_cover"])
 
     @property
+    def lst_enabled(self) -> bool:
+        """[lst] enabled: whether land surface temperature / UHI is computed and reported (default true if the section is absent)."""
+        return bool(self.raw.get("lst", {}).get("enabled", True))
+
+    @property
     def max_st_uncertainty_k(self) -> float:
         return float(self.raw["scenes"]["max_st_uncertainty_k"])
 

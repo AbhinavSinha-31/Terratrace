@@ -1,5 +1,8 @@
 """Sanity checks: anything suspicious is FLAGGED in results_summary.md, never hidden or silently fixed.
 
+With config.toml [lst] enabled = false no LST / UHI check runs and the November–February composite (used only for LST)
+is not checked.
+
 Each flag is (level, topic, message). Levels: WARNING = a number that must not be used without addressing it,
 CAUTION = usable but must be stated in the paper, INFO = context worth knowing.
 """
@@ -32,9 +35,10 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
     flags: list[Flag] = []
     acc = pd.read_csv(tables / "accuracy_metrics.csv")
     labels = pd.read_csv(tables / "training_labels.csv")
-    lst = pd.read_csv(tables / "lst_summary.csv")
-    per_class = pd.read_csv(tables / "lst_per_class.csv")
-    uhi = pd.read_csv(tables / "uhi_intensity.csv")
+    heat = cfg.lst_enabled
+    lst = pd.read_csv(tables / "lst_summary.csv") if heat else pd.DataFrame()
+    per_class = pd.read_csv(tables / "lst_per_class.csv") if heat else pd.DataFrame()
+    uhi = pd.read_csv(tables / "uhi_intensity.csv") if heat else pd.DataFrame()
     areas = pd.read_csv(tables / "class_areas.csv")
 
     flags.append(("CAUTION", "accuracy", "All accuracy figures are AGREEMENT WITH REFERENCE LABELS (held-out GLC-FCS30D stable pixels), "
@@ -64,7 +68,7 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
     lab = lambda y, s: cfg.season_label(s, int(y))  # noqa: E731
     for y in years:
         meta = load_meta(cache, y)
-        for s in ("summer", "winter", "annual"):
+        for s in ("summer", "winter", "annual") if heat else ("summer", "annual"):
             n = meta["scenes"][s]["count"]
             if n < ck["min_scenes"]:
                 flags.append(("WARNING", "scenes", f"{lab(y, s)}: only {n} Landsat scenes."))
@@ -110,7 +114,7 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
                               f"{ck['min_stable_share']:.0%}); {ch['lost_km2']:.1f} km² was lost to other classes and {ch['gained_km2']:.1f} km² "
                               f"gained from them. The net change ({ch['net_km2']:+.1f} km²) is a small difference between these large gross "
                               f"flows, which include class confusion, so it is uncertain."))
-    for season in ("summer", "winter"):
+    for season in ("summer", "winter") if heat else ():
         u = uhi[(uhi.season == season) & (uhi.method == "urban core vs rural ring")].sort_values("year")
         if len(u) > 1 and np.sign(u.uhi_intensity_c).nunique() > 1:
             flags.append(("CAUTION", "UHI", "the core-vs-ring UHI changes sign between years ("
@@ -120,6 +124,8 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
     months_path = tables / "scene_months.csv"
     if months_path.exists():
         sm = pd.read_csv(months_path)
+        if not heat:
+            sm = sm[sm.season == "summer"]
         for season, d in sm.groupby("season", sort=False):
             for a, b in combinations(sorted(d.year.unique()), 2):
                 da, db = d[d.year == a].set_index("month_of_season"), d[d.year == b].set_index("month_of_season")
@@ -136,7 +142,7 @@ def run(cfg: Config, cache: Path, tables: Path, years: list[int]) -> list[Flag]:
                     flags.append(("CAUTION", "scenes", f"{la} vs {lb}: the scenes are "
                                   f"spread differently over the season — {da.month_name[k]} holds {da.share_of_composite[k]:.0%} of the scenes in "
                                   f"{la} but {db.share_of_composite[k]:.0%} in {lb} (more than {ck['max_month_share_diff_pp']} percentage points "
-                                  "apart). The two composites describe different parts of the season, so part of their temperature "
-                                  "difference can come from timing."))
+                                  "apart). The two composites describe different parts of the season, so part of their "
+                                  f"{'temperature ' if heat else ''}difference can come from timing."))
     flags.append(("INFO", "population", f"GHSL epochs from {cfg.population['projected_from']} are model projections, not census-based estimates."))
     return flags

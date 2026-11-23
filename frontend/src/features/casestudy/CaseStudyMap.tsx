@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type StyleSpecification } from 'maplibre-gl';
-import { ArrowRightLeft, Flame, Layers, RotateCcw } from 'lucide-react';
+import { ArrowRightLeft, Layers, RotateCcw } from 'lucide-react';
 import { LayerToggle, Segmented, Skeleton, StateView, Switch } from '../../design';
 import { useBasemaps } from '../../data/queries';
 import type { BaseLayer } from '../../data/contracts';
-import { caseStudyAsset, compositeLabel, useCaseStudyTiles, type CaseStudyDoc, type TilesManifest } from './data';
+import { caseStudyAsset, useCaseStudyTiles, type CaseStudyDoc, type TilesManifest } from './data';
 
-type Kind = 'lulc' | 'change' | 'lst';
-type Season = 'summer' | 'winter';
-const OVERLAY = 'TerraTrace LULC + UHI pipeline · Landsat Collection 2 (USGS), 30 m';
+// Land surface temperature was withdrawn in pipeline 1.0.2 (pending a weather-normalised method): no temperature layer.
+type Kind = 'lulc' | 'change';
+const OVERLAY = 'TerraTrace LULC pipeline · Landsat Collection 2 (USGS), 30 m';
 
 /** Absolute tile URL with its {z}/{x}/{y} placeholders intact (URL() would percent-encode the braces). */
 const absolute = (path: string) => new URL(path, window.location.href).href.replace(/%7B/gi, '{').replace(/%7D/gi, '}');
@@ -47,7 +47,7 @@ function Swatch({ color }: { color: string }) {
   return <span className="mt-[3px] h-2.5 w-2.5 shrink-0 rounded-[2px] shadow-[0_0_0_1px_rgba(255,255,255,0.15)]" style={{ background: color }} />;
 }
 
-function Legend({ d, t, kind, year, season }: { d: CaseStudyDoc; t: TilesManifest; kind: Kind | null; year: number; season: Season }) {
+function Legend({ d, t, kind, year }: { d: CaseStudyDoc; t: TilesManifest; kind: Kind | null; year: number }) {
   if (!kind) return <p className="text-[11.5px] text-ink-3">No analysis layer shown — basemap only.</p>;
   if (kind === 'lulc') {
     const area = (code: number) => d.areas.find((a) => a.year === year && a.class_code === code);
@@ -63,32 +63,18 @@ function Legend({ d, t, kind, year, season }: { d: CaseStudyDoc; t: TilesManifes
       </ul>
     );
   }
-  if (kind === 'change') {
-    const ch = t.layers.find((l) => l.kind === 'change');
-    const values = ch ? t.legends.change_km2[ch.id] ?? [] : [];
-    return (
-      <ul className="space-y-1 text-[12px]" data-testid="case-map-legend">
-        {t.legends.change.map((c, i) => (
-          <li key={c.code} className="flex gap-2"><Swatch color={c.color} />
-            <span className="min-w-0 flex-1 text-ink-2">{c.name}</span>
-            <span className="t-data shrink-0 text-ink">{values[i] !== undefined ? `${km2(values[i])} km²` : '—'}</span>
-          </li>
-        ))}
-        <li className="pt-1 text-[11px] leading-snug text-ink-3">Gross pixel changes; errors of both maps add up here — use the net figures below.</li>
-      </ul>
-    );
-  }
-  const l = t.legends.lst[season];
-  const mean = d.lst_summary.find((r) => r.year === year && r.season === season)?.mean_land_c;
+  const ch = t.layers.find((l) => l.kind === 'change');
+  const values = ch ? t.legends.change_km2[ch.id] ?? [] : [];
   return (
-    <div className="text-[12px]" data-testid="case-map-legend">
-      <div className="h-2.5 rounded-[2px]" style={{ background: `linear-gradient(to right, ${l.stops.join(', ')})` }} />
-      <div className="t-data mt-1 flex justify-between text-[11px] text-ink-2"><span>≤ {l.vmin.toFixed(1)} °C</span><span>≥ {l.vmax.toFixed(1)} °C</span></div>
-      <p className="mt-1.5 text-[11px] leading-snug text-ink-3">
-        Land surface temperature, {compositeLabel(d, season, year, true)}{season === 'winter' ? ' (Nov–Feb, secondary)' : ' (primary)'}{mean !== undefined ? ` · study-area land mean ${mean.toFixed(1)} °C` : ''}.
-        One colour range for both years of this season; transparent = no valid temperature.
-      </p>
-    </div>
+    <ul className="space-y-1 text-[12px]" data-testid="case-map-legend">
+      {t.legends.change.map((c, i) => (
+        <li key={c.code} className="flex gap-2"><Swatch color={c.color} />
+          <span className="min-w-0 flex-1 text-ink-2">{c.name}</span>
+          <span className="t-data shrink-0 text-ink">{values[i] !== undefined ? `${km2(values[i])} km²` : '—'}</span>
+        </li>
+      ))}
+      <li className="pt-1 text-[11px] leading-snug text-ink-3">Gross pixel changes; errors of both maps add up here — use the net figures below.</li>
+    </ul>
   );
 }
 
@@ -102,12 +88,11 @@ export function CaseStudyMap({ d }: { d: CaseStudyDoc }) {
   const years = d.study.years;
   const [kind, setKind] = useState<Kind | null>('lulc');
   const [year, setYear] = useState(years[years.length - 1]);
-  const [season, setSeason] = useState<Season>('summer');
   const [opacity, setOpacity] = useState(0.85);
   const [labels, setLabels] = useState(true);
   const [outline, setOutline] = useState(true);
   const change = t?.layers.find((l) => l.kind === 'change');
-  const active = kind === 'lulc' ? `lulc_${year}` : kind === 'lst' ? `lst_${season}_${year}` : kind === 'change' ? change?.id : undefined;
+  const active = kind === 'lulc' ? `lulc_${year}` : kind === 'change' ? change?.id : undefined;
 
   useEffect(() => {
     if (!t || !el.current) return;
@@ -170,16 +155,12 @@ export function CaseStudyMap({ d }: { d: CaseStudyDoc }) {
             <LayerToggle icon={<ArrowRightLeft size={14} />} label={`Change ${change.from_year} → ${change.to_year}`} hint="Pixel-by-pixel comparison of the two land-cover maps"
               on={kind === 'change'} onChange={toggle('change')} />
           )}
-          <LayerToggle icon={<Flame size={14} />} label="Surface temperature" hint="Landsat land surface temperature at the ~10:30 overpass" on={kind === 'lst'} onChange={toggle('lst')}>
-            <Segmented<Season> label="Season" value={season} onChange={setSeason}
-              options={[{ value: 'summer', label: 'Apr–Jun' }, { value: 'winter', label: 'Winter' }]} />
-          </LayerToggle>
         </div>
         <div className="space-y-1.5 px-2">
           <div className="t-label text-ink-3">Year</div>
           {kind === 'change' && change?.kind === 'change'
             ? <p className="text-[11.5px] text-ink-3">The change layer compares {change.from_year} and {change.to_year}.</p>
-            : <Segmented<string> label="Year" size="md" value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map((y) => ({ value: String(y), label: kind === 'lst' && season === 'winter' ? compositeLabel(d, 'winter', y, true).replace(/^Winter /, '') : String(y) }))} />}
+            : <Segmented<string> label="Year" size="md" value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map((y) => ({ value: String(y), label: String(y) }))} />}
         </div>
         <label className="block space-y-1 px-2">
           <span className="flex justify-between"><span className="t-label text-ink-3">Opacity</span><span className="t-data text-[11px] text-ink-2">{Math.round(opacity * 100)} %</span></span>
@@ -190,7 +171,7 @@ export function CaseStudyMap({ d }: { d: CaseStudyDoc }) {
           <div className="flex items-center justify-between gap-3"><span>Study-area outline</span><Switch on={outline} onChange={setOutline} label="Study-area outline" /></div>
         </div>
         <div className="border-t border-line px-2 pt-3">
-          {t ? <Legend d={d} t={t} kind={kind} year={year} season={season} /> : <Skeleton className="h-20 rounded-md" />}
+          {t ? <Legend d={d} t={t} kind={kind} year={year} /> : <Skeleton className="h-20 rounded-md" />}
         </div>
       </div>
     </div>

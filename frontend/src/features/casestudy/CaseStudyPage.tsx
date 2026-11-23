@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, BookOpenText, Info, MessageSquarePlus, ShieldCheck, X } from 'lucide-react';
-import { Badge, Button, IconButton, Segmented, Skeleton, StateView, Tooltip } from '../../design';
+import { Badge, Button, IconButton, Skeleton, StateView, Tooltip } from '../../design';
 import { startDiscussion } from '../community/compose';
 import { fmtDelta } from '../../lib/format';
 import { useUi } from '../../state/store';
@@ -10,15 +10,11 @@ import { CaseStudyMap } from './CaseStudyMap';
 import { TierBadge } from '../shell/TierBadge';
 import { DownloadCard } from './DownloadCard';
 
-// Number formats match results_summary.md (1 decimal for km² and %, 2 for UHI, 3 for r and kappa).
+// Number formats match results_summary.md (1 decimal for km² and %, 3 for kappa).
+// The surface heat (land surface temperature / UHI) section was withdrawn in pipeline 1.0.2, pending a weather-normalised method.
 const nf1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const km2 = (v: number) => nf1.format(v);
 const pct1 = (v: number) => v.toFixed(1);
-const degC = (v: number) => `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)} °C`;
-const signedC = (v: number) => `${fmtDelta(v, 2)} °C`;
-const signedR = (v: number) => fmtDelta(v, 3);
-const SEASON = { summer: 'April–June (primary)', winter: 'Winter, November–February (secondary)' } as const;
-type Season = keyof typeof SEASON;
 
 function Section({ id, title, kicker, children }: { id: string; title: string; kicker?: string; children: ReactNode }) {
   return (
@@ -76,11 +72,6 @@ const thr = `${th} text-right`;
 const td = 'border-b border-line/60 px-2 py-1.5 text-ink-2';
 const tdr = `${td} t-data text-right text-ink`;
 
-function IslandBadge({ result }: { result: string }) {
-  const tone = result === 'heat island' ? 'warn' : result === 'cool island' ? 'accent' : 'neutral';
-  return <Badge tone={tone}>{result}</Badge>;
-}
-
 // ---------------------------------------------------------------- sections
 function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
   const meta = caseStudyMeta(d.id);
@@ -108,7 +99,7 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 id="case-study-title" className="t-h1 text-ink">{meta?.name ?? d.study.short_name}</h1>
           <Button size="sm" variant="secondary" icon={<MessageSquarePlus size={14} />} data-testid="discuss-case-study"
-            onClick={() => startDiscussion({ aoiId: null, name: `Case study: ${meta?.name ?? d.study.short_name}`, region: d.study.name, tags: ['case-study', 'urban-heat', 'land-cover', 'india'] })}>
+            onClick={() => startDiscussion({ aoiId: null, name: `Case study: ${meta?.name ?? d.study.short_name}`, region: d.study.name, tags: ['case-study', 'land-cover', 'india'] })}>
             Discuss this study
           </Button>
         </div>
@@ -126,7 +117,7 @@ function Header({ d, onClose }: { d: CaseStudyDoc; onClose(): void }) {
         <div className="tt-panel p-3">
           <dt className="t-label text-ink-3">Scenes used</dt>
           <dd className="mt-1 space-y-0.5 text-ink">{d.study.years.map((y) => (
-            <div key={y}><span className="t-data">{y}</span><span className="text-ink-3"> · {scenes(y, 'summer')} {compositeLabel(d, 'summer', y, true)} · {scenes(y, 'winter')} {compositeLabel(d, 'winter', y)} · {scenes(y, 'annual')} whole year</span></div>
+            <div key={y}><span className="t-data">{y}</span><span className="text-ink-3"> · {scenes(y, 'summer')} {compositeLabel(d, 'summer', y, true)} · {scenes(y, 'annual')} whole year</span></div>
           ))}</dd>
         </div>
       </dl>
@@ -148,7 +139,7 @@ function ToMethod({ children }: { children: ReactNode }) {
 function Headlines({ d }: { d: CaseStudyDoc }) {
   return (
     <Section id="cs-findings" title="Key findings" kicker={`${yearSpan(d.study.years)} · from Landsat satellite data`}>
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="case-study-headlines">
+      <ul className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${d.headlines.length > 2 ? 'lg:grid-cols-3' : ''}`} data-testid="case-study-headlines">
         {d.headlines.map((h) => (
           <li key={h.id} className="tt-panel flex flex-col p-4" data-headline={h.id}>
             <div className="flex items-baseline justify-between gap-3">
@@ -276,139 +267,7 @@ function Population({ d }: { d: CaseStudyDoc }) {
   );
 }
 
-function Heat({ d }: { d: CaseStudyDoc }) {
-  const [season, setSeason] = useState<Season>('summer');
-  const ys = d.study.years;
-  const lst = (y: number) => d.lst_summary.find((r) => r.year === y && r.season === season);
-  const cls = (y: number, c: number) => d.lst_per_class.find((r) => r.year === y && r.season === season && r.class_code === c);
-  const imgs = season === 'summer' ? d.images.lst_summer : d.images.lst_winter;
-  return (
-    <Section id="cs-heat" title="Surface heat" kicker="Landsat land surface temperature at the ~10:30 overpass">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="w-full max-w-[420px]">
-          <Segmented<Season> label="Season" size="md" value={season} onChange={setSeason}
-            options={[{ value: 'summer', label: 'April–June (primary)' }, { value: 'winter', label: 'Winter, Nov–Feb (secondary)' }]} />
-        </div>
-      </div>
-      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${ys.length > 2 ? 'lg:grid-cols-3' : ''}`}>
-        {ys.map((y) => <Figure key={y} id={d.id} img={imgs[String(y)]} alt={`Land surface temperature, ${compositeLabel(d, season, y)}`} caption={`${compositeLabel(d, season, y)}${season === 'winter' ? ' (November–February)' : ''} · mean land ${lst(y) ? degC(lst(y)!.mean_land_c) : '—'}`} />)}
-      </div>
-
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <div>
-          <h3 className="t-label mb-2 text-ink-3">Mean LST per class · {SEASON[season]}</h3>
-          <Table minWidth={360}>
-            <thead><tr><th className={th}>Class</th>{ys.map((y) => <th key={y} className={thr}>{compositeLabel(d, season, y, true)}</th>)}</tr></thead>
-            <tbody>
-              <tr><td className={`${td} text-ink`}>Study area (land)</td>{ys.map((y) => <td key={y} className={tdr}>{lst(y) ? degC(lst(y)!.mean_land_c) : '—'}</td>)}</tr>
-              {d.study.classes.map((c) => (
-                <tr key={c.code}><td className={td}>{c.name}</td>{ys.map((y) => <td key={y} className={tdr}>{cls(y, c.code) ? degC(cls(y, c.code)!.mean_c) : '—'}</td>)}</tr>
-              ))}
-            </tbody>
-          </Table>
-          <p className="mt-2 text-[11.5px] leading-snug text-ink-3">Absolute LST differs between years partly because of each season's weather; compare classes within a year, or use UHI intensity across years.</p>
-          {d.context?.weather_2025 && (
-            <div className="mt-3 rounded-md border border-warn/40 bg-warn/[0.06] p-3 text-[12px] leading-relaxed text-ink-2" data-testid="case-study-weather">
-              <div className="t-label mb-1 text-warn">Weather context · cited, not a result of this study</div>
-              {d.context.weather_2025.text}
-            </div>
-          )}
-        </div>
-        <div>
-          <h3 className="t-label mb-2 text-ink-3">Urban heat island intensity (urban − rural)</h3>
-          <PhoneCards testId="case-study-uhi-cards" items={(['summer', 'winter'] as Season[]).flatMap((s) => ys.flatMap((y): PhoneCard[] => {
-            const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
-            const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
-            return core ? [{ key: `${s}-${y}`, title: compositeLabel(d, s, y, true), aside: <IslandBadge result={core.result} />,
-              rows: [['Core − ring (primary)', signedC(core.uhi_c)], ['Built-up − rest', bu ? signedC(bu.uhi_c) : '—']] }] : [];
-          }))} />
-          <div className="hidden sm:block">
-            <Table minWidth={460}>
-              <thead><tr><th className={th}>Composite</th><th className={thr}>Core − ring (primary)</th><th className={thr}>Built-up − rest</th><th className={th}>Result</th></tr></thead>
-              <tbody data-testid="case-study-uhi">
-                {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => {
-                  const core = d.uhi.find((u) => u.year === y && u.season === s && u.primary);
-                  const bu = d.uhi.find((u) => u.year === y && u.season === s && !u.primary);
-                  if (!core) return null;
-                  return (
-                    <tr key={`${s}-${y}`}>
-                      <td className={td}>{compositeLabel(d, s, y, true)}</td>
-                      <td className={tdr}>{signedC(core.uhi_c)}</td>
-                      <td className={tdr}>{bu ? signedC(bu.uhi_c) : '—'}</td>
-                      <td className={td}><IslandBadge result={core.result} /></td>
-                    </tr>
-                  );
-                }))}
-              </tbody>
-            </Table>
-          </div>
-          <p className="mt-2 text-[11.5px] leading-snug text-ink-3">
-            Urban core minus the countryside around it. How the core and ring are drawn, and why the summer value changes sign: <ToMethod>Method &amp; limitations</ToMethod>.
-          </p>
-        </div>
-      </div>
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Figure id={d.id} img={d.images.uhi_zones[String(ys[ys.length - 1])]} alt="Urban core and rural ring zones" caption={`UHI zones (urban core and rural ring), ${ys[ys.length - 1]}`} />
-        <div className="space-y-2">
-          <h3 className="t-label text-ink-3">Did land that became built-up warm? (key test)</h3>
-          <p className="text-[11.5px] text-ink-3 sm:hidden">{compositeLabel(d, season, ys[0], true)} → {compositeLabel(d, season, ys[ys.length - 1], true)}</p>
-          <PhoneCards testId="case-study-conversion-cards" items={d.conversion.filter((c) => c.season === season).map((c) => ({
-            key: `${c.period}-${c.group}`, title: c.group,
-            rows: [['Area', `${km2(c.area_km2)} km²`], ['ΔLST', signedC(c.delta_lst_c)], ['Δ normalised', `${fmtDelta(c.delta_z, 2)} SD`]],
-          }))} />
-          <div className="hidden sm:block">
-            <Table minWidth={420}>
-              <thead><tr><th className={th}>Group · {compositeLabel(d, season, ys[0], true)} → {compositeLabel(d, season, ys[ys.length - 1], true)}</th><th className={thr}>km²</th><th className={thr}>ΔLST</th><th className={thr}>Δ normalised</th></tr></thead>
-              <tbody>
-                {d.conversion.filter((c) => c.season === season).map((c) => (
-                  <tr key={`${c.period}-${c.group}`}><td className={td}>{c.group}</td><td className={tdr}>{km2(c.area_km2)}</td><td className={tdr}>{signedC(c.delta_lst_c)}</td><td className={tdr}>{fmtDelta(c.delta_z, 2)} SD</td></tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-          <p className="text-[11.5px] leading-snug text-ink-3">Normalised LST = (LST − study-area mean) / SD for that season and year, so a hotter year as a whole does not count as warming.</p>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-function Correlations({ d }: { d: CaseStudyDoc }) {
-  const ys = d.study.years;
-  const r = (y: number, s: Season, i: 'NDVI' | 'NDBI') => d.correlations.find((c) => c.year === y && c.season === s && c.index === i);
-  return (
-    <Section id="cs-correlations" title="Temperature vs vegetation and built-up indices" kicker="Pearson r over all land pixels (water excluded)">
-      <PhoneCards testId="case-study-correlation-cards" items={(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y): PhoneCard => ({
-        key: `${s}-${y}`, title: compositeLabel(d, s, y, true),
-        rows: [['LST vs NDVI r', r(y, s, 'NDVI') ? signedR(r(y, s, 'NDVI')!.r) : '—'], ['LST vs NDBI r', r(y, s, 'NDBI') ? signedR(r(y, s, 'NDBI')!.r) : '—'],
-          ['Pixels', r(y, s, 'NDVI')?.n_pixels.toLocaleString('en-US') ?? '—']],
-      })))} />
-      <div className="hidden sm:block">
-        <Table minWidth={460}>
-          <thead><tr><th className={th}>Composite</th><th className={thr}>LST vs NDVI r</th><th className={thr}>LST vs NDBI r</th><th className={thr}>Pixels</th></tr></thead>
-          <tbody data-testid="case-study-correlations">
-            {(['summer', 'winter'] as Season[]).flatMap((s) => ys.map((y) => (
-              <tr key={`${s}-${y}`}>
-                <td className={td}>{compositeLabel(d, s, y, true)}</td>
-                <td className={tdr}>{r(y, s, 'NDVI') ? signedR(r(y, s, 'NDVI')!.r) : '—'}</td>
-                <td className={tdr}>{r(y, s, 'NDBI') ? signedR(r(y, s, 'NDBI')!.r) : '—'}</td>
-                <td className={tdr}>{r(y, s, 'NDVI')?.n_pixels.toLocaleString('en-US') ?? '—'}</td>
-              </tr>
-            )))}
-          </tbody>
-        </Table>
-      </div>
-      <p className="mt-2 text-[11.5px] leading-snug text-ink-3">All p &lt; 0.001 on a 300 m thinned grid (neighbouring 30 m pixels are not independent); with this many pixels the size of r is what matters.</p>
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Figure id={d.id} img={d.images.charts.scatter_lst_indices_summer} alt="LST against NDVI and NDBI, April–June" caption="April–June (primary)" />
-        <Figure id={d.id} img={d.images.charts.scatter_lst_indices_winter} alt="LST against NDVI and NDBI, November–February" caption={`${compositeLabel(d, 'winter', ys[0])} and ${compositeLabel(d, 'winter', ys[ys.length - 1]).toLowerCase()} (November–February, secondary)`} />
-      </div>
-    </Section>
-  );
-}
-
 function MethodLimitations({ d }: { d: CaseStudyDoc }) {
-  const removed = d.masking.impact.map((m) => Number(m.pixels_removed_entirely) / Number(m.pixels_with_lst_before) * 100);
   return (
     <Section id="cs-method" title="Method & limitations" kicker="What the numbers can and cannot claim">
       <h3 className="t-label mb-2 text-ink-3">How to read these results</h3>
@@ -423,11 +282,6 @@ function MethodLimitations({ d }: { d: CaseStudyDoc }) {
       <div className="tt-panel mt-4 p-4 text-[12.5px] leading-relaxed text-ink-2">
         <h3 className="t-label mb-1.5 text-ink-3">Method</h3>
         <p>{d.study.method_summary}</p>
-        <p className="mt-2">
-          Urban core: pixels whose built-up fraction within 500 m is at least 50 %, in patches of at least 1 km². Rural ring: the nearest
-          non-built-up, non-water land of equal area inside the study area (East Delhi, west of the study area, is itself urban), after
-          Peng et al. (2012) and Chakraborty &amp; Lee (2019). A negative value means the city is cooler than its surroundings by day.
-        </p>
         <p className="mt-2" data-testid="case-study-reference-labels">
           <b className="font-medium text-ink">Reference labels (training and test).</b>{' '}
           {d.study.reference_labels.map((r) => `${r.year} map: ${r.text}`).join('; ')}.
@@ -457,7 +311,7 @@ function MethodLimitations({ d }: { d: CaseStudyDoc }) {
         </div>
         <p className="mt-2 text-[11.5px] leading-snug text-ink-3">Landsat scenes that passed the scene cloud filter (clouds inside them are masked per pixel); neighbouring path/rows on one date count as separate scenes. A quality flag is raised automatically when the months differ a lot between years.</p>
       </div>
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-4">
         <div className="tt-panel p-4">
           <h3 className="t-label flex items-center gap-1.5 text-ink-3"><ShieldCheck size={13} /> Classification — agreement with reference labels</h3>
           <ul className="mt-2 space-y-2 text-[12.5px] text-ink-2" data-testid="case-study-accuracy">
@@ -469,16 +323,6 @@ function MethodLimitations({ d }: { d: CaseStudyDoc }) {
             ))}
           </ul>
           <p className="mt-2 text-[11.5px] leading-snug text-ink-3">These are agreement with GLC-FCS30D-derived reference labels, not accuracy against ground truth. Independent validation points are prepared but not yet interpreted.</p>
-        </div>
-        <div className="tt-panel p-4">
-          <h3 className="t-label flex items-center gap-1.5 text-ink-3"><Info size={13} /> Temperature masking rule</h3>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-2">{d.masking.rule}</p>
-          {removed.length > 0 && (
-            <p className="mt-2 text-[11.5px] leading-snug text-ink-3">
-              Pixels that lost their temperature: {Math.min(...removed).toFixed(3)}–{Math.max(...removed).toFixed(3)}% per composite; UHI values moved by at most{' '}
-              {Math.max(...d.masking.impact.map((m) => Math.abs(Number(m.uhi_core_ring_after_c) - Number(m.uhi_core_ring_before_c)))).toFixed(2)} °C.
-            </p>
-          )}
         </div>
       </div>
       <div className="tt-panel mt-4 p-4">
@@ -538,14 +382,11 @@ export function CaseStudyPage() {
                 <LandCoverMaps d={data} />
                 <LandCoverChange d={data} />
                 <Population d={data} />
-                <Heat d={data} />
-                <Correlations d={data} />
                 <MethodLimitations d={data} />
                 <DownloadCard id={data.id} place="bottom" />
                 <footer className="border-t border-line pt-4 text-[11.5px] leading-relaxed text-ink-4">
                   Precomputed case study generated {data.generated_utc.slice(0, 10)} by the TerraTrace analysis pipeline v{data.pipeline_version} from
                   precomputed tables (Landsat Collection 2 via Google Earth Engine; GLC-FCS30D, ESA WorldCover, Dynamic World labels; GHSL population).
-                  Weather context: India Meteorological Department (cited, not a result of this study).
                   It is not an interactive TerraTrace analysis and is not counted in the homepage totals.
                 </footer>
               </>

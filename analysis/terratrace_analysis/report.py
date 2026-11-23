@@ -1,4 +1,7 @@
-"""results_summary.md — nine fixed sections, written so an abstract can be drafted directly from it.
+"""results_summary.md — fixed sections, written so an abstract can be drafted directly from it.
+
+With config.toml [lst] enabled = false the temperature / UHI and correlation sections, every LST or UHI sentence (findings,
+quality control, limitations) and the November–February composites are left out, and the sections are numbered without them.
 
 Every result is read from the regenerated CSV tables in outputs/tables (or the run metadata); nothing is typed in by hand.
 Context from outside the pipeline (config.toml [context], e.g. the IMD weather note) is quoted with its source and never
@@ -11,6 +14,7 @@ Sentences state the direction the data show (heat island OR cool island, warming
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from itertools import combinations
 from pathlib import Path
@@ -64,15 +68,18 @@ class Tables:
         self.areas = pd.read_csv(t / "class_areas.csv")
         self.acc = pd.read_csv(t / "accuracy_metrics.csv")
         self.labels = pd.read_csv(t / "training_labels.csv")
-        self.lstc = pd.read_csv(t / "lst_per_class.csv")
-        self.lsts = pd.read_csv(t / "lst_summary.csv")
-        self.uhi = pd.read_csv(t / "uhi_intensity.csv")
-        self.cor = pd.read_csv(t / "lst_correlations.csv")
+        # Land surface temperature / UHI tables: read only while config.toml [lst] enabled = true.
+        self.heat = cfg.lst_enabled
+        self.seasons = ("summer", "winter") if self.heat else ("summer",)
+        self.lstc = pd.read_csv(t / "lst_per_class.csv") if self.heat else None
+        self.lsts = pd.read_csv(t / "lst_summary.csv") if self.heat else None
+        self.uhi = pd.read_csv(t / "uhi_intensity.csv") if self.heat else None
+        self.cor = pd.read_csv(t / "lst_correlations.csv") if self.heat else None
         self.scenes = pd.read_csv(t / "scenes.csv")
         self.scene_months = pd.read_csv(t / "scene_months.csv")
-        self.conv = pd.read_csv(t / "conversion_lst_change.csv") if (t / "conversion_lst_change.csv").exists() else None
+        self.conv = pd.read_csv(t / "conversion_lst_change.csv") if self.heat and (t / "conversion_lst_change.csv").exists() else None
         self.pop = pd.read_csv(t / "population_vs_builtup.csv") if (t / "population_vs_builtup.csv").exists() else None
-        self.mask = pd.read_csv(t / "lst_mask_impact.csv") if (t / "lst_mask_impact.csv").exists() else None
+        self.mask = pd.read_csv(t / "lst_mask_impact.csv") if self.heat and (t / "lst_mask_impact.csv").exists() else None
         self.cm = {y: pd.read_csv(t / f"confusion_matrix_{y}.csv", index_col=0) for y in self.years}
         self.tm = {(a, b): pd.read_csv(t / f"transition_{a}_{b}_km2.csv", index_col=0) for a, b in combinations(self.years, 2)}
         self.aoi_area = json.loads((cache / "aoi_area.json").read_text(encoding="utf-8"))
@@ -110,7 +117,7 @@ def cross_check(T: Tables) -> list[str]:
         tot = T.areas[(T.areas.year == y)].area_km2.sum()
         assert abs(tot - T.aoi_area["area_km2_grid"]) < 0.01, f"class areas {y} do not add up to the study area"
         assert abs(tot - T.study_km2) < 1e-6, f"study area {y} differs from the first year's"
-        for s in ("summer", "winter", "annual"):
+        for s in (*T.seasons, "annual"):
             dates = T.meta[y]["scenes"][s]["dates"]
             sc = T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].iloc[0]
             assert int(sc.scenes) == len(dates) == len(T.meta[y]["scenes"][s]["ids"]), f"scene count {y} {s}"
@@ -127,13 +134,14 @@ def cross_check(T: Tables) -> list[str]:
         a = T.acc[T.acc.year == y].iloc[0]
         assert abs(np.trace(cm) / cm.sum() - a.overall_agreement) < 1e-9, f"overall agreement {y}"
         assert int(cm.sum()) == int(a.n_test_points), f"test points {y}"
-        for s in ("summer", "winter"):
+        for s in T.seasons if T.heat else ():
             for m in (CORE, BUILTM):
                 r = T.u(y, s, m)
                 assert abs(r.urban_mean_c - r.rural_mean_c - r.uhi_intensity_c) < 1e-9, f"UHI {y} {s} {m}"
         done.append(f"{y}: class areas re-counted from the raster, sum to the study area ({T.study_km2:,.1f} km²), percentages sum "
-                    "to 100; overall agreement = trace / total of the confusion matrix; UHI = urban − rural (4 cases); scene counts, "
-                    "scenes per month and median dates re-counted from the saved scene lists")
+                    "to 100; overall agreement = trace / total of the confusion matrix; "
+                    + ("UHI = urban − rural (4 cases); " if T.heat else "")
+                    + "scene counts, scenes per month and median dates re-counted from the saved scene lists")
     for (a, b), tm in T.tm.items():
         la, lb = np.load(T.cache / str(a) / "lulc.npy"), np.load(T.cache / str(b) / "lulc.npy")
         both = aoi & (la > 0) & (lb > 0)
@@ -164,8 +172,8 @@ def s1_setup(T: Tables, L: list[str]) -> None:
                      + (f" ({T.meta[y]['pooled_years'][0]}–{T.meta[y]['pooled_years'][-1]} pooled)" if len(T.meta[y]['pooled_years']) > 1 else "")
                      for y in T.years)
     n = lambda y, s: int(T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].scenes.iloc[0])  # noqa: E731
-    sc = "; ".join(f"{T.lab('summer', y)}: {n(y, 'summer')}, {T.lab('winter', y)}: {n(y, 'winter')}, whole year {y}: {n(y, 'annual')}"
-                   for y in T.years)
+    sc = "; ".join(f"{T.lab('summer', y)}: {n(y, 'summer')}, " + (f"{T.lab('winter', y)}: {n(y, 'winter')}, " if T.heat else "")
+                   + f"whole year {y}: {n(y, 'annual')}" for y in T.years)
     pts = "; ".join(f"{y}: {int(T.labels[T.labels.year == y].train_points.sum())} training / {int(T.labels[T.labels.year == y].test_points.sum())} test"
                     for y in T.years)
     L += [f"- **Study area:** {cfg.study['name']} — FAO GAUL 2025 districts {' + '.join(cfg.study.get('district_labels', cfg.study['gaul_districts']))}, "
@@ -208,7 +216,7 @@ def label_mismatches(T: Tables) -> list[str]:
 def scene_timing(T: Tables) -> list[dict]:
     """One row per seasonal composite: scenes per month, total and median date (scene_months.csv, scenes.csv)."""
     rows = []
-    for s in ("summer", "winter"):
+    for s in T.seasons:
         for y in T.years:
             sm = T.scene_months[(T.scene_months.year == y) & (T.scene_months.season == s)].sort_values("month_of_season")
             sc = T.scenes[(T.scenes.year == y) & (T.scenes.season == s)].iloc[0]
@@ -237,7 +245,7 @@ def s2_quality(T: Tables, L: list[str]) -> None:
         L.append(f"- **{y}:** overall agreement with reference labels **{a.overall_agreement:.1%}**, kappa **{a.kappa:.3f}** "
                  f"({int(a.n_test_points)} held-out points). Most confused pairs: {conf}.{withheld}")
     L += ["- These figures measure agreement with labels derived from GLC-FCS30D (stable pixels, agreeing with an independent "
-          "product), **not accuracy against ground truth**; see §9.", ""]
+          "product), **not accuracy against ground truth**; see Limitations.", ""]
 
 
 def s3_change(T: Tables, L: list[str]) -> None:
@@ -365,8 +373,21 @@ def s6_cor(T: Tables, L: list[str]) -> None:
 
 
 def s7_qc(T: Tables, L: list[str], flags: list, checks_done: list[str]) -> None:
-    L += ["## 7. Quality control", "",
-          f"- **LST masking rule:** in every scene, a pixel's LST is dropped when the USGS surface-temperature uncertainty "
+    L += ["## 7. Quality control", ""]
+    if T.heat:
+        s7_lst_masking(T, L)
+    else:
+        L.append("- Seasonal ponds: a few pixels classified Water are ponds that are dry in April–June (e.g. 28.62°N 77.47°E; "
+                 "JRC Global Surface Water ≈ 1 month of water per year); for the April–June composite their class is wrong.")
+    L += ["", "**Flags raised by checks.py:**", ""]
+    order = {"WARNING": 0, "CAUTION": 1, "INFO": 2}
+    L += [f"- **{lvl}** ({topic}): {msg}" for lvl, topic, msg in sorted(flags, key=lambda f: order[f[0]])] or ["- none"]
+    L += ["", "**Cross-checks run before writing this file (all passed):**", ""] + [f"- {c}" for c in checks_done] + [""]
+
+
+def s7_lst_masking(T: Tables, L: list[str]) -> None:
+    """The LST quality mask, its effect, and the seasonal-pond note (only while config.toml [lst] enabled = true)."""
+    L += [f"- **LST masking rule:** in every scene, a pixel's LST is dropped when the USGS surface-temperature uncertainty "
           f"(`ST_QA`) exceeds {T.cfg.max_st_uncertainty_k:g} K **or** its emissivity (`ST_EMIS`) is below {T.cfg.min_st_emissivity:.2f} "
           "(real surfaces here: ~0.92–0.99), in addition to the QA_PIXEL cloud/shadow/snow mask. It targets ASTER GED emissivity "
           "artefacts that the cloud mask cannot see: blocky 100 m rectangles at the southern tip (28.09°N 77.48–77.51°E) with "
@@ -386,14 +407,10 @@ def s7_qc(T: Tables, L: list[str], flags: list, checks_done: list[str]) -> None:
     L.append("- Seasonal ponds: a few pixels classified Water are ponds that are dry in April–June (e.g. 28.62°N 77.47°E; "
              "JRC Global Surface Water ≈ 1 month of water per year). Their LST is real; the class is wrong. Water is excluded "
              "from all land-LST statistics, so they do not affect the UHI numbers.")
-    L += ["", "**Flags raised by checks.py:**", ""]
-    order = {"WARNING": 0, "CAUTION": 1, "INFO": 2}
-    L += [f"- **{lvl}** ({topic}): {msg}" for lvl, topic, msg in sorted(flags, key=lambda f: order[f[0]])] or ["- none"]
-    L += ["", "**Cross-checks run before writing this file (all passed):**", ""] + [f"- {c}" for c in checks_done] + [""]
 
 
 def s8_findings(T: Tables, L: list[str]) -> None:
-    L += ["## 8. Five key findings", ""]
+    L += ["## 8. Key findings", ""]
     a, b = T.years[0], T.years[-1]
     tm = T.tm[(a, b)]
     bu, ag = T.built, T.cfg.class_name(3)
@@ -417,6 +434,9 @@ def s8_findings(T: Tables, L: list[str]) -> None:
              f"{vn} in both years, {_f(ch['lost_km2'])} km² was lost to other classes and {_f(ch['gained_km2'])} km² gained from them; "
              f"the net {_signed(ch['net_km2'], 0, ' km²')} is a small difference between these flows, which include class confusion, "
              "so it is uncertain.")
+    if not T.heat:   # config.toml [lst] enabled = false: no temperature finding
+        L += [f"{i}. {x}" for i, x in enumerate(F[:5], 1)] + [""]
+        return
     u_b, u_a = T.u(b, "summer", CORE), T.u(a, "summer", CORE)
     w_a, w_b = T.u(a, "winter", CORE), T.u(b, "winter", CORE)
     F.append(f"In the pre-monsoon season (~10:30 overpass) the urban core was {_signed(u_a.uhi_intensity_c)} relative to its rural ring "
@@ -439,6 +459,21 @@ def s8_findings(T: Tables, L: list[str]) -> None:
     L += [f"{i}. {x}" for i, x in enumerate(F[:5], 1)] + [""]
 
 
+def composite_inputs(T: Tables) -> list[str]:
+    """One limitation line when the April–June composites behind the land-cover maps differ in sensors or scene count between
+    the first and last year (scenes.csv and the run metadata; the classification itself is not changed)."""
+    a, b = T.years[0], T.years[-1]
+    names = {"LE07": "Landsat 7", "LC08": "Landsat 8", "LC09": "Landsat 9", "LT05": "Landsat 5"}
+    sens = {y: " + ".join(names[s] for s in T.meta[y]["sensors"]) for y in (a, b)}
+    n = {y: int(T.scenes[(T.scenes.year == y) & (T.scenes.season == "summer")].scenes.iloc[0]) for y in (a, b)}
+    if sens[a] == sens[b] and n[a] == n[b]:
+        return []
+    more = b if n[b] > n[a] else a
+    return [f"- **The April–June composites differ between years.** The {a} land-cover map is built from {sens[a]} only "
+            f"({n[a]} scenes that passed the cloud filter), the {b} map from {sens[b]} ({n[b]} scenes), so the {more} composite "
+            "draws on more clear observations per pixel; the classification was not adjusted for this."]
+
+
 def s9_limits(T: Tables, L: list[str]) -> None:
     L += ["## 9. Limitations", "",
           "- **Accuracy is agreement with reference labels, not true accuracy.** Training and test points come from the same "
@@ -458,13 +493,14 @@ def s9_limits(T: Tables, L: list[str]) -> None:
               f"{c.name}: {_f(ch['stable_km2'])} km² stable, {_f(ch['lost_km2'])} lost, {_f(ch['gained_km2'])} gained, net {_signed(ch['net_km2'], 1, ' km²')}"
               for c in T.cfg.classes for ch in [T.churn(T.years[0], T.years[-1], c.code)]
               if ch["stable_km2"] < T.cfg.checks["min_stable_share"] * ch["first_km2"]) + ").",
-          "- **One overpass time.** Landsat sees ~10:30 local time only; night-time UHI (usually the strongest) is not measured.",
-          "- **One composite per season per year.** Year-to-year weather differences affect absolute LST; UHI intensity and "
-          "normalised LST reduce but do not remove this.",
-          *([f"- **Weather, April–June {T.years[-1]}.** {T.cfg.context['weather_2025']['text']}"] if "weather_2025" in T.cfg.context else []),
-          "- **Thermal resolution.** LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed.",
-          "- **Rural ring inside the study area.** East Delhi (urban) borders the study area to the west, so the ring is "
-          "restricted to the districts; its location differs between years with the urban core.",
+          *composite_inputs(T),
+          *(["- **One overpass time.** Landsat sees ~10:30 local time only; night-time UHI (usually the strongest) is not measured.",
+             "- **One composite per season per year.** Year-to-year weather differences affect absolute LST; UHI intensity and "
+             "normalised LST reduce but do not remove this.",
+             *([f"- **Weather, April–June {T.years[-1]}.** {T.cfg.context['weather_2025']['text']}"] if "weather_2025" in T.cfg.context else []),
+             "- **Thermal resolution.** LST is 100 m (Landsat 8/9) or 60 m (Landsat 7) resampled to 30 m; small features are smoothed.",
+             "- **Rural ring inside the study area.** East Delhi (urban) borders the study area to the west, so the ring is "
+             "restricted to the districts; its location differs between years with the urban core."] if T.heat else []),
           *([f"- **Reference-label years differ from the map years.** The labels used to train and test each map are not all from "
              f"the map's own year: {'; '.join(label_mismatches(T))}. GLC-FCS30D ends in {T.cfg.labels['glc_last_year']}, so "
              + "; ".join(f"the {y} map was trained and tested only on pixels whose class was stable in {g['years'][0]}–{g['years'][-1]}"
@@ -489,9 +525,12 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     s2_quality(T, L)
     s3_change(T, L)
     s4_population(T, L)
-    s5_lst(T, L)
-    s6_cor(T, L)
+    if T.heat:
+        s5_lst(T, L)
+        s6_cor(T, L)
     s7_qc(T, L, flags, checks_done)
     s8_findings(T, L)
     s9_limits(T, L)
+    n = iter(range(1, 100))   # number the sections that were written (5 and 6 are absent when LST is switched off)
+    L = [re.sub(r"^## \d+\. ", lambda _: f"## {next(n)}. ", line) for line in L]
     (out / "results_summary.md").write_text("\n".join(L) + "\n", encoding="utf-8")

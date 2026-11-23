@@ -94,13 +94,12 @@ function useUrbanRows(): { rows: UrbanRow[]; loading: boolean } {
   }
   if (cs) {
     const b = cs.net_change.find((n) => /^built/i.test(n.class));
-    const lastYear = Math.max(...cs.uhi.map((u) => u.year));
-    const winter = cs.uhi.find((u) => u.primary && u.season === 'winter' && u.year === lastYear);
     rows.push({
       id: cs.id, name: CASE_STUDIES[0].name, source: 'Case study · Landsat land-cover pipeline',
       period: b ? `${b.from_year}→${b.to_year}` : '',
       built: b ? `${signed(b.delta_km2)} km²` : null,
-      heat: winter ? `${signed(winter.uhi_c)} °C urban core vs rural ring, winter ${winter.year}` : null,
+      // The case study's surface heat (UHI) results were withdrawn in pipeline 1.0.2, pending a weather-normalised method.
+      heat: null,
       open: () => useUi.getState().openCaseStudy(cs.id),
     });
   }

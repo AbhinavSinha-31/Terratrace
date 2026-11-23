@@ -1,12 +1,12 @@
 {
-  "pipeline_version": "1.0.1",
-  "run_utc": "2026-11-23T20:28:19+00:00",
+  "pipeline_version": "1.0.2",
+  "run_utc": "2026-11-23T20:49:08+00:00",
   "years": [
     2015,
     2025
   ],
   "steps": [
-    "validation"
+    "report"
   ],
   "config_file": "config.toml",
   "config": {
@@ -74,6 +74,9 @@
         "start_year_offset": 0,
         "end_year_offset": 1
       }
+    },
+    "lst": {
+      "enabled": false
     },
     "scenes": {
       "max_cloud_cover": 60,
@@ -260,7 +263,7 @@
     },
     "report": {
       "author": "Abhinav Sinha, Bennett University",
-      "title": "Urban growth and surface heat in Noida\u2013Ghaziabad (Delhi NCR)",
+      "title": "Urban growth and land-cover change in Noida\u2013Ghaziabad (Delhi NCR)",
       "status": "Preliminary results \u2014 not peer reviewed",
       "pdf_file": "terratrace-noida-ghaziabad-case-study.pdf",
       "data_file": "terratrace-noida-ghaziabad-data.zip"

@@ -9,6 +9,8 @@ same code that writes results_summary.md (terratrace_analysis.report), so the pa
     outputs/results_summary.md (run `run_pipeline.py --steps report` first if this fails);
   * the QC flags come from terratrace_analysis.checks.
 Re-runnable: when 2005 is added to the pipeline, run this again and the page shows all three years.
+With config.toml [lst] enabled = false (since 1.0.2) the JSON carries no temperature / UHI field, headline, caveat or image,
+and every old *.webp in the destination folder (including the lst_*.webp maps) is deleted before the new images are written.
 
 Output: frontend/public/case-studies/<id>/case-study.json and *.webp (each image ≤ ~480 KB).
 The homepage card image is not exported here: it is the same true-colour basemap tile the live featured cards use
@@ -90,10 +92,6 @@ def headlines(T) -> list[dict]:
     tm = T.tm[(a, b)]
     net = float(tm.loc[ag, bu] - tm.loc[bu, ag])
     dc = T.area(b, 3) - T.area(a, 3)
-    sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
-    wa, wb = float(T.u(a, "winter", CORE).uhi_intensity_c), float(T.u(b, "winter", CORE).uhi_intensity_c)
-    nd = T.cor[T.cor["index"] == "NDVI"].r.astype(float)
-    nb = T.cor[T.cor["index"] == "NDBI"].r.astype(float)
 
     pop = ""
     if T.pop is not None:
@@ -110,6 +108,17 @@ def headlines(T) -> list[dict]:
         "text": f"Most new built-up land replaced cropland: a net {net:,.0f} km² of farmland became built-up, and cropland "
                 f"overall {'shrank' if dc < 0 else 'grew'} by {abs(dc):,.0f} km².",
     }]
+    return cards + (heat_headlines(T) if T.heat else [])
+
+
+def heat_headlines(T) -> list[dict]:
+    """Temperature headline cards (only while config.toml [lst] enabled = true)."""
+    a, b = T.years[0], T.years[-1]
+    sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
+    wa, wb = float(T.u(a, "winter", CORE).uhi_intensity_c), float(T.u(b, "winter", CORE).uhi_intensity_c)
+    nd = T.cor[T.cor["index"] == "NDVI"].r.astype(float)
+    nb = T.cor[T.cor["index"] == "NDBI"].r.astype(float)
+    cards = []
     # Third card: greener areas are cooler (replaces the 1.0.0 vegetation-cover card: the net vegetation change is uncertain
     # because of its gross churn, see report.s8_findings and checks.churn).
     if (nd < 0).all():
@@ -142,7 +151,6 @@ def caveats(T) -> list[dict]:
     tm = T.tm[(a, b)]
     fwd, rev = float(tm.loc[ag, bu]), float(tm.loc[bu, ag])
     acc = T.acc.set_index("year")
-    sa, sb = float(T.u(a, "summer", CORE).uhi_intensity_c), float(T.u(b, "summer", CORE).uhi_intensity_c)
     out = [{
         "title": "Net, not gross, land-cover change",
         "text": f"Between {a} and {b}, {fwd:.1f} km² of cropland was mapped as built-up, but {rev:.1f} km² was mapped the other way. "
@@ -157,7 +165,8 @@ def caveats(T) -> list[dict]:
                 "so the figures are optimistic. They are agreement with reference labels, not accuracy against ground truth; "
                 "independent validation is still to be done.",
     }]
-    if (sa < 0) != (sb < 0):
+    sa, sb = (float(T.u(y, "summer", CORE).uhi_intensity_c) for y in (a, b)) if T.heat else (0.0, 0.0)
+    if T.heat and (sa < 0) != (sb < 0):
         out.append({
             "title": "The summer daytime result changes sign",
             "text": f"The urban core was {_sg(sa, 2)} °C relative to its rural ring in {T.lab('summer', a)} (a cool island) and "
@@ -176,13 +185,54 @@ def caveats(T) -> list[dict]:
         })
     out.append({
         "title": "Association, not cause",
-        "text": "Correlations describe how surface temperature varies with vegetation and built-up surfaces across pixels; on their own "
-                f"they do not show cause. Population and built-up area are compared at two time points ({a} and {b}) only.",
+        "text": ("Correlations describe how surface temperature varies with vegetation and built-up surfaces across pixels; on their own "
+                 f"they do not show cause. Population and built-up area are compared at two time points ({a} and {b}) only.") if T.heat else
+                (f"Population and built-up area are compared at two time points ({a} and {b}) only: they grew together, which does not "
+                 "show that one caused the other."),
     })
     return out
 
 
 # ----------------------------------------------------------------------------- export
+def heat_fields(T, images: dict) -> dict:
+    """Land surface temperature / UHI fields and web images (only while config.toml [lst] enabled = true)."""
+    cfg = T.cfg
+    lst_summary = [{"year": int(r.year), "season": r.season, "mean_land_c": float(r.mean_land_c), "valid_fraction": float(r.valid_fraction_of_study_area)}
+                   for _, r in T.lsts.iterrows()]
+    lst_class = [{"year": int(r.year), "season": r.season, "class": r["class"], "class_code": int(r.class_code), "mean_c": float(r.mean_c),
+                  "n_pixels": int(r.n_pixels)} for _, r in T.lstc.iterrows()]
+
+    def island(v: float) -> str:
+        return "near zero" if abs(v) < report.NEAR_ZERO_C else ("heat island" if v > 0 else "cool island")
+    uhi = [{"year": int(r.year), "season": r.season, "method": r.method, "primary": r.method == CORE, "uhi_c": float(r.uhi_intensity_c),
+            "urban_mean_c": float(r.urban_mean_c), "rural_mean_c": float(r.rural_mean_c),
+            "ring_outer_km": None if pd.isna(r.ring_outer_km) else float(r.ring_outer_km), "result": island(float(r.uhi_intensity_c))}
+           for _, r in T.uhi.iterrows()]
+    conv = [] if T.conv is None else [{"period": r.period, "season": r.season, "group": r.group, "area_km2": float(r.area_km2),
+                                        "delta_lst_c": float(r.mean_delta_lst_c), "delta_z": float(r.mean_delta_z)}
+                                       for _, r in T.conv[T.conv.n_pixels > 0].iterrows()]
+    cor = [{"year": int(r.year), "season": r.season, "index": r["index"], "r": float(r.r), "p_thinned": float(r.p_thinned),
+            "n_pixels": int(r.n_pixels), "n_thinned": int(r.n_thinned), "thin_spacing_m": int(r.thin_spacing_m)} for _, r in T.cor.iterrows()]
+    mask = [] if T.mask is None else [{k: (v.item() if hasattr(v, "item") else v) for k, v in r.items()} for _, r in T.mask.iterrows()]
+    images.update({"lst_summer": {}, "lst_winter": {}, "uhi_zones": {}})
+    for y in T.years:
+        images["lst_summer"][str(y)] = webp(OUT / "maps" / f"lst_summer_{y}.png", DEST / f"lst_summer_{y}.webp", 900)
+        images["lst_winter"][str(y)] = webp(OUT / "maps" / f"lst_winter_{y}.png", DEST / f"lst_winter_{y}.webp", 900)
+        images["uhi_zones"][str(y)] = webp(OUT / "maps" / f"uhi_zones_{y}.png", DEST / f"uhi_zones_{y}.webp", 900)
+    for name in ("uhi_intensity_by_year", "lst_by_class_and_year", "scatter_lst_indices_summer", "scatter_lst_indices_winter"):
+        images["charts"][name] = webp(OUT / "charts" / f"{name}.png", DEST / f"{name}.webp", 1200)
+    for p in sorted((OUT / "charts").glob("conversion_lst_change_*.png")):
+        images["charts"][p.stem] = webp(p, DEST / f"{p.stem}.webp", 1200)
+    return {
+        "lst_summary": lst_summary, "lst_per_class": lst_class, "uhi": uhi, "conversion": conv, "correlations": cor,
+        "masking": {"rule": (f"In every scene a pixel's land surface temperature is dropped when the USGS uncertainty (ST_QA) exceeds "
+                             f"{cfg.max_st_uncertainty_k:g} K or its emissivity (ST_EMIS) is below {cfg.min_st_emissivity:.2f}, in addition "
+                             "to the QA_PIXEL cloud, shadow and snow mask. It removes emissivity-database artefacts (blocky false hot "
+                             "spots) that the cloud mask cannot see; reflectance and the land-cover maps are unaffected."),
+                    "impact": mask},
+    }
+
+
 def main() -> None:
     cfg = config_mod.load()
     years = sorted(int(y) for y in pd.read_csv(OUT / "tables" / "class_areas.csv").year.unique())
@@ -224,46 +274,24 @@ def main() -> None:
             pop.append({"epoch": int(r.epoch), "population": int(r.population), "ghsl_built_km2": float(r.ghsl_built_km2),
                         "projection": bool(r.projection_not_estimate),
                         "builtup_km2_this_study": None if pd.isna(r.builtup_km2_this_study) else float(r.builtup_km2_this_study)})
-    lst_summary = [{"year": int(r.year), "season": r.season, "mean_land_c": float(r.mean_land_c), "valid_fraction": float(r.valid_fraction_of_study_area)}
-                   for _, r in T.lsts.iterrows()]
-    lst_class = [{"year": int(r.year), "season": r.season, "class": r["class"], "class_code": int(r.class_code), "mean_c": float(r.mean_c),
-                  "n_pixels": int(r.n_pixels)} for _, r in T.lstc.iterrows()]
-
-    def island(v: float) -> str:
-        return "near zero" if abs(v) < report.NEAR_ZERO_C else ("heat island" if v > 0 else "cool island")
-    uhi = [{"year": int(r.year), "season": r.season, "method": r.method, "primary": r.method == CORE, "uhi_c": float(r.uhi_intensity_c),
-            "urban_mean_c": float(r.urban_mean_c), "rural_mean_c": float(r.rural_mean_c),
-            "ring_outer_km": None if pd.isna(r.ring_outer_km) else float(r.ring_outer_km), "result": island(float(r.uhi_intensity_c))}
-           for _, r in T.uhi.iterrows()]
-    conv = [] if T.conv is None else [{"period": r.period, "season": r.season, "group": r.group, "area_km2": float(r.area_km2),
-                                        "delta_lst_c": float(r.mean_delta_lst_c), "delta_z": float(r.mean_delta_z)}
-                                       for _, r in T.conv[T.conv.n_pixels > 0].iterrows()]
-    cor = [{"year": int(r.year), "season": r.season, "index": r["index"], "r": float(r.r), "p_thinned": float(r.p_thinned),
-            "n_pixels": int(r.n_pixels), "n_thinned": int(r.n_thinned), "thin_spacing_m": int(r.thin_spacing_m)} for _, r in T.cor.iterrows()]
     acc = []
     for _, r in T.acc.iterrows():
         cm = T.cm[int(r.year)]
         pairs = sorted(((int(cm.iat[i, j] + cm.iat[j, i]), cm.index[i], cm.columns[j]) for i in range(len(cm)) for j in range(i + 1, len(cm))), reverse=True)
         acc.append({"year": int(r.year), "overall_agreement": float(r.overall_agreement), "kappa": float(r.kappa), "n_test": int(r.n_test_points),
                     "label": "agreement with reference labels", "most_confused": [{"a": a_, "b": b_, "n": n} for n, a_, b_ in pairs[:2]]})
-    mask = [] if T.mask is None else [{k: (v.item() if hasattr(v, "item") else v) for k, v in r.items()} for _, r in T.mask.iterrows()]
 
     DEST.mkdir(parents=True, exist_ok=True)
     for old in DEST.glob("*.webp"):
         old.unlink()
-    images: dict = {"lulc": {}, "lst_summer": {}, "lst_winter": {}, "change": {}, "uhi_zones": {}, "charts": {}}
+    images: dict = {"lulc": {}, "change": {}, "charts": {}}
     for y in T.years:
         images["lulc"][str(y)] = webp(OUT / "maps" / f"lulc_{y}.png", DEST / f"lulc_{y}.webp", 900)
-        images["lst_summer"][str(y)] = webp(OUT / "maps" / f"lst_summer_{y}.png", DEST / f"lst_summer_{y}.webp", 900)
-        images["lst_winter"][str(y)] = webp(OUT / "maps" / f"lst_winter_{y}.png", DEST / f"lst_winter_{y}.webp", 900)
-        images["uhi_zones"][str(y)] = webp(OUT / "maps" / f"uhi_zones_{y}.png", DEST / f"uhi_zones_{y}.webp", 900)
     for a, b in combinations(T.years, 2):
         images["change"][f"{a}-{b}"] = webp(OUT / "maps" / f"change_{a}_{b}.png", DEST / f"change_{a}_{b}.webp", 900)
-    for name in ("builtup_percent_by_year", "lulc_composition", "uhi_intensity_by_year", "lst_by_class_and_year", "population_vs_builtup",
-                 "scatter_lst_indices_summer", "scatter_lst_indices_winter"):
+    for name in ("builtup_percent_by_year", "lulc_composition", "population_vs_builtup"):
         images["charts"][name] = webp(OUT / "charts" / f"{name}.png", DEST / f"{name}.webp", 1200)
-    for p in sorted((OUT / "charts").glob("conversion_lst_change_*.png")):
-        images["charts"][p.stem] = webp(p, DEST / f"{p.stem}.webp", 1200)
+    heat = heat_fields(T, images) if T.heat else {}
 
     sensors = {str(y): " + ".join(names[s] for s in T.meta[y]["sensors"]) for y in T.years}
     doc = {
@@ -271,7 +299,10 @@ def main() -> None:
         "pipeline_version": __version__,
         # Last Earth Engine download of the rasters behind every table (the LULC and LST of this run; later steps are local).
         "earth_engine_downloaded_utc": max(T.meta[y].get("lst_mask", {}).get("refetched_utc", "") for y in T.years),
-        "thumbnail_url": cfg.raw["website"]["thumbnail_url"], "source": "analysis/outputs/tables (TerraTrace LULC + UHI pipeline); no live computation",
+        "thumbnail_url": cfg.raw["website"]["thumbnail_url"],
+        "source": f"analysis/outputs/tables (TerraTrace LULC{' + UHI' if T.heat else ''} pipeline); no live computation",
+        # config.toml [lst] enabled: false = no land surface temperature / UHI field, headline, caveat or image in this file.
+        "lst_enabled": T.heat,
         "study": {
             "name": cfg.study["name"], "short_name": cfg.study["short_name"], "districts": cfg.study.get("district_labels", cfg.study["gaul_districts"]),
             "boundary_source": "FAO GAUL 2025, level 2",
@@ -281,31 +312,28 @@ def main() -> None:
             "area_km2_boundary_polygon": T.aoi_area["area_km2_geodesic"],
             "years": T.years, "sensors": sensors,
             "scenes": [{"year": int(r.year), "season": r.season, "scenes": int(r.scenes), "composite": r.composite,
-                        "median_date": r.median_date} for _, r in T.scenes.iterrows()],
+                        "median_date": r.median_date} for _, r in T.scenes.iterrows() if r.season in (*T.seasons, "annual")],
             # Composite names ('April–June 2015', 'winter 2014–15'), from config.toml's season dates — the page uses these.
-            "composites": {s: {str(y): {"label": T.lab(s, y), "short": T.lab(s, y, True)} for y in T.years} for s in ("summer", "winter")},
+            "composites": {s: {str(y): {"label": T.lab(s, y), "short": T.lab(s, y, True)} for y in T.years} for s in T.seasons},
             "scene_timing": report.scene_timing(T),
             "reference_labels": [{"year": y, "text": report.label_years(T, y), "sources": labels.sources(cfg, y)} for y in T.years],
             "reference_label_mismatches": report.label_mismatches(T),
             "classes": [{"code": c.code, "name": c.name, "color": c.color} for c in cfg.classes],
             "method_summary": (f"Landsat Collection 2 Level-2 composites; {len(cfg.classes)}-class Random Forest (Breiman, 2001; "
-                               f"{cfg.rf['trees']} trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels; land surface "
-                               "temperature from the Landsat thermal band (April–June primary, November–February winter secondary); UHI as "
-                               "urban core minus an equal-area rural ring (Peng et al., 2012; Chakraborty & Lee, 2019)."),
+                               f"{cfg.rf['trees']} trees) in Google Earth Engine at 30 m, trained on stable GLC-FCS30D labels"
+                               + ("; land surface temperature from the Landsat thermal band (April–June primary, November–February winter "
+                                  "secondary); UHI as urban core minus an equal-area rural ring (Peng et al., 2012; Chakraborty & Lee, 2019)."
+                                  if T.heat else ".")),
         },
         "headlines": headlines(T), "caveats": caveats(T),
         "findings": F, "limitations": [{"title": l["title"], "text": l["text"]} for l in LIM], "flags": flags,
         "areas": areas, "net_change": net, "transitions": transitions, "population": pop,
-        "lst_summary": lst_summary, "lst_per_class": lst_class, "uhi": uhi, "conversion": conv, "correlations": cor,
+        **heat,
         "accuracy": acc,
-        "masking": {"rule": (f"In every scene a pixel's land surface temperature is dropped when the USGS uncertainty (ST_QA) exceeds "
-                             f"{cfg.max_st_uncertainty_k:g} K or its emissivity (ST_EMIS) is below {cfg.min_st_emissivity:.2f}, in addition "
-                             "to the QA_PIXEL cloud, shadow and snow mask. It removes emissivity-database artefacts (blocky false hot "
-                             "spots) that the cloud mask cannot see; reflectance and the land-cover maps are unaffected."),
-                    "impact": mask},
         "images": images, "cross_checks": cross,
-        # Cited context from outside the pipeline (config.toml [context]); never a result of this study.
-        "context": {k: dict(v) for k, v in cfg.context.items()},
+        # Cited context from outside the pipeline (config.toml [context]); never a result of this study. The 2025 weather note
+        # explains the temperature results only, so it is exported only with them.
+        "context": {k: dict(v) for k, v in cfg.context.items()} if T.heat else {},
         "changelog": [{"version": v, "text": t} for v, t in CHANGELOG.items()],
     }
     (DEST / "case-study.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")

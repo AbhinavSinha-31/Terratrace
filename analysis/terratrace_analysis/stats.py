@@ -28,11 +28,13 @@ BUILT, VEG, AGRI, WATER = 1, 2, 3, 4   # Barren/Open land is merged into BUILT (
 
 
 # ----------------------------------------------------------------------------- loading
-def load_year(cache: Path, year: int) -> dict[str, np.ndarray]:
+def load_year(cache: Path, year: int, lst: bool = True) -> dict[str, np.ndarray]:
+    """A year's rasters; lst=False skips the LST rasters (config.toml [lst] enabled = false)."""
     d = cache / str(year)
     out = {"lulc": np.load(d / "lulc.npy")}
     for b in ("lst_summer", "lst_winter", "ndvi_summer", "ndbi_summer", "ndvi_winter", "ndbi_winter"):
-        out[b] = np.load(d / f"{b}.npy")
+        if lst or not b.startswith("lst_"):
+            out[b] = np.load(d / f"{b}.npy")
     return out
 
 
@@ -217,7 +219,7 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     out.mkdir(parents=True, exist_ok=True)
     aoi = np.load(cache / "aoi_mask.npy").astype(bool)
     years = [y for y in years if (cache / str(y) / "meta.json").exists()]
-    data = {y: load_year(cache, y) for y in years}
+    data = {y: load_year(cache, y, cfg.lst_enabled) for y in years}
     meta = {y: load_meta(cache, y) for y in years}
     thin = int(cfg.uhi["correlation_thin"])
     names = {c.code: c.name for c in cfg.classes}
@@ -278,6 +280,27 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
     pd.DataFrame(scene_rows).to_csv(out / "scenes.csv", index=False)
     pd.DataFrame(month_rows).to_csv(out / "scene_months.csv", index=False)
 
+    # 5–6. LST and UHI — only while config.toml [lst] enabled = true. When it is off, the LST tables already in `out` are
+    # left exactly as they are (kept as raw outputs) and nothing downstream reads them.
+    if cfg.lst_enabled:
+        lst_tables(cfg, data, aoi, cache, out, years, thin)
+    else:
+        log.info("stats: LST / UHI switched off in config.toml [lst] — LST tables not recomputed")
+
+    # 7. Population vs built-up
+    pop_path = cache / "population.csv"
+    if pop_path.exists():
+        pop = pd.read_csv(pop_path)
+        pop.to_csv(out / "population.csv", index=False)
+        built = areas[areas.class_code == BUILT][["year", "area_km2", "percent_of_classified"]].rename(
+            columns={"area_km2": "builtup_km2_this_study", "percent_of_classified": "builtup_percent_this_study"})
+        merged = pop.merge(built, left_on="epoch", right_on="year", how="left").drop(columns="year")
+        merged.to_csv(out / "population_vs_builtup.csv", index=False)
+    log.info("stats: tables written to %s", out)
+
+
+def lst_tables(cfg: Config, data: dict, aoi: np.ndarray, cache: Path, out: Path, years: list[int], thin: int) -> None:
+    """LST summaries, LST per class, UHI (both methods), LST–index correlations and the conversion analysis."""
     # 5. LST summaries, per class, UHI, correlations
     lst_rows, cls_rows, uhi_rows, cor_rows = [], [], [], []
     for y in years:
@@ -315,14 +338,3 @@ def run(cfg: Config, cache: Path, out: Path, years: list[int]) -> None:
                           for r in conversion(cfg, data[a]["lulc"], data[b]["lulc"], data[a][f"lst_{s}"], data[b][f"lst_{s}"], aoi)]
     if conv_rows:
         pd.DataFrame(conv_rows).to_csv(out / "conversion_lst_change.csv", index=False)
-
-    # 7. Population vs built-up
-    pop_path = cache / "population.csv"
-    if pop_path.exists():
-        pop = pd.read_csv(pop_path)
-        pop.to_csv(out / "population.csv", index=False)
-        built = areas[areas.class_code == BUILT][["year", "area_km2", "percent_of_classified"]].rename(
-            columns={"area_km2": "builtup_km2_this_study", "percent_of_classified": "builtup_percent_this_study"})
-        merged = pop.merge(built, left_on="epoch", right_on="year", how="left").drop(columns="year")
-        merged.to_csv(out / "population_vs_builtup.csv", index=False)
-    log.info("stats: tables written to %s", out)

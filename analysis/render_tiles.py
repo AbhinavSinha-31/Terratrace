@@ -7,6 +7,7 @@ Layers — the same classes, colours and LST colour ranges as the publication ma
   lulc_<year>            land use / land cover (class colours from config.toml)
   change_<a>_<b>         land-cover change categories (maps.CHANGE_CLASSES, maps.change_codes)
   lst_<season>_<year>    land surface temperature, inferno, one colour range per season shared by all years (maps.lst_range)
+                         — only while config.toml [lst] enabled = true (no LST layer or legend otherwise)
 
 Web Mercator (EPSG:3857), 256 px PNG tiles. At z12 one tile pixel is ~34 m here, the 30 m data's own resolution, so no
 deeper zoom is rendered (the map enlarges z12 tiles). Below z12 each tile pixel aggregates the 30 m pixels under it
@@ -171,15 +172,16 @@ def main() -> None:
     change_pal = [hexrgb(NOT_CLASSIFIED)] + [hexrgb(c) for _, c in CHANGE_CLASSES]
     levels = 255
     lst_pal = [tuple(int(round(v * 255)) for v in rgba[:3]) for rgba in colormaps["inferno"](np.linspace(0, 1, levels))]
-    ranges = {s: lst_range(CACHE, aoi, years, s) for s in ("summer", "winter")}
+    heat = cfg.lst_enabled
+    ranges = {s: lst_range(CACHE, aoi, years, s) for s in ("summer", "winter")} if heat else {}
 
     layers: dict[str, dict] = {}
-    data = {y: load_year(CACHE, y) for y in years}
+    data = {y: load_year(CACHE, y, heat) for y in years}
     for y in years:
         layers[f"lulc_{y}"] = {"kind": "lulc", "year": y, "values": data[y]["lulc"]}
     for p, q in combinations(years, 2):
         layers[f"change_{p}_{q}"] = {"kind": "change", "from_year": p, "to_year": q, "values": change_codes(data[p]["lulc"], data[q]["lulc"])}
-    for s in ("summer", "winter"):
+    for s in ("summer", "winter") if heat else ():
         for y in years:
             layers[f"lst_{s}_{y}"] = {"kind": "lst", "season": s, "year": y, "values": data[y][f"lst_{s}"]}
 
@@ -205,7 +207,7 @@ def main() -> None:
                         idx, pal = continuous(L["values"], flat, inside, f, vmin, vmax, levels), lst_pal
                     sizes[name] += save_png(idx, pal, out / name / str(z) / str(x) / f"{y}.png")
                     files += 1
-        print(f"z{z}: {len(xs) * len(ys)} tiles per layer (supersampling {f}×{f})")
+        print(f"z{z}: {len(xs) * len(ys)} tiles per layer (supersampling {f}x{f})")
 
     sq = cfg.scale ** 2 / 1e6
     change_km2 = {name: [float((L["values"][aoi] == i).sum() * sq) for i in range(1, len(CHANGE_CLASSES) + 1)]
@@ -221,8 +223,8 @@ def main() -> None:
             "lulc": [{"code": 0, "name": "Not classified", "color": NOT_CLASSIFIED}] + [{"code": c.code, "name": c.name, "color": c.color} for c in cfg.classes],
             "change": [{"code": i, "name": n, "color": c} for i, (n, c) in enumerate(CHANGE_CLASSES, 1)],
             "change_km2": change_km2,
-            "lst": {s: {"vmin": round(r[0], 2), "vmax": round(r[1], 2),
-                        "stops": [mcolors.to_hex(colormaps["inferno"](v)) for v in stops]} for s, r in ranges.items()},
+            **({"lst": {s: {"vmin": round(r[0], 2), "vmax": round(r[1], 2),
+                            "stops": [mcolors.to_hex(colormaps["inferno"](v)) for v in stops]} for s, r in ranges.items()}} if heat else {}),
         },
         "files": files, "bytes": sum(sizes.values()),
     }
@@ -231,7 +233,7 @@ def main() -> None:
         "type": "FeatureCollection",
         "features": [{"type": "Feature", "properties": {"name": cfg.study["short_name"]},
                       "geometry": {"type": "MultiPolygon", "coordinates": ll_polys}}]}, separators=(",", ":")), encoding="utf-8")
-    print(f"{files} tiles, {manifest['bytes'] / 1e6:.2f} MB → {out.relative_to(ROOT.parent).as_posix()}")
+    print(f"{files} tiles, {manifest['bytes'] / 1e6:.2f} MB -> {out.relative_to(ROOT.parent).as_posix()}")
     for k in layers:
         print(f"  {k}: {sizes[k] / 1e6:.2f} MB")
 

@@ -206,10 +206,12 @@ def run(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int]) -> 
     years = [y for y in years if (cache / str(y) / "meta.json").exists()]
     builtup_trend(cfg, tables, out)
     class_composition(cfg, tables, out)
-    lst_by_class(cfg, tables, out)
-    uhi_trend(cfg, tables, out)
     population_vs_builtup(cfg, tables, out)
-    for s in ("summer", "winter"):
-        scatter(cfg, cache, tables, out, years, s)
-    conversion_chart(cfg, tables, out)
+    # LST / UHI charts only while config.toml [lst] enabled = true (existing ones in `out` are left as they are).
+    if cfg.lst_enabled:
+        lst_by_class(cfg, tables, out)
+        uhi_trend(cfg, tables, out)
+        for s in ("summer", "winter"):
+            scatter(cfg, cache, tables, out, years, s)
+        conversion_chart(cfg, tables, out)
     log.info("charts: written to %s", out)

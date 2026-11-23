@@ -55,6 +55,16 @@ end = "01-01"
 start_year_offset = 0
 end_year_offset = 1
 
+# Land surface temperature (LST) and urban heat island (UHI) analysis — switched OFF on 2026-11-24 (pipeline 1.0.2).
+# Why: the April–June 2015 vs 2025 comparison is not like-for-like. 2025 comes out ~3.3 °C cooler mostly because of weather
+# (May 2025 was the wettest May on record in Delhi, see [context.weather_2025]), and 2015 is Landsat 8 only (17 scenes) while
+# 2025 is Landsat 8 + 9 (29 scenes). Withdrawn pending a weather-normalised method.
+# With enabled = false: the `lst` step is skipped; `ee` does not download LST rasters; stats, figures and the results summary
+# leave temperature out; the website export, PDF report, data download and map tiles contain no LST or UHI content.
+# The LST code and the LST outputs already in outputs/ (tables, maps, charts, cached rasters) are kept. Set true to restore.
+[lst]
+enabled = false
+
 [scenes]
 max_cloud_cover = 60       # scene-level CLOUD_COVER (%) filter; clouds inside kept scenes are removed per pixel (QA_PIXEL)
 # LST pixels whose USGS surface-temperature uncertainty (ST_QA, K) exceeds this are dropped from the LST composite only.
@@ -176,13 +186,14 @@ thumbnail_url = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/defa
 # (title page, page footer, "How to cite", PDF metadata) — add co-authors here, nowhere else.
 [report]
 author = "Abhinav Sinha, Bennett University"
-title = "Urban growth and surface heat in Noida–Ghaziabad (Delhi NCR)"   # the study years are appended
+title = "Urban growth and land-cover change in Noida–Ghaziabad (Delhi NCR)"   # the study years are appended
 status = "Preliminary results — not peer reviewed"
 pdf_file = "terratrace-noida-ghaziabad-case-study.pdf"
 data_file = "terratrace-noida-ghaziabad-data.zip"
 
 # Context from outside the pipeline, quoted in the report (summary §5 and §9, PDF, web page) with its source.
-# These are NOT results of this study; every sentence that uses one cites it.
+# These are NOT results of this study; every sentence that uses one cites it. weather_2025 explains the LST results only, so
+# it is printed only while [lst] enabled = true.
 [context.weather_2025]
 text = "April–June 2025 was unusually wet in Delhi: May 2025 was the wettest May on record since 1901 (India Meteorological Department). Wet soils and greener crops lower daytime land surface temperature, so the lower absolute LST in 2025 reflects weather rather than land change. Compare classes within a year, or use UHI intensity and normalised LST across years."
 source = "India Meteorological Department (IMD): Delhi (Safdarjung) rainfall in May 2025 was the highest for May since records began in 1901 (IMD Safdarjung observations, as reported by IMD in late May 2025); all-India context in IMD's Monthly Climate Summary, May 2025 (press release, 7 June 2025), https://mausam.imd.gov.in"

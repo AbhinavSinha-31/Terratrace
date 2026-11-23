@@ -11,12 +11,16 @@ Steps (in order):
   ee          per year: composites, reference labels, sample, Random Forest, accuracy,
               then download LULC / LST / NDVI / NDBI rasters                              [Earth Engine]
   lst         re-download only the LST rasters of cached years (after an LST-masking change; LULC kept)  [Earth Engine]
+              — skipped while config.toml [lst] enabled = false (then `ee` does not download LST either)
   population  GHSL population and built-up surface per epoch                             [Earth Engine]
   stats       class areas, transitions, LST per class, UHI (both methods), correlations,
               conversion analysis → CSV tables                                           [local]
   figures     maps and charts → PNG                                                      [local]
   validation  stratified validation points (KML + CSV) for manual checking               [local + 1 small EE call]
   report      sanity checks + results_summary.md                                         [local]
+
+With [lst] enabled = false, stats / figures / report leave out every temperature and UHI result (the LST code and the LST
+outputs already in outputs/ are kept).
 
 Earth Engine results are cached in outputs/cache/; a cached step is skipped unless --force is given.
 Earth Engine requests run one at a time (noncommercial quota).
@@ -143,10 +147,11 @@ def step_ee(cfg, year: int, force: bool) -> None:
     lulc_img = comp["features"].classify(clf).rename("lulc").toByte().clip(geom)
     np.save(d / "lulc.npy", download.fetch(lulc_img, grid, ["lulc"], nodata=0)["lulc"].astype(np.uint8))
     log.info("ee %d: LULC raster downloaded", year)
-    stack = ee.Image.cat([comp[b] for b in FLOAT_BANDS]).clip(geom)
-    for b, a in download.fetch(stack, grid, FLOAT_BANDS).items():
+    bands = FLOAT_BANDS if cfg.lst_enabled else [b for b in FLOAT_BANDS if not b.startswith("lst_")]
+    stack = ee.Image.cat([comp[b] for b in bands]).clip(geom)
+    for b, a in download.fetch(stack, grid, bands).items():
         np.save(d / f"{b}.npy", a)
-    log.info("ee %d: LST / NDVI / NDBI rasters downloaded", year)
+    log.info("ee %d: %s rasters downloaded", year, "LST / NDVI / NDBI" if cfg.lst_enabled else "NDVI / NDBI (LST switched off)")
 
     write_json(d / "meta.json", {
         "year": year, "sensors": list(spec.sensors), "pooled_years": spec.years, "note": spec.note,
@@ -247,8 +252,11 @@ def main() -> None:
         for y in years:
             step_ee(cfg, y, a.force)
     if "lst" in a.steps:
-        for y in years:
-            step_lst(cfg, y)
+        if not cfg.lst_enabled:
+            log.info("lst: switched off in config.toml [lst] enabled = false — skipped")
+        else:
+            for y in years:
+                step_lst(cfg, y)
     if "population" in a.steps:
         step_population(cfg, a.force)
     if "stats" in a.steps:

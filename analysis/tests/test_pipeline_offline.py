@@ -206,3 +206,19 @@ def test_reference_label_years_are_read_from_config_and_mismatches_flagged():
     assert [(p["product"], p["label_year"], p["matches"]) for p in s15] == [("GLC-FCS30D", 2015, True), ("Dynamic World", 2016, False)]
     assert [(p["product"], p["label_year"], p["matches"]) for p in s25] == [
         ("GLC-FCS30D", 2022, False), ("ESA WorldCover", 2021, False), ("Dynamic World", 2025, True)]
+
+
+def test_surface_heat_withdrawn_from_the_published_case_study():
+    """1.0.2: LST / UHI switched off in config.toml; the website files must carry no temperature content (the LST code and
+    the raw LST outputs in analysis/outputs stay)."""
+    import json
+    assert CFG.lst_enabled is False
+    dest = Path(__file__).resolve().parents[2] / "frontend" / "public" / "case-studies" / "noida-ghaziabad"
+    doc = json.loads((dest / "case-study.json").read_text(encoding="utf-8"))
+    assert doc["lst_enabled"] is False and doc["pipeline_version"] == "1.0.2"
+    assert not {"lst_summary", "lst_per_class", "uhi", "conversion", "correlations", "masking"} & set(doc)
+    assert not {"lst_summer", "lst_winter", "uhi_zones"} & set(doc["images"]) and not doc["context"]
+    assert not list(dest.glob("*lst*.webp")) and not list(dest.glob("uhi_*.webp")) and not list((dest / "tiles").glob("lst_*"))
+    tiles = json.loads((dest / "tiles.json").read_text(encoding="utf-8"))
+    assert all(layer["kind"] != "lst" for layer in tiles["layers"]) and "lst" not in tiles["legends"]
+    assert (Path(__file__).resolve().parents[1] / "outputs" / "tables" / "lst_summary.csv").exists()   # raw output kept

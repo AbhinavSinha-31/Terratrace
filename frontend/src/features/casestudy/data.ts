@@ -14,7 +14,7 @@ export interface CaseStudyMeta {
 }
 
 export const CASE_STUDIES: CaseStudyMeta[] = [
-  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & surface heat' },
+  { id: 'noida-ghaziabad', name: 'Noida–Ghaziabad (Delhi NCR)', country: 'India', region: 'Uttar Pradesh', subtitle: 'Urban growth & land-cover change' },
 ];
 
 export const caseStudyMeta = (id: string) => CASE_STUDIES.find((c) => c.id === id) ?? null;
@@ -23,7 +23,9 @@ export const caseStudyAsset = (id: string, file: string) => `${import.meta.env.B
 export interface ImageRef { file: string; width: number; height: number; bytes: number }
 type Season = 'summer' | 'winter';
 
-/** Mirrors analysis/export_case_study.py. Every number in it comes from the analysis tables. */
+/** Mirrors analysis/export_case_study.py. Every number in it comes from the analysis tables.
+ *  Land surface temperature / UHI was withdrawn in pipeline 1.0.2 (config.toml [lst] enabled = false), so the file carries no
+ *  temperature field and the page shows none. */
 export interface CaseStudyDoc {
   id: string;
   generated_utc: string;
@@ -32,14 +34,16 @@ export interface CaseStudyDoc {
    *  imagery URLs are never built in frontend source. */
   thumbnail_url: string;
   earth_engine_downloaded_utc: string;
+  /** false since 1.0.2: no land surface temperature / UHI content in this file. */
+  lst_enabled: boolean;
   study: {
     name: string; short_name: string; districts: string[]; boundary_source: string;
     /** The sum of the classified 30 m pixels (class_areas.csv) — the study area as reported everywhere. */
     area_km2: number; area_km2_definition: string; area_km2_boundary_polygon: number;
     years: number[]; sensors: Record<string, string>;
     scenes: { year: number; season: Season | 'annual'; scenes: number; composite: string; median_date: string }[];
-    /** Composite names from the pipeline config: 'April–June 2015' / 'Apr–Jun 2015'; 'winter 2014–15' (both forms). */
-    composites: Record<Season, Record<string, { label: string; short: string }>>;
+    /** Composite names from the pipeline config: 'April–June 2015' / 'Apr–Jun 2015' (and 'winter 2014–15' while LST is on). */
+    composites: Partial<Record<Season, Record<string, { label: string; short: string }>>>;
     /** Scenes per calendar month and median acquisition date of each seasonal composite. */
     scene_timing: { composite: string; year: number; season: Season; months: string; per_month: { month: string; label: string; scenes: number }[]; total: number; median: string }[];
     /** Exactly which reference products and years made each map's training and test labels. */
@@ -47,8 +51,6 @@ export interface CaseStudyDoc {
     reference_label_mismatches: string[];
     classes: { code: number; name: string; color: string }[]; method_summary: string;
   };
-  /** Cited context from outside the pipeline (never a result of the study). */
-  context: Record<string, { text: string; source: string; reference: string }>;
   changelog: { version: string; text: string }[];
   /** Plain-language headline cards (one number, one sentence), generated from the tables by export_case_study.py. */
   headlines: { id: string; value: string; period: string; title: string; text: string }[];
@@ -67,17 +69,8 @@ export interface CaseStudyDoc {
     cropland_to_built: { gross_km2: number; reverse_km2: number; net_km2: number };
   }[];
   population: { epoch: number; population: number; ghsl_built_km2: number; projection: boolean; builtup_km2_this_study: number | null }[];
-  lst_summary: { year: number; season: Season; mean_land_c: number }[];
-  lst_per_class: { year: number; season: Season; class: string; class_code: number; mean_c: number }[];
-  uhi: { year: number; season: Season; method: string; primary: boolean; uhi_c: number; urban_mean_c: number; rural_mean_c: number; ring_outer_km: number | null; result: 'heat island' | 'cool island' | 'near zero' }[];
-  conversion: { period: string; season: Season; group: string; area_km2: number; delta_lst_c: number; delta_z: number }[];
-  correlations: { year: number; season: Season; index: 'NDVI' | 'NDBI'; r: number; p_thinned: number; n_pixels: number; n_thinned: number; thin_spacing_m: number }[];
   accuracy: { year: number; overall_agreement: number; kappa: number; n_test: number; label: string; most_confused: { a: string; b: string; n: number }[] }[];
-  masking: { rule: string; impact: Record<string, number | string | boolean>[] };
-  images: {
-    lulc: Record<string, ImageRef>; lst_summer: Record<string, ImageRef>; lst_winter: Record<string, ImageRef>;
-    change: Record<string, ImageRef>; uhi_zones: Record<string, ImageRef>; charts: Record<string, ImageRef>;
-  };
+  images: { lulc: Record<string, ImageRef>; change: Record<string, ImageRef>; charts: Record<string, ImageRef> };
   cross_checks: string[];
 }
 
@@ -109,13 +102,11 @@ export interface TilesManifest {
   layers: ({ id: string; bytes: number } & (
     | { kind: 'lulc'; year: number }
     | { kind: 'change'; from_year: number; to_year: number }
-    | { kind: 'lst'; season: Season; year: number }
   ))[];
   legends: {
     lulc: { code: number; name: string; color: string }[];
     change: { code: number; name: string; color: string }[];
     change_km2: Record<string, number[]>;
-    lst: Record<Season, { vmin: number; vmax: number; stops: string[] }>;
   };
   files: number;
   bytes: number;

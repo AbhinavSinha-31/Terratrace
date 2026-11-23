@@ -74,7 +74,7 @@ def _sensor(meta: dict) -> str:
 
 
 def lulc_map(cfg: Config, cache: Path, grid: Grid, aoi: np.ndarray, year: int, areas: pd.DataFrame, out: Path) -> None:
-    lulc = load_year(cache, year)["lulc"]
+    lulc = load_year(cache, year, lst=False)["lulc"]
     meta = load_meta(cache, year)
     cmap = mcolors.ListedColormap(["#ffffff"] + [c.color for c in cfg.classes])
     shown = np.where(aoi, lulc, 0).astype(float)
@@ -144,7 +144,7 @@ def change_codes(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def change_map(cfg: Config, cache: Path, grid: Grid, aoi: np.ndarray, a: int, b: int, out: Path) -> None:
-    la, lb = load_year(cache, a)["lulc"], load_year(cache, b)["lulc"]
+    la, lb = load_year(cache, a, lst=False)["lulc"], load_year(cache, b, lst=False)["lulc"]
     codes = change_codes(la, lb).astype(float)
     codes[~aoi] = np.nan
     cmap = mcolors.ListedColormap(["#ffffff"] + [c for _, c in CHANGE_CLASSES])
@@ -211,8 +211,10 @@ def run(cfg: Config, cache: Path, tables: Path, out: Path, years: list[int]) -> 
     areas = pd.read_csv(tables / "class_areas.csv")
     for y in years:
         lulc_map(cfg, cache, grid, aoi, y, areas, out)
-        uhi_zone_map(cfg, cache, grid, aoi, y, out)
-    for season in ("summer", "winter"):
+        if cfg.lst_enabled:
+            uhi_zone_map(cfg, cache, grid, aoi, y, out)
+    # LST maps only while config.toml [lst] enabled = true (existing LST maps in `out` are left as they are).
+    for season in ("summer", "winter") if cfg.lst_enabled else ():
         vmin, vmax = lst_range(cache, aoi, years, season)
         for y in years:
             lst_map(cfg, cache, grid, aoi, y, season, vmin, vmax, out)
